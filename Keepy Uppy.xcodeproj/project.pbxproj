@@ -10,11 +10,13 @@
 		107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */; };
 		11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 		130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */; };
+		1B190889A1E8D20C6AB041A4 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		1E0BE3C1E4729694626E7157 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C24FA183A399A32DA5906A43 /* Assets.xcassets */; };
 		28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB173EBACDD623663B735B7 /* PowerMonitor.swift */; };
 		3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831A5A41A55C3873E0EB9F3A /* MenuContent.swift */; };
 		39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
+		5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		7039380D884506666B63B537 /* ClientTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */; };
 		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
@@ -29,6 +31,7 @@
 		C7F5E72DE41546AD65AD3C51 /* ClientTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D378E67123C7D9A20D572DE /* ClientTableTests.swift */; };
 		D205F3E8E168E58C4584C1EB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54DD10487A2C28D32E9A656 /* main.swift */; };
 		DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		E8C38C20E116D2684F48183B /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
 		EE6F70C75212E80A7CDDEDAE /* KeepyUppyHelper in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = C9CDC8DF84425782DA71988A /* KeepyUppyHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7050454E03C8EC42BB1FA587 /* HelperService.swift */; };
@@ -90,6 +93,7 @@
 /* Begin PBXFileReference section */
 		029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerServiceTests.swift; sourceTree = "<group>"; };
 		076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPCProtocol.swift; sourceTree = "<group>"; };
+		0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirement.swift; sourceTree = "<group>"; };
 		1086C7B6913D7589DE52E386 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
 		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
@@ -199,6 +203,7 @@
 				7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */,
 				9D902E0F1599E782E483782C /* PowerControl.swift */,
 				DEA751693CBB332AD0528569 /* PowerSPI.h */,
+				0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */,
 				076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */,
 			);
 			path = Shared;
@@ -390,6 +395,7 @@
 				DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */,
 				28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */,
 				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
+				1B190889A1E8D20C6AB041A4 /* SigningRequirement.swift in Sources */,
 				11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -400,6 +406,7 @@
 			files = (
 				BB7F22ABD73A1331A279732A /* ClientTable.swift in Sources */,
 				9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */,
+				5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */,
 				FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */,
 				B24BB0CBA33407554586D264 /* main.swift in Sources */,
 			);
@@ -413,6 +420,7 @@
 				107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */,
 				F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */,
 				F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */,
+				E8C38C20E116D2684F48183B /* SigningRequirement.swift in Sources */,
 				AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */,
 				D205F3E8E168E58C4584C1EB /* main.swift in Sources */,
 			);
