@@ -8,6 +8,8 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - Sources
+    resources:
+      - Resources/Assets.xcassets
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
@@ -18,6 +20,7 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   Keepy UppyTests:
     type: bundle.unit-test
     platform: macOS
