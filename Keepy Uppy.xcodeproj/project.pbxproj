@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
+		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
 		F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -25,6 +26,7 @@
 /* Begin PBXFileReference section */
 		029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerServiceTests.swift; sourceTree = "<group>"; };
 		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
+		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Keepy Uppy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -52,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */,
+				2BBD98DDC9057502F4594A1F /* LoginItemService.swift */,
 				1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */,
 			);
 			path = Sources;
@@ -144,6 +147,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
+				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
 				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
