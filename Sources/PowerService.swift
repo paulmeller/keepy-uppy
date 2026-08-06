@@ -1,21 +1,8 @@
 import Foundation
 
-enum SleepState: Equatable {
-    case disabled
-    case enabled
-    case unknown
-}
-
-enum PowerSource: Equatable {
-    case battery
-    case acPower
-    case unknown
-}
-
-struct BatteryState: Equatable {
-    let percentage: Int?
-    let source: PowerSource
-}
+// SleepState, PowerSource, and BatteryState live in Shared/PowerControl.swift —
+// that file compiles into the app, helper, and CLI targets, while this file is
+// app-only, so the shared types had to move there to stay visible everywhere.
 
 enum PowerError: Error {
     case commandFailed(Error)

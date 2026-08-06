@@ -26,6 +26,7 @@ targets:
         codeSign: true
         copy:
           destination: executables
+      - sdk: IOKit.framework
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
@@ -36,6 +37,7 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   Keepy UppyTests:
     type: bundle.unit-test
@@ -53,24 +55,30 @@ targets:
     platform: macOS
     deploymentTarget: "13.0"
     sources: [Helper, Shared]
+    dependencies:
+      - sdk: IOKit.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.helper
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
 
   keepy-uppy:
     type: tool
     platform: macOS
     deploymentTarget: "13.0"
     sources: [CLI, Shared]
+    dependencies:
+      - sdk: IOKit.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.cli
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
 schemes:
   Keepy Uppy:
     build:
