@@ -8,7 +8,6 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - Sources
-    resources:
       - Resources/Assets.xcassets
     settings:
       base:
