@@ -824,6 +824,32 @@ final class SessionTableTests: XCTestCase {
 }
 ```
 
+Also add, in the same file:
+
+```swift
+/// `isDaemonEvaluable` decides whether a session survives the agent going
+/// away (spec §5). A wrong answer is a safety bug the type checker cannot
+/// catch — a switch stays exhaustive whichever branch a case is in — so
+/// every case is pinned explicitly.
+final class SessionKindEvaluationTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func testDaemonEvaluableKinds() {
+        XCTAssertTrue(SessionKind.indefinite.isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.duration(until: t0).isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.untilTime(t0).isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.lease(expires: t0).isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.whileOnACPower.isDaemonEvaluable)
+    }
+
+    func testAgentEvaluatedKinds() {
+        XCTAssertFalse(SessionKind.whileAppRunning(bundleID: "com.apple.dt.Xcode").isDaemonEvaluable)
+        XCTAssertFalse(SessionKind.whileExternalDisplay.isDaemonEvaluable)
+        XCTAssertFalse(SessionKind.whileCPUBusy(threshold: 0.5).isDaemonEvaluable)
+    }
+}
+```
+
 - [ ] **Step 2: Run to verify failure**
 
 Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
@@ -913,7 +939,7 @@ struct SessionTable {
 - [ ] **Step 4: Regenerate and run tests**
 
 Run: `xcodegen generate && xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
-Expected: `** TEST SUCCEEDED **`, 24/24 (18 carried forward + 6 new). Both tables coexist for now; the client table's 6 tests still pass and are retired in Task 9.
+Expected: `** TEST SUCCEEDED **`, 26/26 (18 carried forward + 8 new). Both tables coexist for now; the client table's 6 tests still pass and are retired in Task 9.
 
 - [ ] **Step 5: Commit**
 
