@@ -1,0 +1,29 @@
+name: Keepy Uppy
+options:
+  createIntermediateGroups: true
+targets:
+  Keepy Uppy:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Sources
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy
+        PRODUCT_MODULE_NAME: KeepyUppy
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "5.0"
+schemes:
+  Keepy Uppy:
+    build:
+      targets:
+        Keepy Uppy: all
+    run:
+      config: Debug
+    archive:
+      config: Release
