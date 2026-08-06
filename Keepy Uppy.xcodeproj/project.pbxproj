@@ -7,17 +7,32 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
+		130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */; };
 		1E0BE3C1E4729694626E7157 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C24FA183A399A32DA5906A43 /* Assets.xcassets */; };
 		28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB173EBACDD623663B735B7 /* PowerMonitor.swift */; };
 		3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831A5A41A55C3873E0EB9F3A /* MenuContent.swift */; };
 		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
 		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
+		AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
+		B24BB0CBA33407554586D264 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1086C7B6913D7589DE52E386 /* main.swift */; };
+		D205F3E8E168E58C4584C1EB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54DD10487A2C28D32E9A656 /* main.swift */; };
 		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
+		EE6F70C75212E80A7CDDEDAE /* KeepyUppyHelper in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = C9CDC8DF84425782DA71988A /* KeepyUppyHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */; };
+		FE6E59808EB8F308E3C74DF0 /* keepy-uppy in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		0A424376985D3EC2EE576EC7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D8F245DB69BDA025D9EBA7F8;
+			remoteInfo = "keepy-uppy";
+		};
 		5CA7447268FD2BF54D56523F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
@@ -25,22 +40,76 @@
 			remoteGlobalIDString = 372BEB17D83EAA4E3114018B;
 			remoteInfo = "Keepy Uppy";
 		};
+		7469637EBFDAFCAAFA9317DA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2AD771B60EB2B13AC4F9E1FE;
+			remoteInfo = KeepyUppyHelper;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		6FA1F630841276593EBC478A /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchDaemons;
+			dstSubfolderSpec = 1;
+			files = (
+				130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D55898A12A803EC9066CA345 /* Embed Dependencies */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				EE6F70C75212E80A7CDDEDAE /* KeepyUppyHelper in Embed Dependencies */,
+				FE6E59808EB8F308E3C74DF0 /* keepy-uppy in Embed Dependencies */,
+			);
+			name = "Embed Dependencies";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerServiceTests.swift; sourceTree = "<group>"; };
+		076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPCProtocol.swift; sourceTree = "<group>"; };
+		1086C7B6913D7589DE52E386 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
 		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
 		3CB173EBACDD623663B735B7 /* PowerMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMonitor.swift; sourceTree = "<group>"; };
 		564C97E2907D353762EC75D8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */ = {isa = PBXFileReference; includeInIndex = 0; path = "keepy-uppy"; sourceTree = BUILT_PRODUCTS_DIR; };
 		831A5A41A55C3873E0EB9F3A /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
+		A54DD10487A2C28D32E9A656 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.helper.plist"; sourceTree = "<group>"; };
 		C24FA183A399A32DA5906A43 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Keepy Uppy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9CDC8DF84425782DA71988A /* KeepyUppyHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = KeepyUppyHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		01D059F22217BFF26D87DD58 /* Helper */ = {
+			isa = PBXGroup;
+			children = (
+				A54DD10487A2C28D32E9A656 /* main.swift */,
+			);
+			path = Helper;
+			sourceTree = "<group>";
+		};
+		0EE25908F10DE0C7420AB01D /* CLI */ = {
+			isa = PBXGroup;
+			children = (
+				1086C7B6913D7589DE52E386 /* main.swift */,
+			);
+			path = CLI;
+			sourceTree = "<group>";
+		};
 		1827E92DFD9F8B1EB6BB75FF /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -60,11 +129,23 @@
 		47E0E32377B4F771578FC9FE = {
 			isa = PBXGroup;
 			children = (
+				0EE25908F10DE0C7420AB01D /* CLI */,
+				01D059F22217BFF26D87DD58 /* Helper */,
+				D2E6C3D891CF027C4629BB3F /* Launchd */,
 				1827E92DFD9F8B1EB6BB75FF /* Resources */,
+				5C4440F6DC01E7E379F5DF1E /* Shared */,
 				7ACAC04A41BF4B1F3566ADBB /* Sources */,
 				406BB7D86155C2735F97FC65 /* Tests */,
 				ED1BCADD3AB3138280732983 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		5C4440F6DC01E7E379F5DF1E /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		7ACAC04A41BF4B1F3566ADBB /* Sources */ = {
@@ -80,11 +161,21 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		D2E6C3D891CF027C4629BB3F /* Launchd */ = {
+			isa = PBXGroup;
+			children = (
+				C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */,
+			);
+			path = Launchd;
+			sourceTree = "<group>";
+		};
 		ED1BCADD3AB3138280732983 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */,
 				6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */,
+				7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */,
+				C9CDC8DF84425782DA71988A /* KeepyUppyHelper */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -92,16 +183,37 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2AD771B60EB2B13AC4F9E1FE /* KeepyUppyHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 40F3EF7D75145C69A18BB21A /* Build configuration list for PBXNativeTarget "KeepyUppyHelper" */;
+			buildPhases = (
+				8F25A019AFCE31DB11D12A95 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KeepyUppyHelper;
+			packageProductDependencies = (
+			);
+			productName = KeepyUppyHelper;
+			productReference = C9CDC8DF84425782DA71988A /* KeepyUppyHelper */;
+			productType = "com.apple.product-type.tool";
+		};
 		372BEB17D83EAA4E3114018B /* Keepy Uppy */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DD0D93F83FBA2420B978CAA0 /* Build configuration list for PBXNativeTarget "Keepy Uppy" */;
 			buildPhases = (
 				0FC8DCC8AF9E1943D5A6736B /* Sources */,
 				371E1AFD2D6A5AD27CD7D8EB /* Resources */,
+				6FA1F630841276593EBC478A /* CopyFiles */,
+				D55898A12A803EC9066CA345 /* Embed Dependencies */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				11B8273A308455B6D4D1769E /* PBXTargetDependency */,
+				71C7B20C6BBDF10DA9B31815 /* PBXTargetDependency */,
 			);
 			name = "Keepy Uppy";
 			packageProductDependencies = (
@@ -128,6 +240,23 @@
 			productReference = 6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		D8F245DB69BDA025D9EBA7F8 /* keepy-uppy */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F90D1C8FD637C2686569775E /* Build configuration list for PBXNativeTarget "keepy-uppy" */;
+			buildPhases = (
+				7BAAF317325C3BC6DFE95A68 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "keepy-uppy";
+			packageProductDependencies = (
+			);
+			productName = "keepy-uppy";
+			productReference = 7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -137,7 +266,13 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					2AD771B60EB2B13AC4F9E1FE = {
+						ProvisioningStyle = Manual;
+					};
 					372BEB17D83EAA4E3114018B = {
+						ProvisioningStyle = Manual;
+					};
+					D8F245DB69BDA025D9EBA7F8 = {
 						ProvisioningStyle = Manual;
 					};
 				};
@@ -158,6 +293,8 @@
 			targets = (
 				372BEB17D83EAA4E3114018B /* Keepy Uppy */,
 				538727C39A3D0131080521AA /* Keepy UppyTests */,
+				2AD771B60EB2B13AC4F9E1FE /* KeepyUppyHelper */,
+				D8F245DB69BDA025D9EBA7F8 /* keepy-uppy */,
 			);
 		};
 /* End PBXProject section */
@@ -184,6 +321,25 @@
 				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
 				28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */,
 				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
+				11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BAAF317325C3BC6DFE95A68 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */,
+				B24BB0CBA33407554586D264 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8F25A019AFCE31DB11D12A95 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */,
+				D205F3E8E168E58C4584C1EB /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -198,14 +354,58 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		11B8273A308455B6D4D1769E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2AD771B60EB2B13AC4F9E1FE /* KeepyUppyHelper */;
+			targetProxy = 7469637EBFDAFCAAFA9317DA /* PBXContainerItemProxy */;
+		};
 		3B56B21E5668DEFF72007842 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 372BEB17D83EAA4E3114018B /* Keepy Uppy */;
 			targetProxy = 5CA7447268FD2BF54D56523F /* PBXContainerItemProxy */;
 		};
+		71C7B20C6BBDF10DA9B31815 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D8F245DB69BDA025D9EBA7F8 /* keepy-uppy */;
+			targetProxy = 0A424376985D3EC2EE576EC7 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		28EB7D619FC6729DF9DAD46F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.cli";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		43E8C91576460DAE392A3352 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.helper";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 		5D7E747DBCF96F6F25BBA4D8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -282,6 +482,40 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		7CE2B0D45028C5CFADD33ED5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.helper";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		8243DD716C691FE7B1FFBB68 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.cli";
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
 		};
 		C78C67C9F2E271C6092C09A5 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -404,6 +638,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		40F3EF7D75145C69A18BB21A /* Build configuration list for PBXNativeTarget "KeepyUppyHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				43E8C91576460DAE392A3352 /* Debug */,
+				7CE2B0D45028C5CFADD33ED5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		6661A0FC34AF35EB0C99957D /* Build configuration list for PBXProject "Keepy Uppy" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -427,6 +670,15 @@
 			buildConfigurations = (
 				CAB1B2A7E05A34E7C867B28C /* Debug */,
 				F77A9A983D4F13423847B53C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F90D1C8FD637C2686569775E /* Build configuration list for PBXNativeTarget "keepy-uppy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				28EB7D619FC6729DF9DAD46F /* Debug */,
+				8243DD716C691FE7B1FFBB68 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
