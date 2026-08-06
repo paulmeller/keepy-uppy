@@ -49,6 +49,7 @@ archive: generate
         DEVELOPMENT_TEAM="{{team_id}}"
 
 export: archive
+    rm -rf "{{export_path}}"
     sed "s/KEEPY_UPPY_TEAM_ID/{{team_id}}/" packaging/ExportOptions.plist > "{{derived_data}}/ExportOptions.plist"
     xcodebuild -exportArchive \
         -archivePath "{{archive_path}}" \
