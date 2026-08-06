@@ -744,7 +744,11 @@ git commit -m "Pin XPC connections to our signing identity"
 **Files:**
 - Create: `Shared/Session.swift`, `Shared/SessionTable.swift`
 - Test: `Tests/SessionTableTests.swift`
-- Delete: `Shared/ClientTable.swift`, `Tests/ClientTableTests.swift`
+
+`ClientTable` and its tests are deliberately **left in place** until Task 9
+repoints the helper off them. Deleting them here would orphan
+`Helper/HelperService.swift`'s reference and leave the branch red for three
+tasks; additive-then-delete keeps every task green.
 
 **Interfaces:**
 - Produces: `ClientID`, `SessionKind`, `SessionPersistence`, `SessionOrigin`, `Session`, and `SessionTable` with `insert`, `remove(id:)`, `removeAll(ownedBy:)`, `sessions`, `desiredKeepAwake`.
@@ -906,24 +910,16 @@ struct SessionTable {
 }
 ```
 
-- [ ] **Step 4: Delete the superseded reducer**
-
-```bash
-git rm Shared/ClientTable.swift Tests/ClientTableTests.swift
-```
-
-- [ ] **Step 5: Regenerate and run tests**
+- [ ] **Step 4: Regenerate and run tests**
 
 Run: `xcodegen generate && xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
-Expected: `** TEST SUCCEEDED **`, 18/18 (12 carried forward + 6 new; the 6 ClientTable tests are replaced one-for-one).
+Expected: `** TEST SUCCEEDED **`, 24/24 (18 carried forward + 6 new). Both tables coexist for now; the client table's 6 tests still pass and are retired in Task 9.
 
-Note: `Helper/HelperService.swift` still references `ClientTable` and will fail to compile. Fixing it is Task 9's job — if the build breaks here, that is expected, and you should report it rather than editing the helper. **If you cannot get a green test run without touching the helper, stop and report BLOCKED**, quoting the error.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add -A Shared Tests "Keepy Uppy.xcodeproj"
-git commit -m "Replace client table with session table"
+git add Shared/Session.swift Shared/SessionTable.swift Tests/SessionTableTests.swift "Keepy Uppy.xcodeproj"
+git commit -m "Add session table alongside the client table"
 ```
 
 ---
@@ -1438,7 +1434,7 @@ git commit -m "Add pure safety engine with hysteresis and trigger suppression"
 - Consumes: `SessionEngine` (Task 7), `SafetyEngine` (Task 8), `PowerControl` (Task 2).
 - Produces: `SafetyObserving` protocol plus its live implementation, and `DaemonRuntime` — the single serialised owner of both engines that all XPC calls funnel through.
 
-Task 6 left `HelperService` referencing the deleted `ClientTable`; this task is where that is repaired. The engines stay pure — every clock read, IOKit call, and notification lives here.
+This task repoints `HelperService` off `ClientTable` and onto the runtime, and **deletes `Shared/ClientTable.swift` and `Tests/ClientTableTests.swift`** — Task 6 deliberately left them in place so the branch stayed green in between. Their six tests are already re-expressed as session-table tests, so this is not a coverage regression. The engines stay pure: every clock read, IOKit call, and notification lives here.
 
 - [ ] **Step 1: Implement the observers behind a protocol**
 
@@ -1672,9 +1668,13 @@ Do not launch, load, or register the daemon — that needs root and signing, and
 - [ ] **Step 6: Commit**
 
 ```bash
+git rm Shared/ClientTable.swift Tests/ClientTableTests.swift
 git add "Keepy Uppy.xcodeproj" Helper
 git commit -m "Wire session and safety engines into the daemon runtime"
 ```
+
+Expected after deletion: 38 tests (the 6 client-table tests retire; session,
+safety, and existing suites remain).
 
 ---
 
