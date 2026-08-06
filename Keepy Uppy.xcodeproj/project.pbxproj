@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB173EBACDD623663B735B7 /* PowerMonitor.swift */; };
+		3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831A5A41A55C3873E0EB9F3A /* MenuContent.swift */; };
+		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
 		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
 		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
@@ -29,8 +31,10 @@
 		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
 		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
 		3CB173EBACDD623663B735B7 /* PowerMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMonitor.swift; sourceTree = "<group>"; };
+		564C97E2907D353762EC75D8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		831A5A41A55C3873E0EB9F3A /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
 		C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Keepy Uppy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -55,8 +59,10 @@
 		7ACAC04A41BF4B1F3566ADBB /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				564C97E2907D353762EC75D8 /* AppDelegate.swift */,
 				6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */,
 				2BBD98DDC9057502F4594A1F /* LoginItemService.swift */,
+				831A5A41A55C3873E0EB9F3A /* MenuContent.swift */,
 				3CB173EBACDD623663B735B7 /* PowerMonitor.swift */,
 				1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */,
 			);
@@ -149,8 +155,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
+				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
 				28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */,
 				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
 			);
