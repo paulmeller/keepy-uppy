@@ -18,7 +18,9 @@ Rust/objc2 design this superseded).
 
 ## Build and run (development)
 
-    just run
+    just run       # build Debug and launch
+    just test      # run the unit tests
+    just generate  # regenerate the Xcode project after adding/removing files
 
 ## Build the distributable app
 
