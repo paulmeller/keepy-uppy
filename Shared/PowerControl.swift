@@ -25,7 +25,8 @@ enum PowerControl {
     private static let sleepDisabledKey = "SleepDisabled" as CFString
 
     static func sleepDisabled() -> Bool {
-        guard let settings = IOPMCopySystemPowerSettings() as? [String: Any] else { return false }
+        guard let settings = IOPMCopySystemPowerSettings()?.takeRetainedValue() as? [String: Any]
+        else { return false }
         return (settings["SleepDisabled"] as? Bool) ?? false
     }
 
