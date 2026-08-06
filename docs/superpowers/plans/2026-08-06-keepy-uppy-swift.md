@@ -174,7 +174,12 @@ Add a second target under `targets:`:
       - Tests
     dependencies:
       - target: Keepy Uppy
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 ```
+
+(`GENERATE_INFOPLIST_FILE: YES` was discovered during execution: a `bundle.unit-test` target with neither it nor an `INFOPLIST_FILE` fails to produce a valid test bundle under current Xcode.)
 
 Replace the `schemes:` block to wire the test target into the "Keepy Uppy" scheme:
 
@@ -984,12 +989,15 @@ print("Wrote iconset PNGs to \(outputDir)")
 
 - [ ] **Step 3: Wire the asset catalog into `project.yml`**
 
-Add `resources:` under the `Keepy Uppy` target (alongside the existing `sources:`):
+Add `Resources/Assets.xcassets` as a second entry in the `Keepy Uppy` target's existing `sources:` list — xcodegen assigns files to build phases by type, so a `.xcassets` path in `sources:` lands in the Resources build phase automatically:
 
 ```yaml
-    resources:
+    sources:
+      - Sources
       - Resources/Assets.xcassets
 ```
+
+(Discovered during execution: a target-level `resources:` key is NOT valid ProjectSpec — xcodegen silently ignores it and no resources phase is generated.)
 
 Add to the target's `settings.base`:
 
@@ -1084,6 +1092,7 @@ archive: generate
         DEVELOPMENT_TEAM="{{team_id}}"
 
 export: archive
+    rm -rf "{{export_path}}"
     sed "s/KEEPY_UPPY_TEAM_ID/{{team_id}}/" packaging/ExportOptions.plist > "{{derived_data}}/ExportOptions.plist"
     xcodebuild -exportArchive \
         -archivePath "{{archive_path}}" \
