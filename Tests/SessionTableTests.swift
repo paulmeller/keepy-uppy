@@ -60,3 +60,24 @@ final class SessionTableTests: XCTestCase {
         XCTAssertEqual(table.sessions.count, 1)
     }
 }
+
+/// `isDaemonEvaluable` decides whether a session survives the agent going
+/// away (spec §5). A wrong answer here is a safety bug that the type checker
+/// cannot catch, so every case is pinned explicitly.
+final class SessionKindEvaluationTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func testDaemonEvaluableKinds() {
+        XCTAssertTrue(SessionKind.indefinite.isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.duration(until: t0).isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.untilTime(t0).isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.lease(expires: t0).isDaemonEvaluable)
+        XCTAssertTrue(SessionKind.whileOnACPower.isDaemonEvaluable)
+    }
+
+    func testAgentEvaluatedKinds() {
+        XCTAssertFalse(SessionKind.whileAppRunning(bundleID: "com.apple.dt.Xcode").isDaemonEvaluable)
+        XCTAssertFalse(SessionKind.whileExternalDisplay.isDaemonEvaluable)
+        XCTAssertFalse(SessionKind.whileCPUBusy(threshold: 0.5).isDaemonEvaluable)
+    }
+}
