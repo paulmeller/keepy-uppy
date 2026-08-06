@@ -1062,6 +1062,8 @@ Expected: `** TEST SUCCEEDED **` (uses the already-verified `generate`/`test` re
 ```markdown
 # Keepy Uppy
 
+![Two laptops playing keepy-uppy with a red balloon](assets/keepy-uppy.png)
+
 Keeps a MacBook awake with the lid closed by toggling `pmset -a disablesleep`
 through a menu-bar balloon icon. See
 `docs/superpowers/specs/2026-08-06-keepy-uppy-swift-design.md` for the full
