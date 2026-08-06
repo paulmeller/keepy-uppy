@@ -7,19 +7,43 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
+		F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		5CA7447268FD2BF54D56523F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 372BEB17D83EAA4E3114018B;
+			remoteInfo = "Keepy Uppy";
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerServiceTests.swift; sourceTree = "<group>"; };
+		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
+		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Keepy Uppy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
+		406BB7D86155C2735F97FC65 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
 		47E0E32377B4F771578FC9FE = {
 			isa = PBXGroup;
 			children = (
 				7ACAC04A41BF4B1F3566ADBB /* Sources */,
+				406BB7D86155C2735F97FC65 /* Tests */,
 				ED1BCADD3AB3138280732983 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -28,6 +52,7 @@
 			isa = PBXGroup;
 			children = (
 				6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */,
+				1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -36,6 +61,7 @@
 			isa = PBXGroup;
 			children = (
 				C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */,
+				6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -59,6 +85,24 @@
 			productName = "Keepy Uppy";
 			productReference = C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */;
 			productType = "com.apple.product-type.application";
+		};
+		538727C39A3D0131080521AA /* Keepy UppyTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F324447D2F9A3016D79792F5 /* Build configuration list for PBXNativeTarget "Keepy UppyTests" */;
+			buildPhases = (
+				A7E90969563259EFF132C5D9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				3B56B21E5668DEFF72007842 /* PBXTargetDependency */,
+			);
+			name = "Keepy UppyTests";
+			packageProductDependencies = (
+			);
+			productName = "Keepy UppyTests";
+			productReference = 6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -89,6 +133,7 @@
 			projectRoot = "";
 			targets = (
 				372BEB17D83EAA4E3114018B /* Keepy Uppy */,
+				538727C39A3D0131080521AA /* Keepy UppyTests */,
 			);
 		};
 /* End PBXProject section */
@@ -99,10 +144,27 @@
 			buildActionMask = 2147483647;
 			files = (
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
+				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A7E90969563259EFF132C5D9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3B56B21E5668DEFF72007842 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 372BEB17D83EAA4E3114018B /* Keepy Uppy */;
+			targetProxy = 5CA7447268FD2BF54D56523F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		5D7E747DBCF96F6F25BBA4D8 /* Release */ = {
@@ -244,6 +306,23 @@
 			};
 			name = Debug;
 		};
+		CAB1B2A7E05A34E7C867B28C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Keepy Uppy.app/Contents/MacOS/Keepy Uppy";
+			};
+			name = Debug;
+		};
 		D32FBD3B6053FA1BCF36355E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -266,6 +345,23 @@
 			};
 			name = Release;
 		};
+		F77A9A983D4F13423847B53C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Keepy Uppy.app/Contents/MacOS/Keepy Uppy";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -283,6 +379,15 @@
 			buildConfigurations = (
 				5DFDB40F3AF516786E7C3A76 /* Debug */,
 				D32FBD3B6053FA1BCF36355E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F324447D2F9A3016D79792F5 /* Build configuration list for PBXNativeTarget "Keepy UppyTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CAB1B2A7E05A34E7C867B28C /* Debug */,
+				F77A9A983D4F13423847B53C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

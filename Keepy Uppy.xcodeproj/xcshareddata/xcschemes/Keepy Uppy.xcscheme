@@ -21,6 +21,20 @@
                ReferencedContainer = "container:Keepy Uppy.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "538727C39A3D0131080521AA"
+               BuildableName = "Keepy UppyTests.xctest"
+               BlueprintName = "Keepy UppyTests"
+               ReferencedContainer = "container:Keepy Uppy.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -39,7 +53,20 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "538727C39A3D0131080521AA"
+               BuildableName = "Keepy UppyTests.xctest"
+               BlueprintName = "Keepy UppyTests"
+               ReferencedContainer = "container:Keepy Uppy.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

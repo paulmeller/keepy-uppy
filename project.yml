@@ -18,12 +18,27 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+  Keepy UppyTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Tests
+    dependencies:
+      - target: Keepy Uppy
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Keepy Uppy:
     build:
       targets:
         Keepy Uppy: all
+        Keepy UppyTests: [test]
     run:
       config: Debug
+    test:
+      targets:
+        - Keepy UppyTests
     archive:
       config: Release
