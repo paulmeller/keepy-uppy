@@ -8,7 +8,24 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - Sources
+      - Shared
       - Resources/Assets.xcassets
+      - path: Launchd/au.com.workwireless.keepy-uppy.helper.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
+    dependencies:
+      - target: KeepyUppyHelper
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: keepy-uppy
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
@@ -31,6 +48,29 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  KeepyUppyHelper:
+    type: tool
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources: [Helper, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.helper
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "5.0"
+
+  keepy-uppy:
+    type: tool
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources: [CLI, Shared]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.cli
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "5.0"
 schemes:
   Keepy Uppy:
     build:
