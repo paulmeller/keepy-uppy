@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */; };
 		11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 		130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */; };
 		1E0BE3C1E4729694626E7157 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C24FA183A399A32DA5906A43 /* Assets.xcassets */; };
@@ -30,6 +31,7 @@
 		DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
 		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
 		EE6F70C75212E80A7CDDEDAE /* KeepyUppyHelper in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = C9CDC8DF84425782DA71988A /* KeepyUppyHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7050454E03C8EC42BB1FA587 /* HelperService.swift */; };
 		F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
 		F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */; };
 		FE6E59808EB8F308E3C74DF0 /* keepy-uppy in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -95,6 +97,7 @@
 		564C97E2907D353762EC75D8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7050454E03C8EC42BB1FA587 /* HelperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperService.swift; sourceTree = "<group>"; };
 		7D378E67123C7D9A20D572DE /* ClientTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientTableTests.swift; sourceTree = "<group>"; };
 		7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientTable.swift; sourceTree = "<group>"; };
 		7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */ = {isa = PBXFileReference; includeInIndex = 0; path = "keepy-uppy"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -107,6 +110,7 @@
 		C9CDC8DF84425782DA71988A /* KeepyUppyHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = KeepyUppyHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 		D51C70013B48AA645E69A849 /* PowerControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControlTests.swift; sourceTree = "<group>"; };
 		DEA751693CBB332AD0528569 /* PowerSPI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PowerSPI.h; sourceTree = "<group>"; };
+		E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperListenerDelegate.swift; sourceTree = "<group>"; };
 		F88FDDC055F1833EEBFF2042 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -141,6 +145,8 @@
 		01D059F22217BFF26D87DD58 /* Helper */ = {
 			isa = PBXGroup;
 			children = (
+				E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */,
+				7050454E03C8EC42BB1FA587 /* HelperService.swift */,
 				A54DD10487A2C28D32E9A656 /* main.swift */,
 			);
 			path = Helper;
@@ -404,6 +410,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				9D2F32DA5B5CECE753733CDC /* ClientTable.swift in Sources */,
+				107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */,
+				F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */,
 				F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */,
 				AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */,
 				D205F3E8E168E58C4584C1EB /* main.swift in Sources */,
