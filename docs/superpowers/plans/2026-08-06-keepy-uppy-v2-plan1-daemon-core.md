@@ -1145,10 +1145,28 @@ struct SessionEngine {
 }
 ```
 
+Two further tests are required, because the properties they guard are
+invisible to the eight above — a reviewer confirmed every one of them would
+still pass with the regression in place:
+
+- `testNonTickEventStillSweepsAnExpiredSession` — drives a NON-tick event
+  while an unrelated session has already passed its deadline, and asserts the
+  expired one is reported in `ended`. Without it, moving the expiry sweep
+  inside `case .tick` goes unnoticed, and a stale session can be observed
+  alive between ticks.
+- `testRenewLeasePreservesIdentityAndOnlyMovesDeadline` — asserts `id`,
+  `owner`, `persistence`, `origin`, and `startedAt` all survive a renewal and
+  only the deadline moves. Dropping `startedAt` would silently corrupt the
+  max-duration backstop the safety engine depends on; minting a fresh `id`
+  would otherwise pass too.
+
+Prove both are real by injecting each regression, confirming the suite fails
+in that specific test, and reverting.
+
 - [ ] **Step 4: Run tests**
 
 Run: `xcodebuild test …` (same flags)
-Expected: `** TEST SUCCEEDED **`, 26/26 (18 + 8 new).
+Expected: `** TEST SUCCEEDED **`, 36/36 (26 + 10 new).
 
 - [ ] **Step 5: Commit**
 
@@ -1439,7 +1457,7 @@ struct SafetyEngine {
 - [ ] **Step 4: Run tests**
 
 Run: `xcodebuild test …` (same flags)
-Expected: `** TEST SUCCEEDED **`, 38/38 (26 + 12 new).
+Expected: `** TEST SUCCEEDED **`, 48/48 (36 + 12 new).
 
 - [ ] **Step 5: Commit**
 
@@ -1687,7 +1705,7 @@ In `Helper/main.swift`, replace `delegate.startup()` with the runtime's `start()
 - [ ] **Step 5: Build and test**
 
 Run: `xcodegen generate && xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
-Expected: `** TEST SUCCEEDED **`, 38/38, no new warnings.
+Expected: `** TEST SUCCEEDED **`, 42/42 (48 minus the 6 retired client-table tests), no new warnings.
 
 Do not launch, load, or register the daemon — that needs root and signing, and is human-verified later.
 
@@ -1699,7 +1717,7 @@ git add "Keepy Uppy.xcodeproj" Helper
 git commit -m "Wire session and safety engines into the daemon runtime"
 ```
 
-Expected after deletion: 38 tests (the 6 client-table tests retire; session,
+Expected after deletion: 42 tests (the 6 client-table tests retire; session,
 safety, and existing suites remain).
 
 ---
@@ -1762,7 +1780,7 @@ When the connection registered as the agent invalidates, call `runtime.agentDisa
 - [ ] **Step 4: Build and test**
 
 Run: `xcodegen generate && xcodebuild test …` (same flags)
-Expected: `** TEST SUCCEEDED **`, 38/38.
+Expected: `** TEST SUCCEEDED **`, 42/42.
 
 - [ ] **Step 5: Commit**
 
@@ -1830,7 +1848,7 @@ Make `archive` depend on `teamid` (`archive: generate teamid`) and end `export` 
 - [ ] **Step 3: Verify recipes and the dev flow**
 
 Run: `just --list` → all recipes, no parse errors.
-Run: `just test` → `** TEST SUCCEEDED **`, 38/38.
+Run: `just test` → `** TEST SUCCEEDED **`, 42/42.
 Run: `unset KEEPY_UPPY_TEAM_ID; just teamid` → fails with the guard message, and `git diff --quiet Shared/SigningRequirement.swift` exits 0 (source untouched).
 
 - [ ] **Step 4: Document the architecture in the README**
