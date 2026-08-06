@@ -15,9 +15,10 @@
 - Naming: bundle id `au.com.workwireless.keepy-uppy`; Xcode project `Keepy Uppy.xcodeproj`; app target and scheme both named `Keepy Uppy`; test target `Keepy UppyTests`; Swift module name pinned explicitly to `KeepyUppy` (via `PRODUCT_MODULE_NAME`) so `@testable import KeepyUppy` doesn't depend on Xcode's automatic space-to-underscore sanitization of the product name.
 - Privilege model: every privileged state change goes through `osascript -e '... with administrator privileges'` via `Process`, producing the native macOS auth dialog. No sudoers modification, no privileged helper daemon (spec §5).
 - Every `xcodebuild` invocation in this plan uses `-derivedDataPath build` for a predictable, repo-local output location (`build/Build/Products/...`) instead of Xcode's default per-user DerivedData path. Add `build/`, `*.xcuserstate`, and `xcuserdata/` to `.gitignore` in Task 1.
+- Dev and test builds pass `CODE_SIGN_IDENTITY=-` (ad-hoc signing) rather than `CODE_SIGNING_ALLOWED=NO`: TCC-backed features exercised during development — notification authorization, `SMAppService` login-item identity — behave unreliably for a completely unsigned bundle, while an ad-hoc signature is enough for local use. Release signing is separate (Task 9).
 - `xcodegen generate` assigns fresh internal UUIDs to `.xcodeproj` contents on every run. Expect the committed `.xcodeproj` to show as a full-file diff each time a task adds new source files and re-runs `generate` — this is expected `xcodegen` behavior, not corruption.
 - Testing: `PowerService`'s parsing functions are pure and unit-tested via XCTest, run with `xcodebuild test`. Everything touching SwiftUI/AppKit/`SMAppService`/`UNUserNotificationCenter` cannot be unit-tested; each such task's "test" step is `xcodebuild build` plus a manual check, accumulated into the README's checklist in Task 9.
-- Unlike the Rust/`objc2` version of this plan, none of the APIs used here needed independent source verification — `MenuBarExtra`, `NSApplicationDelegateAdaptor`, `SMAppService`, `UNUserNotificationCenter`, and `Process` are all stable, first-party, extensively documented Apple APIs. There is no "known API risk" section in this plan.
+- Unlike the Rust/`objc2` version of this plan, the Apple APIs used here needed no independent source verification — `MenuBarExtra`, `NSApplicationDelegateAdaptor`, `SMAppService`, `UNUserNotificationCenter`, and `Process` are all stable, first-party, extensively documented. The verified risks in this plan are **tooling semantics** instead, each addressed inline where it bites: xcodegen's `info:` key regenerates `Info.plist` on every `generate` (Task 1 uses `INFOPLIST_FILE` instead), `just` evaluates top-level `env_var()` eagerly and aborts on missing variables (Task 9 uses `env_var_or_default` plus in-recipe guards), and xcodegen's automatic test hosting launches the full app during `xcodebuild test` (Task 6 guards the notification-permission request out under XCTest).
 
 ---
 
@@ -54,10 +55,9 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - Sources
-    info:
-      path: Resources/Info.plist
     settings:
       base:
+        INFOPLIST_FILE: Resources/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy
         PRODUCT_MODULE_NAME: KeepyUppy
         MARKETING_VERSION: "0.1.0"
@@ -75,6 +75,8 @@ schemes:
     archive:
       config: Release
 ```
+
+`INFOPLIST_FILE` in `settings.base` — not xcodegen's target-level `info:` key — is deliberate and load-bearing: `info:` means "generate an Info.plist at this path", and xcodegen rewrites that file on **every** `xcodegen generate`, which would silently clobber the handcrafted plist below (destroying `LSUIElement` among other keys) on every task that regenerates the project. `INFOPLIST_FILE` keeps the handcrafted file authoritative.
 
 - [ ] **Step 3: Create `Resources/Info.plist`**
 
@@ -132,7 +134,7 @@ struct KeepyUppyApp: App {
 Run: `xcodegen generate`
 Expected: `Generated project at Keepy Uppy.xcodeproj`
 
-Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
+Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=-`
 Expected: `** BUILD SUCCEEDED **`
 
 - [ ] **Step 6: Manually verify the smoke test**
@@ -207,7 +209,9 @@ enum SleepState: Equatable {
 
 enum PowerService {
     static func parseSleepDisabled(_ output: String) -> SleepState {
-        fatalError("not implemented")
+        // Deliberately wrong stub (not fatalError: a crash would abort the
+        // whole suite instead of reporting proper test failures).
+        return .unknown
     }
 }
 ```
@@ -229,6 +233,14 @@ final class PowerServiceSleepStateTests: XCTestCase {
 
     func testUnknownStateOnUnexpectedValue() {
         XCTAssertEqual(PowerService.parseSleepDisabled(Self.malformedOutput), .unknown)
+    }
+
+    // pmset's column padding is spaces today, but the battery output already
+    // mixes tabs, so the parser must not silently misread a tab-padded
+    // SleepDisabled line as "line absent" (which would report Normal Sleep
+    // while sleep is actually disabled — the dangerous direction).
+    func testParsesTabSeparatedDisabledLine() {
+        XCTAssertEqual(PowerService.parseSleepDisabled(Self.tabSeparatedOutput), .disabled)
     }
 
     static let disabledOutput = """
@@ -255,6 +267,8 @@ final class PowerServiceSleepStateTests: XCTestCase {
     Currently in use:
      sleep                 10
     """
+
+    static let tabSeparatedOutput = "System-wide power settings:\n SleepDisabled\t\t1\nCurrently in use:\n sleep\t1\n"
 }
 ```
 
@@ -262,18 +276,18 @@ final class PowerServiceSleepStateTests: XCTestCase {
 
 Run: `xcodegen generate`
 
-Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
-Expected: build fails or crashes at `fatalError("not implemented")` — the tests do not pass yet.
+Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
+Expected: `** TEST FAILED **` — 3 of 4 tests fail (the malformed-input test passes vacuously against the `.unknown` stub; the other three are genuinely red).
 
 - [ ] **Step 4: Implement `parseSleepDisabled`**
 
-Replace the `fatalError` body in `Sources/PowerService.swift`:
+Replace the stub body in `Sources/PowerService.swift`:
 
 ```swift
 enum PowerService {
     static func parseSleepDisabled(_ output: String) -> SleepState {
         for line in output.split(separator: "\n") {
-            let parts = line.split(separator: " ")
+            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
             guard parts.first == "SleepDisabled" else { continue }
             guard parts.count > 1 else { return .unknown }
             switch parts[1] {
@@ -289,8 +303,8 @@ enum PowerService {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
-Expected: `** TEST SUCCEEDED **`, 3 tests passed.
+Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
+Expected: `** TEST SUCCEEDED **`, 4 tests passed.
 
 - [ ] **Step 6: Commit**
 
@@ -331,7 +345,8 @@ Add inside `enum PowerService`:
 
 ```swift
     static func parseBattery(_ output: String) -> BatteryState {
-        fatalError("not implemented")
+        // Deliberately wrong stub — every test below fails against it.
+        return BatteryState(percentage: nil, source: .unknown)
     }
 ```
 
@@ -357,20 +372,29 @@ final class PowerServiceBatteryTests: XCTestCase {
         XCTAssertNil(state.percentage)
     }
 
+    // Real-world variant: while charging, pmset emits "(no estimate)"
+    // instead of an "H:MM remaining" figure.
+    func testParsesChargingWithNoEstimate() {
+        let state = PowerService.parseBattery(Self.acChargingNoEstimate)
+        XCTAssertEqual(state.source, .acPower)
+        XCTAssertEqual(state.percentage, 68)
+    }
+
     static let batteryDischarging = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=4325027)\t87%; discharging; 3:48 remaining present: true\n"
     static let acCharged = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=4325027)\t100%; charged; 0:00 remaining present: true\n"
     static let acNoBattery = "Now drawing from 'AC Power'\n"
+    static let acChargingNoEstimate = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=4325027)\t68%; charging; (no estimate) present: true\n"
 }
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
-Expected: crash at `fatalError("not implemented")`.
+Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
+Expected: `** TEST FAILED **` — all 4 battery tests fail against the stub; the 4 sleep-state tests from Task 2 still pass.
 
 - [ ] **Step 3: Implement `parseBattery`**
 
-Replace the `fatalError` body:
+Replace the stub body:
 
 ```swift
     static func parseBattery(_ output: String) -> BatteryState {
@@ -401,8 +425,8 @@ Replace the `fatalError` body:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
-Expected: `** TEST SUCCEEDED **`, 6 tests passed total.
+Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
+Expected: `** TEST SUCCEEDED **`, 8 tests passed total.
 
 - [ ] **Step 5: Commit**
 
@@ -436,12 +460,13 @@ enum PowerError: Error {
 }
 
 extension PowerError {
-    // osascript's exact error text when the user dismisses the admin-auth
-    // dialog is "User canceled. (-128)" — this is the only reliable way to
-    // distinguish a deliberate cancel from a real failure.
+    // When the user dismisses the admin-auth dialog, osascript writes
+    // "execution error: User canceled. (-128)" to stderr — but the prose is
+    // localized on non-English systems, so the stable AppleScript error
+    // code (-128) is matched as well.
     var isUserCancelled: Bool {
         if case .nonZeroExit(let message) = self {
-            return message.contains("User canceled")
+            return message.contains("User canceled") || message.contains("-128")
         }
         return false
     }
@@ -480,25 +505,28 @@ Add inside `enum PowerService`:
         } catch {
             throw PowerError.commandFailed(error)
         }
+        // Drain both pipes BEFORE waitUntilExit: waiting first deadlocks if
+        // a child ever fills a 64KB pipe buffer. pmset's output is far below
+        // that today, but the ordering costs nothing.
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         if process.terminationStatus == 0 {
-            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            guard let text = String(data: data, encoding: .utf8) else {
+            guard let text = String(data: stdoutData, encoding: .utf8) else {
                 throw PowerError.decodingFailed
             }
             return text
         } else {
-            let data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            throw PowerError.nonZeroExit(String(data: data, encoding: .utf8) ?? "")
+            throw PowerError.nonZeroExit(String(data: stderrData, encoding: .utf8) ?? "")
         }
     }
 ```
 
 - [ ] **Step 2: Build and verify existing tests still pass**
 
-Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
-Expected: `** TEST SUCCEEDED **`, all 6 tests still passing, no build errors.
+Run: `xcodebuild test -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -derivedDataPath build CODE_SIGN_IDENTITY=-`
+Expected: `** TEST SUCCEEDED **`, all 8 tests still passing, no build errors.
 
 - [ ] **Step 3: Manually sanity-check against the real system**
 
@@ -517,7 +545,7 @@ git commit -m "Add pmset read/write system calls via osascript admin prompt"
 
 **Files:**
 - Create: `Sources/LoginItemService.swift`
-- Modify: `project.yml` (add `Sources` file — no change needed, `xcodegen` picks up new files under the existing `sources: [Sources]` glob on regenerate)
+- No edit to `project.yml` — `xcodegen` picks up new files under the existing `sources: [Sources]` glob; just re-run `xcodegen generate` (Step 2)
 
 **Interfaces:**
 - Produces: `enum LoginItemStatus { case notRegistered, enabled, requiresApproval, notFound }`; `enum LoginItemService { static func status() -> LoginItemStatus; static func register() throws; static func unregister() throws }`.
@@ -562,7 +590,7 @@ enum LoginItemService {
 
 Run: `xcodegen generate`
 
-Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
+Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=-`
 Expected: `** BUILD SUCCEEDED **`
 
 - [ ] **Step 3: Commit**
@@ -581,7 +609,7 @@ git commit -m "Add SMAppService login-item wrapper"
 
 **Interfaces:**
 - Consumes: `PowerService.{readSleepState, readBatteryState, setSleepDisabled, SleepState, BatteryState, PowerSource, PowerError}` (Tasks 2-4), `LoginItemService.{status, register, unregister, LoginItemStatus}` (Task 5).
-- Produces: `@MainActor final class PowerMonitor: ObservableObject` with `@Published private(set) var sleepState: SleepState`, `@Published private(set) var batteryState: BatteryState`, `@Published private(set) var loginItemEnabled: Bool`, and methods `refresh()`, `toggle()`, `toggleLoginItem()`, `restoreSleepOnQuit()`. This is the type Task 7's UI consumes.
+- Produces: `@MainActor final class PowerMonitor: ObservableObject` with `@Published private(set) var sleepState: SleepState`, `@Published private(set) var batteryState: BatteryState`, `@Published private(set) var loginItemEnabled: Bool`, and methods `func refresh() async`, `func toggle()`, `func toggleLoginItem()`, `func restoreSleepOnQuit()`. This is the type Task 7's UI consumes.
 
 Not unit-testable (timer, real system state, notification permissions). Verified by `xcodebuild build` here; exercised for real in Task 7's manual test.
 
@@ -593,22 +621,26 @@ import UserNotifications
 
 @MainActor
 final class PowerMonitor: ObservableObject {
-    @Published private(set) var sleepState: SleepState = .enabled
+    @Published private(set) var sleepState: SleepState = .unknown
     @Published private(set) var batteryState = BatteryState(percentage: nil, source: .unknown)
     @Published private(set) var loginItemEnabled = false
 
     private let syncInterval: Duration = .seconds(30)
     private let lowBatteryThreshold = 10
     private var syncTask: Task<Void, Never>?
+    // One attempt per low-battery episode: without this latch, an unanswered
+    // admin prompt would re-fire on every 30-second tick until the battery
+    // died. Reset once the machine is charging or back above the threshold.
+    private var hasAttemptedAutoOff = false
 
     init() {
-        refresh()
         requestNotificationAuthorization()
         syncTask = Task { [weak self] in
+            await self?.refresh()
             while let self, !Task.isCancelled {
                 try? await Task.sleep(for: self.syncInterval)
-                self.refresh()
-                self.checkLowBatteryAutoOff()
+                await self.refresh()
+                await self.checkLowBatteryAutoOff()
             }
         }
     }
@@ -617,26 +649,34 @@ final class PowerMonitor: ObservableObject {
         syncTask?.cancel()
     }
 
-    func refresh() {
-        sleepState = (try? PowerService.readSleepState()) ?? .unknown
-        batteryState = (try? PowerService.readBatteryState()) ?? BatteryState(percentage: nil, source: .unknown)
+    // pmset/osascript calls block until their process exits — in the toggle
+    // case, for as long as the admin password dialog is on screen — so every
+    // PowerService call hops off the main actor via Task.detached and only
+    // the published-property writes happen back here (spec §2).
+    func refresh() async {
+        let (sleep, battery) = await Task.detached {
+            ((try? PowerService.readSleepState()) ?? .unknown,
+             (try? PowerService.readBatteryState()) ?? BatteryState(percentage: nil, source: .unknown))
+        }.value
+        sleepState = sleep
+        batteryState = battery
         loginItemEnabled = LoginItemService.status() == .enabled
     }
 
     func toggle() {
         let target = sleepState != .disabled
-        // A cancel is a deliberate, silent no-op by design (spec §3) — no UI.
-        // Any other failure has no dialog framework to surface through yet,
-        // so it stays silent too, but is at least visible in the console for
-        // debugging rather than vanishing entirely.
-        do {
-            try PowerService.setSleepDisabled(target)
-        } catch let error as PowerError where error.isUserCancelled {
-            // no-op
-        } catch {
-            print("keepy-uppy: failed to toggle sleep state: \(error)")
+        Task {
+            await Task.detached {
+                do {
+                    try PowerService.setSleepDisabled(target)
+                } catch let error as PowerError where error.isUserCancelled {
+                    // Deliberate cancel: silent no-op by design (spec §3).
+                } catch {
+                    print("keepy-uppy: failed to toggle sleep state: \(error)")
+                }
+            }.value
+            await refresh()
         }
-        refresh()
     }
 
     func toggleLoginItem() {
@@ -649,34 +689,53 @@ final class PowerMonitor: ObservableObject {
         } catch {
             print("keepy-uppy: failed to update login item: \(error)")
         }
-        refresh()
+        loginItemEnabled = LoginItemService.status() == .enabled
     }
 
+    // Blocking the main thread is correct here: this runs inside
+    // applicationWillTerminate and must finish before the process exits.
+    // State is re-read fresh rather than taken from the cached property,
+    // which can be up to 30 seconds stale if sleep was disabled externally
+    // (source-of-truth rule, spec §2).
     func restoreSleepOnQuit() {
-        guard sleepState == .disabled else { return }
+        guard (try? PowerService.readSleepState()) == .disabled else { return }
         try? PowerService.setSleepDisabled(false)
     }
 
-    private func checkLowBatteryAutoOff() {
-        guard batteryState.source == .battery,
-              let percentage = batteryState.percentage,
-              percentage < lowBatteryThreshold,
-              sleepState == .disabled
-        else { return }
+    private func checkLowBatteryAutoOff() async {
+        let isLow = batteryState.source == .battery
+            && batteryState.percentage.map { $0 < lowBatteryThreshold } ?? false
+        guard isLow else {
+            hasAttemptedAutoOff = false
+            return
+        }
+        guard sleepState == .disabled, !hasAttemptedAutoOff else { return }
+        hasAttemptedAutoOff = true
 
-        try? PowerService.setSleepDisabled(false)
-        postLowBatteryNotification()
-        refresh()
+        await Task.detached {
+            try? PowerService.setSleepDisabled(false)
+        }.value
+        await refresh()
+        // Only claim success if sleep actually came back on — the admin
+        // prompt may have been cancelled or left unanswered (spec §4's
+        // known limitation), and a "re-enabled" notification would then lie.
+        postLowBatteryNotification(reEnabled: sleepState == .enabled)
     }
 
     private func requestNotificationAuthorization() {
+        // Skip under XCTest: xcodegen auto-hosts the test bundle in the app,
+        // so `xcodebuild test` launches this whole app — and a TCC permission
+        // dialog popping mid-test-run would stall the suite.
+        guard NSClassFromString("XCTestCase") == nil else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
     }
 
-    private func postLowBatteryNotification() {
+    private func postLowBatteryNotification(reEnabled: Bool) {
         let content = UNMutableNotificationContent()
         content.title = "Keepy Uppy"
-        content.body = "Battery below 10% — sleep re-enabled automatically."
+        content.body = reEnabled
+            ? "Battery below \(lowBatteryThreshold)% — sleep re-enabled automatically."
+            : "Battery below \(lowBatteryThreshold)% — couldn't re-enable sleep. Approve the prompt or plug in."
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
@@ -687,7 +746,7 @@ final class PowerMonitor: ObservableObject {
 
 Run: `xcodegen generate`
 
-Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
+Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=-`
 Expected: `** BUILD SUCCEEDED **`
 
 - [ ] **Step 3: Commit**
@@ -717,6 +776,7 @@ This is the biggest deliverable in this plan (mirrors the Rust plan's Task 7 in 
 ```swift
 import AppKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let monitor = PowerMonitor()
 
@@ -725,6 +785,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 ```
+
+The `@MainActor` annotation is required, not stylistic: `PowerMonitor.init` is main-actor-isolated, so `let monitor = PowerMonitor()` in a plain `NSObject` subclass is a hard compile error ("call to main actor-isolated initializer in a synchronous nonisolated context") even in Swift 5 language mode. The annotation is also correct — `NSApplicationDelegateAdaptor` instantiates the delegate on the main thread.
+
+Note one deliberate deviation from the spec's §2 sketch: the spec shows `@StateObject private var monitor` living in `KeepyUppyApp` with a monitor-less `AppDelegate`. That sketch cannot implement re-enable-on-quit (spec §3) — `applicationWillTerminate` would have no path to the monitor. Ownership therefore moves into `AppDelegate`, and the `App` reaches it through `appDelegate.monitor`.
 
 - [ ] **Step 2: Create `Sources/MenuContent.swift`**
 
@@ -744,8 +808,6 @@ struct MenuContent: View {
 
     var body: some View {
         Text(statusText)
-
-        Divider()
 
         Button(toggleText) {
             monitor.toggle()
@@ -803,13 +865,13 @@ struct KeepyUppyApp: App {
 
 Run: `xcodegen generate`
 
-Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
+Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=-`
 Expected: `** BUILD SUCCEEDED **`
 
 - [ ] **Step 5: Manually test the full click-through**
 
 Run: `open "build/Build/Products/Debug/Keepy Uppy.app"`, then verify:
-1. Click the balloon icon → menu appears showing "Status: Normal Sleep", "Turn On Keepy Uppy", "Launch at Login" (unchecked), "Quit Keepy Uppy". (Left-click and right-click both open this same menu — there is no separate direct-toggle click, per spec §3.)
+1. Click the balloon icon → menu appears showing "Status: Normal Sleep", "Turn On Keepy Uppy", "Launch at Login" (unchecked), "Quit Keepy Uppy". (Left-click and right-click both open this same menu — there is no separate direct-toggle click, per spec §3.) A notification-permission prompt may appear on first launch — approve it; it's the low-battery alert channel.
 2. Click "Turn On Keepy Uppy" → macOS admin prompt appears → enter password → reopen the menu, it now reads "Turn Off Keepy Uppy" and "Status: Keeping Awake"; icon becomes a filled balloon. Confirm with `pmset -g | grep SleepDisabled` in a terminal — should show `1`.
 3. Toggle back off → confirm `pmset -g | grep SleepDisabled` shows `0` or is absent.
 4. Cancel the admin dialog on a toggle attempt → confirm no crash and no error dialog (silent no-op).
@@ -942,7 +1004,7 @@ Expected: 10 PNG files written under `Resources/Assets.xcassets/AppIcon.appicons
 
 Run: `xcodegen generate`
 
-Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO`
+Run: `xcodebuild build -project "Keepy Uppy.xcodeproj" -scheme "Keepy Uppy" -configuration Debug -derivedDataPath build CODE_SIGN_IDENTITY=-`
 Expected: `** BUILD SUCCEEDED **`
 
 - [ ] **Step 5: Manually verify**
@@ -979,9 +1041,14 @@ app_path := derived_data + "/Build/Products/Debug/" + app_name + ".app"
 archive_path := derived_data + "/" + app_name + ".xcarchive"
 export_path := derived_data + "/export"
 dmg_path := derived_data + "/" + app_name + ".dmg"
-signing_identity := env_var("KEEPY_UPPY_SIGNING_IDENTITY")
-team_id := env_var("KEEPY_UPPY_TEAM_ID")
-notary_profile := env_var("KEEPY_UPPY_NOTARY_PROFILE")
+# env_var_or_default, NOT env_var: just evaluates top-level assignments
+# eagerly when the justfile loads, and env_var() aborts on a missing
+# variable — plain env_var() here would break EVERY recipe (including
+# `just build` and `just test`) on any machine without signing credentials
+# exported. The signing recipes guard for empty values themselves.
+signing_identity := env_var_or_default("KEEPY_UPPY_SIGNING_IDENTITY", "")
+team_id := env_var_or_default("KEEPY_UPPY_TEAM_ID", "")
+notary_profile := env_var_or_default("KEEPY_UPPY_NOTARY_PROFILE", "")
 
 generate:
     xcodegen generate
@@ -992,19 +1059,21 @@ build: generate
         -scheme "{{scheme}}" \
         -configuration Debug \
         -derivedDataPath "{{derived_data}}" \
-        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGN_IDENTITY=-
 
 test: generate
     xcodebuild test \
         -project "{{project}}" \
         -scheme "{{scheme}}" \
         -derivedDataPath "{{derived_data}}" \
-        CODE_SIGNING_ALLOWED=NO
+        CODE_SIGN_IDENTITY=-
 
 run: build
     open "{{app_path}}"
 
 archive: generate
+    @test -n "{{signing_identity}}" || { echo "Set KEEPY_UPPY_SIGNING_IDENTITY (see README)"; exit 1; }
+    @test -n "{{team_id}}" || { echo "Set KEEPY_UPPY_TEAM_ID (see README)"; exit 1; }
     xcodebuild archive \
         -project "{{project}}" \
         -scheme "{{scheme}}" \
@@ -1015,10 +1084,11 @@ archive: generate
         DEVELOPMENT_TEAM="{{team_id}}"
 
 export: archive
+    sed "s/KEEPY_UPPY_TEAM_ID/{{team_id}}/" packaging/ExportOptions.plist > "{{derived_data}}/ExportOptions.plist"
     xcodebuild -exportArchive \
         -archivePath "{{archive_path}}" \
         -exportPath "{{export_path}}" \
-        -exportOptionsPlist packaging/ExportOptions.plist
+        -exportOptionsPlist "{{derived_data}}/ExportOptions.plist"
 
 dmg: export
     rm -f "{{dmg_path}}"
@@ -1028,6 +1098,7 @@ dmg: export
         "{{dmg_path}}"
 
 notarize: dmg
+    @test -n "{{notary_profile}}" || { echo "Set KEEPY_UPPY_NOTARY_PROFILE (see README)"; exit 1; }
     xcrun notarytool submit "{{dmg_path}}" \
         --keychain-profile "{{notary_profile}}" \
         --wait
@@ -1045,9 +1116,15 @@ notarize: dmg
     <string>developer-id</string>
     <key>signingStyle</key>
     <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Developer ID Application</string>
+    <key>teamID</key>
+    <string>KEEPY_UPPY_TEAM_ID</string>
 </dict>
 </plist>
 ```
+
+`KEEPY_UPPY_TEAM_ID` is a literal placeholder: the `export` recipe `sed`s it to the real team id from the environment at export time (the checked-in file never contains the team id). A manual `developer-id` export without `teamID`/`signingCertificate` is the most common way this pipeline fails, with an opaque `exportOptionsPlist` error.
 
 - [ ] **Step 3: Verify the justfile parses and the dev build/test targets still work**
 
