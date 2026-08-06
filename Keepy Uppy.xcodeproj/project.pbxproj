@@ -14,14 +14,18 @@
 		3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831A5A41A55C3873E0EB9F3A /* MenuContent.swift */; };
 		39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
+		7039380D884506666B63B537 /* ClientTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */; };
 		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
 		9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		9D2F32DA5B5CECE753733CDC /* ClientTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */; };
 		A351D4C2C5FB11F6CDCC076F /* PowerControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51C70013B48AA645E69A849 /* PowerControlTests.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
 		AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 		B24BB0CBA33407554586D264 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1086C7B6913D7589DE52E386 /* main.swift */; };
+		BB7F22ABD73A1331A279732A /* ClientTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */; };
+		C7F5E72DE41546AD65AD3C51 /* ClientTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D378E67123C7D9A20D572DE /* ClientTableTests.swift */; };
 		D205F3E8E168E58C4584C1EB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54DD10487A2C28D32E9A656 /* main.swift */; };
 		DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
 		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
@@ -91,6 +95,8 @@
 		564C97E2907D353762EC75D8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7D378E67123C7D9A20D572DE /* ClientTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientTableTests.swift; sourceTree = "<group>"; };
+		7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientTable.swift; sourceTree = "<group>"; };
 		7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */ = {isa = PBXFileReference; includeInIndex = 0; path = "keepy-uppy"; sourceTree = BUILT_PRODUCTS_DIR; };
 		831A5A41A55C3873E0EB9F3A /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
 		9D902E0F1599E782E483782C /* PowerControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControl.swift; sourceTree = "<group>"; };
@@ -159,6 +165,7 @@
 		406BB7D86155C2735F97FC65 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				7D378E67123C7D9A20D572DE /* ClientTableTests.swift */,
 				D51C70013B48AA645E69A849 /* PowerControlTests.swift */,
 				029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */,
 			);
@@ -183,6 +190,7 @@
 		5C4440F6DC01E7E379F5DF1E /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				7E49D96CBE99CB515E0E3B5B /* ClientTable.swift */,
 				9D902E0F1599E782E483782C /* PowerControl.swift */,
 				DEA751693CBB332AD0528569 /* PowerSPI.h */,
 				076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */,
@@ -369,6 +377,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */,
+				7039380D884506666B63B537 /* ClientTable.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
 				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
@@ -383,6 +392,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BB7F22ABD73A1331A279732A /* ClientTable.swift in Sources */,
 				9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */,
 				FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */,
 				B24BB0CBA33407554586D264 /* main.swift in Sources */,
@@ -393,6 +403,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9D2F32DA5B5CECE753733CDC /* ClientTable.swift in Sources */,
 				F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */,
 				AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */,
 				D205F3E8E168E58C4584C1EB /* main.swift in Sources */,
@@ -403,6 +414,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C7F5E72DE41546AD65AD3C51 /* ClientTableTests.swift in Sources */,
 				A351D4C2C5FB11F6CDCC076F /* PowerControlTests.swift in Sources */,
 				F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */,
 			);
