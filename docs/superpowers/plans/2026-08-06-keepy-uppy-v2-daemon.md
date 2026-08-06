@@ -285,7 +285,13 @@ enum PowerControl {
     private static let sleepDisabledKey = "SleepDisabled" as CFString
 
     static func sleepDisabled() -> Bool {
-        guard let settings = IOPMCopySystemPowerSettings() as? [String: Any] else { return false }
+        // takeRetainedValue, not takeUnretainedValue: this is a CF "Copy"
+        // function returning +1 ownership. And the unwrap is required — the
+        // bridging header carries no CF ownership annotations, so Swift
+        // imports this returning Unmanaged, and casting it directly to a
+        // dictionary silently always fails.
+        guard let settings = IOPMCopySystemPowerSettings()?.takeRetainedValue() as? [String: Any]
+        else { return false }
         return (settings["SleepDisabled"] as? Bool) ?? false
     }
 
@@ -336,7 +342,7 @@ enum PowerControl {
 
 - [ ] **Step 5: Wire the bridging header and IOKit into `project.yml`**
 
-On **both** the `Keepy Uppy` and `KeepyUppyHelper` targets, add to `settings.base`:
+On **all three** of the `Keepy Uppy`, `KeepyUppyHelper`, and `keepy-uppy` targets — every target that compiles `Shared/` needs this, including the CLI — add to `settings.base`:
 
 ```yaml
         SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
@@ -350,6 +356,11 @@ and add to each target:
 ```
 
 (For `Keepy Uppy`, append the `sdk:` entry to its existing `dependencies:` list from Task 1.)
+
+`SleepState`, `PowerSource`, and `BatteryState` must also **move** from
+`Sources/PowerService.swift` into `Shared/PowerControl.swift` as part of this
+task. `Sources/` is app-only, so the helper and CLI cannot see those types
+otherwise. Leave the rest of `PowerService.swift` intact — Task 7 deletes it.
 
 - [ ] **Step 6: Regenerate, build, and run the tests**
 
