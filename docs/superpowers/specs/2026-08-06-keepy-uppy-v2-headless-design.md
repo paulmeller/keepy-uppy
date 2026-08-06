@@ -96,13 +96,30 @@ Both ends of every XPC connection pin with `setCodeSigningRequirement`
 ```
 anchor apple generic
   and certificate leaf[subject.OU] = "<TEAM_ID>"
-  and identifier = "au.com.workwireless.keepy-uppy*"
+  and (identifier = "au.com.workwireless.keepy-uppy"
+       or identifier = "au.com.workwireless.keepy-uppy.helper"
+       or identifier = "au.com.workwireless.keepy-uppy.agent"
+       or identifier = "au.com.workwireless.keepy-uppy.cli")
 ```
 
-The Team ID plus bundle-prefix scoping — chosen in the first draft precisely
-so a boundary would never need widening later — admits the new agent with no
-change at all. Grammar verified with `csreq`; runtime matching needs a signed
-build and is human-verified.
+Two properties of this string were established empirically with `codesign -R`
+against ad-hoc-signed binaries, after an earlier draft's prefix form was found
+to be broken. Both are load-bearing:
+
+1. **The requirement language has no wildcard for `identifier`.** `=` is exact
+   match and a trailing `*` is a literal asterisk, so `identifier =
+   "…keepy-uppy*"` matches nothing real and would have made the daemon
+   unreachable in every Release build. Each admitted binary is therefore named
+   explicitly — which also makes admitting a future companion a deliberate,
+   reviewable one-line change rather than an invisible consequence of a prefix.
+2. **`and` binds tighter than `or`, so the parentheses are mandatory.**
+   Without them the string parses as `(anchor and team and identifierA) or
+   identifierB`, admitting any binary claiming identifier B **with no Team ID
+   check at all** — a privilege-escalation path into a root daemon.
+
+Note that `csreq` only proves a requirement *parses*; it does not prove it
+*matches*. Semantics must be verified with `codesign -R` against binaries
+signed with each real identifier.
 
 Bundle identifiers distinguish **role**, not authorisation: only the agent may
 report condition observations, and the daemon ignores observation messages
