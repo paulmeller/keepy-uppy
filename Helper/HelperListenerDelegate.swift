@@ -9,8 +9,12 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
 
     func listener(_ listener: NSXPCListener,
                   shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
-        // Task 5 adds peer code-signing verification here. Until then this
-        // helper accepts any local connection and MUST NOT be shipped.
+        if SigningRequirement.isEnforced {
+            newConnection.setCodeSigningRequirement(SigningRequirement.requirement)
+        } else {
+            helperLogger.error(
+                "⚠️ DEBUG BUILD: XPC peer code-signing requirement NOT enforced. This build must never be distributed.")
+        }
         let id = ObjectIdentifier(newConnection)
 
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
