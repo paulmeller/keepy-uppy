@@ -700,9 +700,10 @@ In `Helper/HelperListenerDelegate.swift`, replace the two comment lines at the t
         if SigningRequirement.isEnforced {
             newConnection.setCodeSigningRequirement(SigningRequirement.requirement)
         } else {
-            helperLogger.error(
-                "⚠️ DEBUG BUILD: XPC peer code-signing requirement NOT enforced. "
-                + "This build must never be distributed.")
+            // One string literal, not concatenation: os.Logger takes an
+            // OSLogMessage built from a compile-time interpolation literal,
+            // and `+` forces resolution to a plain String, which won't compile.
+            helperLogger.error("⚠️ DEBUG BUILD: XPC peer code-signing requirement NOT enforced. This build must never be distributed.")
         }
 ```
 
