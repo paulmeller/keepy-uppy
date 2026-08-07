@@ -136,6 +136,36 @@ case .setup:
     }
 
     semaphore.signal()
+
+case .reset:
+    // Same shape as `.setup` above — synchronous SMAppService work, no XPC,
+    // so it signals the semaphore itself and falls through to the shared
+    // epilogue. `unregister()` is deliberately routed through SMAppService
+    // rather than documented as `sudo launchctl bootout`: smd performs the
+    // privileged eviction on the user's behalf, so a wedged daemon is
+    // recoverable without root.
+    func unregisterAndReport(_ label: String, _ service: SMAppService) {
+        do {
+            try service.unregister()
+            print("\(label): unregistered")
+        } catch {
+            // Not-registered is the expected, benign case when recovering a
+            // half-installed state, and is worth reporting as success rather
+            // than an error the user has to interpret.
+            if service.status == .notRegistered || service.status == .notFound {
+                print("\(label): not registered")
+            } else {
+                FileHandle.standardError.write("keepy-uppy: \(label) unregister failed: \(error.localizedDescription)\n".data(using: .utf8)!)
+                exitCode = 1
+            }
+        }
+    }
+
+    unregisterAndReport("Daemon", SMAppService.daemon(plistName: "au.com.workwireless.keepy-uppy.helper.plist"))
+    unregisterAndReport("Agent", SMAppService.agent(plistName: "au.com.workwireless.keepy-uppy.agent.plist"))
+    print("Run 'keepy-uppy setup' to register again.")
+
+    semaphore.signal()
 }
 
 let waitResult = semaphore.wait(timeout: .now() + 10)

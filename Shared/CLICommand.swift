@@ -21,13 +21,21 @@ enum CLICommand: Equatable {
     case status(json: Bool)
     case sessions
     case setup
+    /// Tears down both background-service registrations. The recovery path
+    /// for a daemon launchd has wedged: a stale or unresolvable job
+    /// definition in the system domain cannot be replaced by re-running
+    /// `setup` (registering an already-registered service does not evict the
+    /// loaded job), and `launchctl bootout system/...` needs root. Going
+    /// through `SMAppService.unregister()` lets `smd` do the privileged
+    /// eviction on the user's behalf, so recovering never requires sudo.
+    case reset
 }
 
 /// Pure: no I/O, no XPC, no process exit — fully testable. `now` is
 /// injected so duration parsing can be tested without depending on the
 /// wall clock.
 func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLICommand, CLIParseError> {
-    guard let command = args.first else { return .failure(CLIParseError(message: "usage: keepy-uppy on|off|status|sessions|setup")) }
+    guard let command = args.first else { return .failure(CLIParseError(message: "usage: keepy-uppy on|off|status|sessions|setup|reset")) }
     let rest = Array(args.dropFirst())
 
     switch command {
@@ -41,8 +49,10 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
         return .success(.sessions)
     case "setup":
         return .success(.setup)
+    case "reset":
+        return .success(.reset)
     default:
-        return .failure(CLIParseError(message: "unknown command '\(command)'; usage: keepy-uppy on|off|status|sessions|setup"))
+        return .failure(CLIParseError(message: "unknown command '\(command)'; usage: keepy-uppy on|off|status|sessions|setup|reset"))
     }
 }
 

@@ -27,6 +27,15 @@ final class DaemonConnection: ObservableObject {
     private let reconnectDelay: TimeInterval = 3
     private let pollInterval: TimeInterval = 3
 
+    /// How long a single XPC call may wait before the daemon is treated as
+    /// unreachable. Generous against a local round-trip (normally well under
+    /// a millisecond) while still bounding the damage from an unresponsive
+    /// daemon: each stuck call now ends after this, instead of pinning a
+    /// task forever. Longer than `pollInterval`, so two polls can briefly
+    /// overlap while one is timing out — harmless, since `refresh()` only
+    /// assigns published state and the latch makes each call resume once.
+    private static let callTimeout: Duration = .seconds(5)
+
     func start() {
         connect()
         // Refresh immediately: `Timer.scheduledTimer` does not fire on
@@ -117,12 +126,38 @@ final class DaemonConnection: ObservableObject {
 
         let result: T? = await withCheckedContinuation { continuation in
             let latch = ContinuationLatch<T?>(continuation)
+
+            // Resuming on reply-or-error is not sufficient on its own. A
+            // daemon that is *registered but never successfully spawns*
+            // (launchd owns the Mach port and keeps retrying the exec)
+            // accepts the connection and queues the message, then neither
+            // replies nor reports an error — so the reply block and the
+            // error handler below both stay silent and the continuation
+            // waits forever. Found by running the real signed build against
+            // exactly that state, which the unit tests could not produce
+            // because they only ever saw "service not registered at all",
+            // which does fail fast. The latch makes this a safe race:
+            // whichever path arrives first wins and the loser is a no-op.
+            let timeout = Task {
+                try? await Task.sleep(for: Self.callTimeout)
+                guard !Task.isCancelled else { return }
+                appLogger.error("XPC call timed out; treating the daemon as unreachable")
+                latch.resume(nil)
+            }
+
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 appLogger.error("XPC error: \(error.localizedDescription)")
+                timeout.cancel()
                 latch.resume(nil)
             } as? HelperProtocol
-            guard let proxy else { return latch.resume(nil) }
-            send(proxy) { latch.resume($0) }
+            guard let proxy else {
+                timeout.cancel()
+                return latch.resume(nil)
+            }
+            send(proxy) { value in
+                timeout.cancel()
+                latch.resume(value)
+            }
         }
 
         if result == nil {
