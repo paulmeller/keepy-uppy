@@ -31,11 +31,15 @@ enum CLICommand: Equatable {
     case reset
 }
 
+/// Named once: the command list appears in both failure messages below, and
+/// adding a verb should not mean remembering to update two strings.
+private let cliUsage = "usage: keepy-uppy on|off|status|sessions|setup|reset"
+
 /// Pure: no I/O, no XPC, no process exit — fully testable. `now` is
 /// injected so duration parsing can be tested without depending on the
 /// wall clock.
 func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLICommand, CLIParseError> {
-    guard let command = args.first else { return .failure(CLIParseError(message: "usage: keepy-uppy on|off|status|sessions|setup|reset")) }
+    guard let command = args.first else { return .failure(CLIParseError(message: cliUsage)) }
     let rest = Array(args.dropFirst())
 
     switch command {
@@ -52,7 +56,7 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
     case "reset":
         return .success(.reset)
     default:
-        return .failure(CLIParseError(message: "unknown command '\(command)'; usage: keepy-uppy on|off|status|sessions|setup|reset"))
+        return .failure(CLIParseError(message: "unknown command '\(command)'; \(cliUsage)"))
     }
 }
 

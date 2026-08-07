@@ -34,23 +34,25 @@ runtime.start()
 // the accepting listener also supply the peer's stable `ClientID`
 // (`ClientRole.clientID(forUserID:)`).
 //
-// Adding a role means adding a case to `ClientRole`, a line here, and a
-// `MachServices` entry in `Launchd/au.com.workwireless.keepy-uppy.helper.plist`
-// — a listener whose service is not declared there never receives anything.
+// Driven off `ClientRole.allCases`, so adding a role means adding a case to
+// `ClientRole` and a `MachServices` entry in
+// `Launchd/au.com.workwireless.keepy-uppy.helper.plist` — nothing here. A
+// listener whose service is not declared in that plist never receives
+// anything.
 
-let appDelegate = HelperListenerDelegate(runtime: runtime, role: .app)
-let appListener = NSXPCListener(machServiceName: ClientRole.app.machServiceName)
-appListener.delegate = appDelegate
-appListener.resume()
+// Both arrays are retained deliberately: `NSXPCListener.delegate` is weak, so
+// a delegate that only lived for one loop iteration would be deallocated
+// before the first connection ever arrived.
+var listenerDelegates: [HelperListenerDelegate] = []
+var listeners: [NSXPCListener] = []
 
-let agentDelegate = HelperListenerDelegate(runtime: runtime, role: .agent)
-let agentListener = NSXPCListener(machServiceName: ClientRole.agent.machServiceName)
-agentListener.delegate = agentDelegate
-agentListener.resume()
-
-let cliDelegate = HelperListenerDelegate(runtime: runtime, role: .cli)
-let cliListener = NSXPCListener(machServiceName: ClientRole.cli.machServiceName)
-cliListener.delegate = cliDelegate
-cliListener.resume()
+for role in ClientRole.allCases {
+    let delegate = HelperListenerDelegate(runtime: runtime, role: role)
+    let listener = NSXPCListener(machServiceName: role.machServiceName)
+    listener.delegate = delegate
+    listener.resume()
+    listenerDelegates.append(delegate)
+    listeners.append(listener)
+}
 
 RunLoop.main.run()

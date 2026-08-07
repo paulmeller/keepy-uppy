@@ -258,13 +258,7 @@ final class DaemonRuntime {
     /// solves the structurally identical problem for the agent refcount.
     func clientDisconnected(_ owner: ClientID) {
         queue.sync {
-            let remaining = max(0, liveConnectionsByClient[owner, default: 0] - 1)
-            if remaining == 0 {
-                liveConnectionsByClient.removeValue(forKey: owner)
-            } else {
-                liveConnectionsByClient[owner] = remaining
-            }
-            guard remaining == 0 else { return }
+            guard Self.decrementToZero(&liveConnectionsByClient, key: owner) else { return }
             let ended = sessions.apply(.clientDisconnected(owner), now: Date())
             if !ended.isEmpty { helperLogger.log("Client \(owner.rawValue) left; ended \(ended.count) session(s)") }
             _ = applyLocked()
@@ -282,13 +276,7 @@ final class DaemonRuntime {
     /// user's agent-evaluated sessions.
     func agentConnectionClosed(userID: UInt32) {
         queue.sync {
-            let remaining = max(0, liveAgentConnectionsByUser[userID, default: 0] - 1)
-            if remaining == 0 {
-                liveAgentConnectionsByUser.removeValue(forKey: userID)
-            } else {
-                liveAgentConnectionsByUser[userID] = remaining
-            }
-            guard remaining == 0 else { return }
+            guard Self.decrementToZero(&liveAgentConnectionsByUser, key: userID) else { return }
             let ended = sessions.apply(.agentDisappeared(userID: userID), now: Date())
             if !ended.isEmpty {
                 helperLogger.log("Last agent connection for uid \(userID) gone; ended \(ended.count) unverifiable session(s)")
@@ -322,6 +310,24 @@ final class DaemonRuntime {
     func currentSessions() -> [Session] { queue.sync { sessions.sessions } }
 
     func isKeepingAwake() -> Bool { queue.sync { PowerControl.sleepDisabled() } }
+
+    /// Drops one reference and reports whether that was the last one.
+    ///
+    /// Shared by both refcounts purely as arithmetic. It deliberately does
+    /// *not* merge them: they stay keyed differently (identity vs. uid), over
+    /// different domains, with different effects — a separation a security
+    /// review settled explicitly. This is only the clamp-remove-report dance
+    /// that was otherwise written out twice, where a future off-by-one would
+    /// have had to be found and fixed in both copies.
+    private static func decrementToZero<Key: Hashable>(_ counts: inout [Key: Int], key: Key) -> Bool {
+        let remaining = max(0, counts[key, default: 0] - 1)
+        if remaining == 0 {
+            counts.removeValue(forKey: key)
+        } else {
+            counts[key] = remaining
+        }
+        return remaining == 0
+    }
 
     // MARK: - Private, always called on `queue`
 

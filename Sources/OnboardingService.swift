@@ -36,14 +36,14 @@ final class OnboardingService: ObservableObject {
     @Published private(set) var agentStatus: ServiceStatus = .notRegistered
 
     func refresh() {
-        daemonStatus = ServiceStatus(SMAppService.daemon(plistName: "au.com.workwireless.keepy-uppy.helper.plist").status)
-        agentStatus = ServiceStatus(SMAppService.agent(plistName: "au.com.workwireless.keepy-uppy.agent.plist").status)
+        daemonStatus = ServiceStatus(SMAppService.daemon(plistName: helperPlistName).status)
+        agentStatus = ServiceStatus(SMAppService.agent(plistName: agentPlistName).status)
     }
 
     func enable() {
-        do { try SMAppService.daemon(plistName: "au.com.workwireless.keepy-uppy.helper.plist").register() }
+        do { try SMAppService.daemon(plistName: helperPlistName).register() }
         catch { appLogger.error("daemon register failed: \(error.localizedDescription)") }
-        do { try SMAppService.agent(plistName: "au.com.workwireless.keepy-uppy.agent.plist").register() }
+        do { try SMAppService.agent(plistName: agentPlistName).register() }
         catch { appLogger.error("agent register failed: \(error.localizedDescription)") }
         refresh()
         if daemonStatus == .requiresApproval || agentStatus == .requiresApproval {

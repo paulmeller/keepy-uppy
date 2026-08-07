@@ -11,6 +11,12 @@ final class DaemonConnection {
     private var connection: NSXPCConnection?
     private var reconnectTask: Task<Void, Never>?
 
+    /// Matches the app client's bound. `EvidenceLoopRunner.tick()` calls in
+    /// here every 5s for the whole login session, so an unbounded wait is the
+    /// difference between one slow tick and a permanently-stranded task per
+    /// tick for days.
+    private static let callTimeout: Duration = .seconds(5)
+
     /// Deliberately longer than the app's 3s. The app's reconnect races its
     /// own 3s UI poll, so healing within one refresh cycle is what makes a
     /// daemon restart invisible; this client is a headless observer on a 5s
@@ -93,17 +99,8 @@ final class DaemonConnection {
         _ send: @escaping (HelperProtocol, @escaping (T) -> Void) -> Void
     ) async -> T? {
         guard let connection else { return nil }
-
-        let result: T? = await withCheckedContinuation { continuation in
-            let latch = ContinuationLatch<T?>(continuation)
-            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                agentLogger.error("XPC error: \(error.localizedDescription)")
-                latch.resume(nil)
-            } as? HelperProtocol
-            guard let proxy else { return latch.resume(nil) }
-            send(proxy) { latch.resume($0) }
-        }
-
+        let result: T? = await xpcCall(on: connection, timeout: Self.callTimeout,
+                                       logger: agentLogger, send)
         if result == nil { handleDisconnect(connection) }
         return result
     }

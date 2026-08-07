@@ -53,8 +53,10 @@
 		5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01853618C70A206B6F132D /* SessionIsolationTests.swift */; };
 		5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		5FDF183125F827921A79CBB8 /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
+		6169C1D2A992BE99FD033DA0 /* XPCCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151202FD37AD92E77E9482E5 /* XPCCall.swift */; };
 		6296B8F1A2CB3332CF81AA53 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
 		6321EC183BF4638535315441 /* SigningRequirementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */; };
+		6441D3A5C6FB8D2B425F1CD8 /* XPCCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151202FD37AD92E77E9482E5 /* XPCCall.swift */; };
 		65FAB6E924A85B86B60FE19B /* ClientIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8ACCDE1F53D86827A3FA87 /* ClientIdentity.swift */; };
 		6D3CD27C18972F228A162EDA /* OnboardingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC93D8F483F729997B0AA625 /* OnboardingService.swift */; };
 		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
@@ -67,6 +69,7 @@
 		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		832845DF92892B7EC3D10B34 /* TriggersSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6053E3730063486EB2B7F47E /* TriggersSettingsTab.swift */; };
 		8EE316A0540244088048694F /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
+		914030CBC71D39696E6B57BA /* XPCCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151202FD37AD92E77E9482E5 /* XPCCall.swift */; };
 		9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
 		975F27F013825BDCA91E0F56 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
 		98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
@@ -114,6 +117,7 @@
 		F8F1EDA29C310995A649B60A /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
 		FC178B9E631E011DE37D5CFB /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
 		FC59D49EDCCE2E89FB26271E /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
+		FE26396397C4640C06DFBEAF /* XPCCall.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151202FD37AD92E77E9482E5 /* XPCCall.swift */; };
 		FE6E59808EB8F308E3C74DF0 /* keepy-uppy in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 /* End PBXBuildFile section */
@@ -190,6 +194,7 @@
 		0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirement.swift; sourceTree = "<group>"; };
 		0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEngine.swift; sourceTree = "<group>"; };
 		1086C7B6913D7589DE52E386 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		151202FD37AD92E77E9482E5 /* XPCCall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPCCall.swift; sourceTree = "<group>"; };
 		1875D33C618D88DEBDDB7CEB /* SessionTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTable.swift; sourceTree = "<group>"; };
 		1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.agent.plist"; sourceTree = "<group>"; };
 		218D3338E5E977B7C598642C /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -383,6 +388,7 @@
 				1875D33C618D88DEBDDB7CEB /* SessionTable.swift */,
 				0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */,
 				5567693DBB46649F15660F65 /* TriggerRule.swift */,
+				151202FD37AD92E77E9482E5 /* XPCCall.swift */,
 				076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */,
 			);
 			path = Shared;
@@ -624,6 +630,7 @@
 				1B190889A1E8D20C6AB041A4 /* SigningRequirement.swift in Sources */,
 				DDD0267675D2F5AE957BDC8D /* TriggerRule.swift in Sources */,
 				832845DF92892B7EC3D10B34 /* TriggersSettingsTab.swift in Sources */,
+				914030CBC71D39696E6B57BA /* XPCCall.swift in Sources */,
 				11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -646,6 +653,7 @@
 				8EE316A0540244088048694F /* SessionTable.swift in Sources */,
 				5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */,
 				54CC3E88C8BD3C35432C6E28 /* TriggerRule.swift in Sources */,
+				6441D3A5C6FB8D2B425F1CD8 /* XPCCall.swift in Sources */,
 				FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */,
 				B24BB0CBA33407554586D264 /* main.swift in Sources */,
 			);
@@ -673,6 +681,7 @@
 				EFC5CDA75216518C1547F3CD /* SessionTable.swift in Sources */,
 				75D494F1A529955A7113FF53 /* SigningRequirement.swift in Sources */,
 				194C25842A48E7780A0C815B /* TriggerRule.swift in Sources */,
+				FE26396397C4640C06DFBEAF /* XPCCall.swift in Sources */,
 				045FA35366F0289479EF43B0 /* XPCProtocol.swift in Sources */,
 				C97BBEC2BCA672284CBB03B7 /* main.swift in Sources */,
 			);
@@ -700,6 +709,7 @@
 				A94B6B3317C441B81B422C13 /* SessionTable.swift in Sources */,
 				E8C38C20E116D2684F48183B /* SigningRequirement.swift in Sources */,
 				BF46A8320FE63E1D0D3CD140 /* TriggerRule.swift in Sources */,
+				6169C1D2A992BE99FD033DA0 /* XPCCall.swift in Sources */,
 				AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */,
 				D205F3E8E168E58C4584C1EB /* main.swift in Sources */,
 			);

@@ -1,3 +1,4 @@
+import SwiftUI
 import AppKit
 import Foundation
 
@@ -123,4 +124,48 @@ func batteryGuardFootnote(_ config: SafetyConfig) -> String {
 func maxSessionLengthLabel(_ config: SafetyConfig) -> String {
     let hours = Int((config.maxSessionDuration ?? 0) / 3600)
     return hours == 1 ? "1 hour" : "\(hours) hours"
+}
+
+// MARK: - Background service status
+
+func serviceStatusTitle(_ state: OnboardingService.State) -> String {
+    switch state {
+    case .running: return "Running"
+    case .needsApproval: return "Waiting for approval"
+    case .notEnabled: return "Not enabled"
+    }
+}
+
+/// Shape as well as colour: colour alone would carry the whole meaning for a
+/// reader who can't distinguish green from orange.
+func serviceStatusSymbol(_ state: OnboardingService.State) -> String {
+    switch state {
+    case .running: return "checkmark.circle.fill"
+    case .needsApproval: return "exclamationmark.triangle.fill"
+    case .notEnabled: return "xmark.circle.fill"
+    }
+}
+
+func serviceStatusTint(_ state: OnboardingService.State) -> Color {
+    switch state {
+    case .running: return .green
+    case .needsApproval: return .orange
+    case .notEnabled: return .secondary
+    }
+}
+
+func backgroundServicesFootnote(_ state: OnboardingService.State) -> String {
+    switch state {
+    case .running:
+        // Both are always-on by design: the agent's plist sets RunAtLoad and
+        // KeepAlive, and the daemon has no idle exit. Claiming they "stop when
+        // no session is running" (as this footer briefly did) is simply false,
+        // and misdescribes two processes a user may be deciding whether to
+        // trust.
+        return "These stay running in the background so a trigger can start a session while you're away. Sleep is only held off while a session is actually active."
+    case .needsApproval:
+        return "macOS needs you to approve these in System Settings → General → Login Items & Extensions before they can run."
+    case .notEnabled:
+        return "Keepy Uppy can't keep this Mac awake until these are enabled."
+    }
 }

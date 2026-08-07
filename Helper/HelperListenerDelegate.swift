@@ -65,71 +65,44 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         newConnection.exportedObject = HelperService(
             runtime: runtime, clientID: id, userID: userID, isAgent: isAgent)
 
-        // One-shot guard around `agentConnectionClosed()`: both
-        // `invalidationHandler` and `interruptionHandler` below can fire for
-        // the same connection, and each is documented to potentially run on
-        // an arbitrary thread. Nobody has shown both actually firing for one
-        // connection today, but nothing rules it out either, and the
-        // refcount in `DaemonRuntime` must be decremented at most once per
-        // accepted connection no matter how many teardown callbacks run.
-        // `NSLock` makes the check-and-set atomic; the flag itself is
-        // captured per connection (a fresh one per `shouldAcceptNewConnection`
-        // call), not shared across connections.
-        let closeLock = NSLock()
-        var closed = false
-        // Explicit `[runtime]` capture, same as the handlers below: captures
-        // the `DaemonRuntime` value itself, not `self`, so this closure
-        // (held by `newConnection`, not by the delegate) cannot extend the
-        // delegate's lifetime.
-        let closeAgentConnectionOnce: () -> Void = { [runtime] in
-            closeLock.lock()
-            let alreadyClosed = closed
-            closed = true
-            closeLock.unlock()
-            guard !alreadyClosed else { return }
-            runtime.agentConnectionClosed(userID: userID)
-        }
-
-        // The same one-shot discipline, for the same reason, around the
-        // *client* refcount — deliberately its own lock and flag rather than
-        // sharing the agent one above, so the agent path's behaviour is
-        // untouched by this change.
+        // One guard, not two. Both refcounts are decremented from the same
+        // pair of handlers, in the same order, and `isAgent` is fixed for
+        // this connection's whole life — so the two independent lock/flag
+        // pairs this replaces could never actually diverge, they just
+        // duplicated the discipline twice over.
         //
-        // This guard is newly load-bearing. `clientDisconnected` used to be
-        // called from both handlers with no guard, which was harmless while
-        // it was an idempotent "end this owner's `clientBound` sessions".
-        // Now that identities are stable, several live connections can share
-        // one `ClientID` and the call is a refcount decrement: a double
-        // decrement for one connection would under-count the live ones and
-        // tear down a still-connected client's sessions.
-        let clientCloseLock = NSLock()
-        var clientClosed = false
-        let closeClientConnectionOnce: () -> Void = { [runtime] in
-            clientCloseLock.lock()
-            let alreadyClosed = clientClosed
-            clientClosed = true
-            clientCloseLock.unlock()
-            guard !alreadyClosed else { return }
+        // The guard exists at all because `invalidationHandler` and
+        // `interruptionHandler` can both fire for one connection, each on an
+        // arbitrary thread, and every refcount here must be decremented at
+        // most once per accepted connection however many teardown callbacks
+        // run. `NSLock` makes the check-and-set atomic; the flag is captured
+        // per connection (a fresh one per `shouldAcceptNewConnection` call),
+        // not shared across connections.
+        let teardownLock = NSLock()
+        var toreDown = false
+        // Explicit `[runtime]` capture, so this closure — held by the
+        // connection, not by the delegate — cannot extend the delegate's
+        // lifetime.
+        let tearDownOnce: () -> Void = { [runtime] in
+            teardownLock.lock()
+            let already = toreDown
+            toreDown = true
+            teardownLock.unlock()
+            guard !already else { return }
+
+            // Order preserved from when these were separate guards.
             runtime.clientDisconnected(id)
-        }
-
-        // Neither handler captures `self`: they hold only the two local
-        // closures above, each of which captures `runtime` explicitly.
-        newConnection.invalidationHandler = {
-            closeClientConnectionOnce()
             // No session outlives its evidence (spec §5): once the *last*
-            // live agent connection disappears, agent-evaluated sessions
-            // can no longer be verified and must end too (Fix 4: a single
-            // other user's agent connection closing must not end this
-            // one's sessions on a multi-user Mac).
-            if isAgent { closeAgentConnectionOnce() }
-        }
-        newConnection.interruptionHandler = {
-            closeClientConnectionOnce()
-            if isAgent { closeAgentConnectionOnce() }
+            // live agent connection disappears, agent-evaluated sessions can
+            // no longer be verified and must end too (Fix 4: one user's agent
+            // connection closing must not end another's sessions).
+            if isAgent { runtime.agentConnectionClosed(userID: userID) }
         }
 
-        // Paired with the `close*ConnectionOnce()` calls above: every
+        newConnection.invalidationHandler = tearDownOnce
+        newConnection.interruptionHandler = tearDownOnce
+
+        // Paired with `tearDownOnce` above: every
         // accepted connection increments the client refcount exactly once,
         // and every accepted *agent* connection the agent refcount exactly
         // once (Fixes 3 & 4). Incremented *before* `resume()`, not after, so
