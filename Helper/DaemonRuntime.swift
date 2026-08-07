@@ -32,7 +32,14 @@ enum LeaseRenewalResult: Equatable {
 final class DaemonRuntime {
     private let queue = DispatchQueue(label: "au.com.workwireless.keepy-uppy.helper.runtime")
     private var sessions = SessionEngine()
-    private var safety = SafetyEngine(config: SafetyConfigStore.load())
+    /// Starts at `.default` and is replaced by the connected user's saved
+    /// config on the first tick that has an agent to read for. It cannot be
+    /// seeded from `SafetyConfigStore.load()` here: that reads the *calling*
+    /// process's preference domain, and this process is root, so it would
+    /// only ever return `.default` anyway — just less honestly (see
+    /// `SafetyConfigStore.load(forUserID:)`). There is also nobody to read
+    /// for yet at construction time; no agent has connected.
+    private var safety = SafetyEngine(config: .default)
     private let observer: SafetyObserving
     private let bundlePath: String
     private var timer: DispatchSourceTimer?
@@ -265,8 +272,33 @@ final class DaemonRuntime {
         let now = Date()
         _ = sessions.apply(.tick, now: now)
 
-        let freshConfig = SafetyConfigStore.load()
-        if freshConfig != safety.config { safety.config = freshConfig }
+        // Pick up Settings → Safety changes. Whose settings? The lowest UID
+        // with a live agent connection. That set is the right source because
+        // a UID only appears in it once a code-signing-verified agent
+        // connection was accepted for it — the same authenticated trust
+        // boundary everything else here rests on — rather than whoever
+        // happens to hold the console. `min()` rather than an arbitrary key
+        // because `Dictionary` ordering is not stable across runs: with two
+        // users logged in, taking "any" key would let the governing config
+        // flap between them from tick to tick.
+        //
+        // Values are honoured exactly as written, with no server-side
+        // clamping. Widening a safety boundary is already a visible,
+        // deliberate choice in that tab (`ThermalSensitivity.off`), and any
+        // admitted signed client can already start an `.indefinite` session
+        // through it, so reading the config the user actually saved crosses
+        // no trust boundary that was not already crossed.
+        //
+        // Nothing is reassigned when the read fails (no agent connected, no
+        // saved config, unreadable): the last config that did load stays in
+        // force, so a transient failure cannot quietly revert a user's
+        // chosen safety settings to the defaults.
+        if let userID = liveAgentConnectionsByUser.keys.min(),
+           let freshConfig = SafetyConfigStore.load(forUserID: userID),
+           freshConfig != safety.config {
+            helperLogger.log("Safety config reloaded from uid \(userID)")
+            safety.config = freshConfig
+        }
 
         let battery = observer.batteryState()
         let onBattery = battery.source == .battery
