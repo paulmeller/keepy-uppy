@@ -61,9 +61,39 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // peer's pid after the fact (spec §4).
         let isAgent = role.isAgent
 
+        // Accepting a connection establishes nothing about the peer:
+        // `setCodeSigningRequirement` above is adjudicated by XPC *after*
+        // this method returns, and any local process can look up a Mach
+        // service. This latch is what separates "accepted" from "proved
+        // itself", and owns the exactly-once bookkeeping for both refcounts.
+        // A fresh instance per `shouldAcceptNewConnection` call, never shared
+        // across connections. See `Shared/ConnectionProofLatch.swift`.
+        let proof = ConnectionProofLatch()
+
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
+        // Both halves of the refcount pairing live here, side by side, so a
+        // future change cannot alter one without seeing the other. Explicit
+        // `[runtime]` captures, so these closures — held by the connection,
+        // not by the delegate — cannot extend the delegate's lifetime.
+        //
+        // The increments moved off accept and onto the arrival of the first
+        // message (security review: refcount-before-proof). Every accepted
+        // connection used to increment the client refcount, and every
+        // accepted *agent* connection the agent refcount (Fixes 3 & 4) —
+        // which meant an unsigned rogue that merely connected could hold
+        // either count above zero for the adjudication window: enough to
+        // suppress `clientDisconnected`'s `clientBound` cleanup when the real
+        // app quit, and enough to fake agent liveness to
+        // `SessionAdmission`'s `noAgentConnected` check. `HelperService`
+        // calls this on entry to every `HelperProtocol` method, which XPC
+        // reaches only for a peer that satisfied the requirement.
         newConnection.exportedObject = HelperService(
-            runtime: runtime, clientID: id, userID: userID, isAgent: isAgent)
+            runtime: runtime, clientID: id, userID: userID, isAgent: isAgent,
+            connectionProven: { [runtime] in
+                guard proof.proveOnce() else { return }
+                runtime.clientConnected(id)
+                if isAgent { runtime.agentConnectionOpened(userID: userID) }
+            })
 
         // One guard, not two. Both refcounts are decremented from the same
         // pair of handlers, in the same order, and `isAgent` is fixed for
@@ -74,21 +104,16 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // The guard exists at all because `invalidationHandler` and
         // `interruptionHandler` can both fire for one connection, each on an
         // arbitrary thread, and every refcount here must be decremented at
-        // most once per accepted connection however many teardown callbacks
-        // run. `NSLock` makes the check-and-set atomic; the flag is captured
-        // per connection (a fresh one per `shouldAcceptNewConnection` call),
-        // not shared across connections.
-        let teardownLock = NSLock()
-        var toreDown = false
-        // Explicit `[runtime]` capture, so this closure — held by the
-        // connection, not by the delegate — cannot extend the delegate's
-        // lifetime.
+        // most once per *counted* connection however many teardown callbacks
+        // run. That check-and-set now lives inside the latch (which has to
+        // hold a lock anyway, since prove and release genuinely race: a
+        // message can be in flight while the connection tears down), and
+        // `releaseOnce()` folds in the second half of this fix — it reports
+        // `true` only for a connection that was actually counted, so a rogue
+        // that connects and vanishes without ever passing the requirement
+        // decrements nothing it never incremented.
         let tearDownOnce: () -> Void = { [runtime] in
-            teardownLock.lock()
-            let already = toreDown
-            toreDown = true
-            teardownLock.unlock()
-            guard !already else { return }
+            guard proof.releaseOnce() else { return }
 
             // Order preserved from when these were separate guards.
             runtime.clientDisconnected(id)
@@ -102,15 +127,6 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         newConnection.invalidationHandler = tearDownOnce
         newConnection.interruptionHandler = tearDownOnce
 
-        // Paired with `tearDownOnce` above: every
-        // accepted connection increments the client refcount exactly once,
-        // and every accepted *agent* connection the agent refcount exactly
-        // once (Fixes 3 & 4). Incremented *before* `resume()`, not after, so
-        // neither refcount can be observed out of order relative to the
-        // connection becoming live — there is no window where the connection
-        // is live but a count hasn't been bumped yet.
-        runtime.clientConnected(id)
-        if isAgent { runtime.agentConnectionOpened(userID: userID) }
         newConnection.resume()
         helperLogger.log("Accepted connection from \(id.rawValue) (role: \(self.role.rawValue))")
         return true

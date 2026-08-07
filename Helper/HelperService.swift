@@ -15,14 +15,37 @@ final class HelperService: NSObject, HelperProtocol {
     private let userID: UInt32
     private let isAgent: Bool
 
-    init(runtime: DaemonRuntime, clientID: ClientID, userID: UInt32, isAgent: Bool) {
+    /// Called on entry to every `HelperProtocol` method below, before any
+    /// other work — including before a method rejects its caller.
+    ///
+    /// Reaching *any* method on this object is the daemon's only proof that
+    /// the peer satisfied the accepting listener's code-signing requirement:
+    /// `HelperListenerDelegate` sets that requirement, but XPC adjudicates it
+    /// after accept and delivers no message until it passes. So this is where
+    /// the connection's liveness refcounts get incremented — see the closure
+    /// in `HelperListenerDelegate.listener(_:shouldAcceptNewConnection:)`,
+    /// which pairs it with the matching decrement.
+    ///
+    /// Idempotent by construction (`ConnectionProofLatch.proveOnce`), so
+    /// calling it from all nine methods counts one connection once, however
+    /// many messages it sends. One hook rather than nine copies of the
+    /// bookkeeping, so the accounting cannot drift method by method — and the
+    /// call itself is cheap enough to sit on every message (an uncontended
+    /// lock; every method below already funnels into `DaemonRuntime`'s serial
+    /// queue anyway).
+    private let connectionProven: () -> Void
+
+    init(runtime: DaemonRuntime, clientID: ClientID, userID: UInt32, isAgent: Bool,
+         connectionProven: @escaping () -> Void) {
         self.runtime = runtime
         self.clientID = clientID
         self.userID = userID
         self.isAgent = isAgent
+        self.connectionProven = connectionProven
     }
 
     func startSession(_ sessionJSON: Data, reply: @escaping (String?, String?) -> Void) {
+        connectionProven()
         guard sessionJSON.count <= Self.maxSessionPayloadBytes else {
             return reply(nil, "session payload too large")
         }
@@ -57,6 +80,7 @@ final class HelperService: NSObject, HelperProtocol {
     }
 
     func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) {
+        connectionProven()
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
         switch runtime.stopSession(id: uuid, requestedBy: clientID) {
         case .authorized:
@@ -70,12 +94,14 @@ final class HelperService: NSObject, HelperProtocol {
     }
 
     func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) {
+        connectionProven()
         helperLogger.log("stopAllSessions(all: \(all)) from \(self.clientID.rawValue)")
         let stopped = runtime.stopAll(all: all, requestedBy: clientID)
         reply(stopped, nil)
     }
 
     func listSessions(reply: @escaping (Data?, String?) -> Void) {
+        connectionProven()
         guard let data = try? JSONEncoder().encode(runtime.currentSessions()) else {
             return reply(nil, "encoding failure")
         }
@@ -83,6 +109,7 @@ final class HelperService: NSObject, HelperProtocol {
     }
 
     func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) {
+        connectionProven()
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
         switch runtime.renewLease(id: uuid, until: until, requestedBy: clientID) {
         case .renewed:
@@ -100,6 +127,7 @@ final class HelperService: NSObject, HelperProtocol {
     }
 
     func reportConditionEnded(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) {
+        connectionProven()
         guard isAgent else {
             helperLogger.error("Rejected condition report from non-agent client \(self.clientID.rawValue)")
             return reply(false, "not authorised")
@@ -120,6 +148,7 @@ final class HelperService: NSObject, HelperProtocol {
     }
 
     func registerAsAgent(reply: @escaping (Bool, String?) -> Void) {
+        connectionProven()
         guard isAgent else {
             helperLogger.error("Rejected agent registration from non-agent client \(self.clientID.rawValue)")
             return reply(false, "not authorised")
@@ -128,9 +157,13 @@ final class HelperService: NSObject, HelperProtocol {
         reply(true, nil)
     }
 
-    func currentState(reply: @escaping (Bool) -> Void) { reply(runtime.isKeepingAwake()) }
+    func currentState(reply: @escaping (Bool) -> Void) {
+        connectionProven()
+        reply(runtime.isKeepingAwake())
+    }
 
     func version(reply: @escaping (String) -> Void) {
+        connectionProven()
         reply(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
     }
 }
