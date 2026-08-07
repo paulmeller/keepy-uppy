@@ -194,6 +194,32 @@ extend a session. CPU-busy ends only after a sustained quiet window (default
 2 minutes) — a momentary lull mid-job must not kill the session, and a kind
 that ends unpredictably is worse than one that does not exist.
 
+### Known limitation: the global session cap is a shared, exhaustible resource
+
+The daemon caps total live sessions (200) and sessions per owner (20) to stop
+unbounded growth from pinning the root process's CPU — the per-owner cap alone
+is close to decorative, since each XPC connection mints a fresh identity, so
+only the global cap does real work (verified: it bounds the amplification a
+flood can achieve to microseconds per event rather than seconds).
+
+What it does not yet solve: a client can open many connections, start
+`detached` sessions on each, and disconnect. Those sessions are legitimate —
+`detached` persistence exists specifically so `keepy-uppy on --for 2h`
+survives the SSH session that started it — so they are not swept as garbage,
+and nothing currently owns them to stop them short of `stopAllSessions(all:
+true)` or their own end condition. Enough of them can consume the entire
+global cap, denying every other client, including the menu-bar app, for as
+long as the orphaned sessions remain.
+
+This is bounded by the code-signing pinning (§4) — an attacker must already be
+running one of our own signed binaries — and it is recoverable, not silent
+data loss. It is deliberately **not** fixed in the daemon-core plan: a correct
+fix needs a fairness policy (e.g. reserving global-cap headroom for sessions
+whose owner is still connected, or bounding how much of the cap orphaned
+sessions may occupy) that is better designed once the CLI — the actual origin
+of legitimate `detached` sessions — is built, rather than guessed at against a
+stub. Resolve this before the CLI ships to anyone outside development.
+
 ### The governing rule: no session outlives its evidence
 
 This replaces the first draft's connection-bound dead man's switch and is
