@@ -32,7 +32,7 @@ enum ThermalSensitivity: String, Codable, CaseIterable {
     }
 }
 
-struct SafetyConfig {
+struct SafetyConfig: Codable, Equatable {
     // `.balanced` is the deliberate default. `.fair` only means fans are
     // audible, so a sustained build with the lid shut reaches it within
     // minutes — defaulting there would stop the very sessions this product
@@ -77,7 +77,7 @@ struct SafetyInputs {
 /// Pure reducer. No I/O, no clock of its own — every input including `now`
 /// arrives in `SafetyInputs`, so all of this is testable instantly.
 struct SafetyEngine {
-    let config: SafetyConfig
+    var config: SafetyConfig
     private var pendingWarning: (reason: SafetyReason, actAt: Date)?
     private var suppressionReason: SafetyReason?
     /// When the triggering condition most recently began looking recovered.
