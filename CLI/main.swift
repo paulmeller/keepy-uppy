@@ -2,15 +2,20 @@ import Foundation
 import ServiceManagement
 
 func connect() -> HelperProtocol? {
-    let connection = NSXPCConnection(machServiceName: helperMachServiceName, options: .privileged)
+    // The CLI-ONLY Mach service, never the app's. That is what makes the
+    // daemon see this process as the CLI, and therefore what gives every
+    // `keepy-uppy` invocation by this user the same stable `ClientID` — the
+    // thing `off` with no flags needs in order to match sessions a previous
+    // invocation started (`ClientRole.clientID(forUserID:)`).
+    let connection = NSXPCConnection(machServiceName: cliMachServiceName, options: .privileged)
     connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
     if SigningRequirement.isEnforced {
-        // Pins the PEER (the daemon), not this process's own identity —
-        // `setCodeSigningRequirement` validates the other end of the
-        // connection. `SigningRequirement.requirement` is the *inbound*
-        // requirement the daemon applies to its clients, and it deliberately
-        // excludes the daemon's own identifier, so pinning it here rejects
-        // the daemon on the first real message.
+        // Unchanged, and still correct: this pins the PEER (the daemon), not
+        // this process's own identity — `setCodeSigningRequirement` validates
+        // the other end of the connection. The daemon's *inbound* requirement
+        // for this service (`SigningRequirement.cliRequirement`) deliberately
+        // excludes the daemon's own identifier, so pinning an inbound
+        // requirement here would reject the daemon on the first real message.
         connection.setCodeSigningRequirement(SigningRequirement.helperRequirement)
     }
     connection.resume()
@@ -24,7 +29,13 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-let ownerID = ClientID(rawValue: "cli-\(ProcessInfo.processInfo.processIdentifier)")
+// A placeholder only. `HelperService.startSession` overwrites `owner` with
+// the identity it derived server-side from the accepting listener's role and
+// the peer's authenticated uid, and never trusts this field — so despite the
+// superficially similar shape, this is NOT the `"cli-<uid>"` id this process's
+// sessions end up owned by (`ClientRole.clientID(forUserID:)`). It is kept
+// only because `Session` requires a non-optional `owner` to encode.
+let ownerID = ClientID(rawValue: "cli-pid-\(ProcessInfo.processInfo.processIdentifier)")
 
 let command: CLICommand
 switch parseCLIArguments(Array(CommandLine.arguments.dropFirst())) {

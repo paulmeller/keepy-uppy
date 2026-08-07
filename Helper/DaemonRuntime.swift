@@ -60,6 +60,28 @@ final class DaemonRuntime {
     ///     disturbing or lending evidence to another login session.
     private var liveAgentConnectionsByUser: [UInt32: Int] = [:]
 
+    /// Per-identity refcount of open connections, keyed by the same stable
+    /// `ClientID` that owns sessions (`ClientRole.clientID(forUserID:)`).
+    ///
+    /// Needed only because that identity became stable. While every accepted
+    /// connection minted its own random `ClientID`, "this connection closed"
+    /// and "this owner is gone" were the same statement, so
+    /// `clientDisconnected` could end the owner's `clientBound` sessions
+    /// outright. Now several live connections can legitimately share one
+    /// identity — two overlapping `keepy-uppy` invocations, or the menu-bar
+    /// app's reconnect logic (`Sources/DaemonConnection.swift`), which builds
+    /// the replacement connection while the old one is still being torn down
+    /// — and the first teardown to run would otherwise end sessions belonging
+    /// to a client that is still there. Only the last connection for an
+    /// identity ends its sessions.
+    ///
+    /// Deliberately separate from `liveAgentConnectionsByUser` above rather
+    /// than folded into it: that one is keyed by uid (not identity), counts
+    /// only agent-service connections, and gates a different thing entirely
+    /// (whether agent-evaluated sessions may start, and when
+    /// `agentDisappeared` fires). Merging them would silently change both.
+    private var liveConnectionsByClient: [ClientID: Int] = [:]
+
     init(observer: SafetyObserving = SystemSafetyObserver(),
          bundlePath: String = Bundle.main.bundlePath) {
         self.observer = observer
@@ -200,8 +222,29 @@ final class DaemonRuntime {
         }
     }
 
+    /// Call when a connection is accepted, before it is resumed. Must be
+    /// paired with exactly one `clientDisconnected` — `HelperListenerDelegate`
+    /// enforces that with a one-shot latch, since invalidation and
+    /// interruption can both fire for the same connection.
+    func clientConnected(_ owner: ClientID) {
+        queue.sync { liveConnectionsByClient[owner, default: 0] += 1 }
+    }
+
+    /// Call when a connection invalidates or is interrupted. Only the *last*
+    /// live connection for this identity ends its `clientBound` sessions:
+    /// with stable `ClientID`s, an overlapping second connection from the
+    /// same client would otherwise have its sessions torn down when the
+    /// first one closed. Modelled on `agentConnectionClosed` below, which
+    /// solves the structurally identical problem for the agent refcount.
     func clientDisconnected(_ owner: ClientID) {
         queue.sync {
+            let remaining = max(0, liveConnectionsByClient[owner, default: 0] - 1)
+            if remaining == 0 {
+                liveConnectionsByClient.removeValue(forKey: owner)
+            } else {
+                liveConnectionsByClient[owner] = remaining
+            }
+            guard remaining == 0 else { return }
             let ended = sessions.apply(.clientDisconnected(owner), now: Date())
             if !ended.isEmpty { helperLogger.log("Client \(owner.rawValue) left; ended \(ended.count) session(s)") }
             _ = applyLocked()

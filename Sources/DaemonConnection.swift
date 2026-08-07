@@ -48,15 +48,19 @@ final class DaemonConnection: ObservableObject {
     }
 
     private func connect() {
+        // `helperMachServiceName` is now the APP-ONLY service (its pinned
+        // requirement narrowed to the app's bundle identifier alone when the
+        // CLI moved to its own service); both the service and the pinned
+        // requirement here are deliberately unchanged.
         let new = NSXPCConnection(machServiceName: helperMachServiceName, options: .privileged)
         new.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
         if SigningRequirement.isEnforced {
             // Pins the PEER (the daemon), not this process's own identity —
             // `setCodeSigningRequirement` validates the other end of the
-            // connection. `SigningRequirement.requirement` is the *inbound*
-            // requirement the daemon applies to its clients, and it
-            // deliberately excludes the daemon's own identifier, so pinning
-            // it here rejects the daemon on the first real message.
+            // connection. The daemon's *inbound* requirement for this service
+            // (`SigningRequirement.appRequirement`) deliberately excludes the
+            // daemon's own identifier, so pinning an inbound requirement here
+            // would reject the daemon on the first real message.
             new.setCodeSigningRequirement(SigningRequirement.helperRequirement)
         }
         // Both handlers capture the connection they belong to, so a late
