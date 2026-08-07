@@ -15,12 +15,38 @@ enum SafetyOutcome: Equatable {
     case stopAll(reason: SafetyReason)
 }
 
+/// A named cutoff rather than a raw `ThermalLevel`, because thermal states are
+/// jargon in a Settings UI — "cautious/balanced/permissive" is a real choice a
+/// user can make; "serious vs. critical" is not.
+enum ThermalSensitivity: String, Codable, CaseIterable {
+    case off, cautious, balanced, permissive
+
+    /// nil means the guard is disabled.
+    func limit(lidClosed: Bool) -> ThermalLevel? {
+        switch self {
+        case .off: return nil
+        case .cautious: return lidClosed ? .fair : .serious
+        case .balanced: return lidClosed ? .serious : .critical
+        case .permissive: return .critical
+        }
+    }
+}
+
 struct SafetyConfig {
-    var thermalGuardEnabled: Bool
+    // `.balanced` is the deliberate default. `.fair` only means fans are
+    // audible, so a sustained build with the lid shut reaches it within
+    // minutes — defaulting there would stop the very sessions this product
+    // exists to sustain, reading as "the feature is broken" rather than "the
+    // guard worked". `.serious` (lid closed) means the machine is actually
+    // throttling, a real signal; users wanting maximum caution can opt into
+    // `.cautious` explicitly.
+    var thermalSensitivity: ThermalSensitivity
     /// nil disables the guard.
     var batteryCutoff: Int?
     /// nil disables the backstop.
     var maxSessionDuration: TimeInterval?
+    /// Still governs the battery cutoff: tighter while the lid is genuinely
+    /// shut and the machine cannot breathe.
     var lidClosedStricter: Bool
     var gracePeriod: TimeInterval
     var cooldown: TimeInterval
@@ -29,7 +55,7 @@ struct SafetyConfig {
     var batteryHysteresis: Int
 
     static let `default` = SafetyConfig(
-        thermalGuardEnabled: true,
+        thermalSensitivity: .balanced,
         batteryCutoff: 10,
         maxSessionDuration: 8 * 3600,
         lidClosedStricter: true,
@@ -53,14 +79,18 @@ struct SafetyInputs {
 struct SafetyEngine {
     let config: SafetyConfig
     private var pendingWarning: (reason: SafetyReason, actAt: Date)?
-    private var suppressedSince: Date?
     private var suppressionReason: SafetyReason?
+    /// When the triggering condition most recently began looking recovered.
+    /// Reset to nil whenever conditions breach again, so a still-active (or
+    /// flapping-just-below-recovery) condition can never accumulate a stale
+    /// head start on the cooldown clock.
+    private var recoveredSince: Date?
 
     init(config: SafetyConfig) { self.config = config }
 
     /// True while a trigger-driven start must not be honoured. Manual starts
     /// are always allowed; this only gates automation (spec §7).
-    var triggersSuppressed: Bool { suppressedSince != nil }
+    var triggersSuppressed: Bool { suppressionReason != nil }
 
     mutating func evaluate(_ inputs: SafetyInputs) -> SafetyOutcome {
         releaseSuppressionIfClear(inputs)
@@ -90,24 +120,17 @@ struct SafetyEngine {
 
     private mutating func stop(reason: SafetyReason, at now: Date) -> SafetyOutcome {
         pendingWarning = nil
-        // Only the first breach starts the cooldown clock. If we reset it on
-        // every repeat breach while already suppressed, a still-active
-        // condition (or one that keeps re-triggering just below full
-        // recovery) would push the clock forward forever and suppression
-        // would never release — the exact fight-the-user bug this engine
-        // exists to prevent (spec §7).
-        if suppressedSince == nil {
-            suppressedSince = now
-        }
         suppressionReason = reason
+        // A breach just happened, so by definition recovery isn't in
+        // progress right now.
+        recoveredSince = nil
         return .stopAll(reason: reason)
     }
 
     private func breach(_ inputs: SafetyInputs) -> SafetyReason? {
-        if config.thermalGuardEnabled {
-            let limit: ThermalLevel = (inputs.lidClosed && config.lidClosedStricter)
-                ? .fair : .serious
-            if inputs.thermal >= limit { return .thermal }
+        if let limit = config.thermalSensitivity.limit(lidClosed: inputs.lidClosed),
+           inputs.thermal >= limit {
+            return .thermal
         }
         if let cutoff = config.batteryCutoff, inputs.onBattery,
            let level = inputs.batteryPercentage {
@@ -121,24 +144,46 @@ struct SafetyEngine {
         return nil
     }
 
+    /// Cooldown release must be anchored to when conditions *recovered*, not
+    /// to when the episode began. Anchoring to episode start inverts the risk
+    /// profile: a long, severe episode would already have outlived the
+    /// cooldown by the time it finally cooled, so triggers would re-arm on
+    /// the very first good reading with no settling time, while a brief
+    /// episode waits the full period regardless of how mild it was.
     private mutating func releaseSuppressionIfClear(_ inputs: SafetyInputs) {
-        guard let since = suppressedSince, let reason = suppressionReason else { return }
-        guard inputs.now.timeIntervalSince(since) >= config.cooldown else { return }
+        guard let reason = suppressionReason else { return }
 
-        let recovered: Bool
-        switch reason {
-        case .thermal:
-            recovered = inputs.thermal == .nominal
-        case .lowBattery:
-            guard let cutoff = config.batteryCutoff else { recovered = true; break }
-            recovered = (inputs.batteryPercentage ?? 100) >= cutoff + config.batteryHysteresis
-        case .maxDuration:
-            recovered = (inputs.oldestSessionAge ?? 0) < (config.maxSessionDuration ?? .infinity)
+        guard recovered(reason, inputs) else {
+            recoveredSince = nil
+            return
         }
 
-        if recovered {
-            suppressedSince = nil
+        let since = recoveredSince ?? inputs.now
+        recoveredSince = since
+        if inputs.now.timeIntervalSince(since) >= config.cooldown {
             suppressionReason = nil
+            recoveredSince = nil
+        }
+    }
+
+    private func recovered(_ reason: SafetyReason, _ inputs: SafetyInputs) -> Bool {
+        switch reason {
+        case .thermal:
+            return inputs.thermal == .nominal
+        case .lowBattery:
+            guard let cutoff = config.batteryCutoff else { return true }
+            // Plugging in removes the danger outright, regardless of what
+            // the percentage happens to read.
+            if !inputs.onBattery { return true }
+            // Must strictly clear the threshold. With defaults the
+            // lid-closed breach threshold (cutoff + 5 = 15) and this
+            // recovery threshold (cutoff + hysteresis = 15) coincide at
+            // exactly 15%; `>=` would let the engine consider itself
+            // recovered while still breaching, releasing and immediately
+            // re-breaching in the same evaluation.
+            return (inputs.batteryPercentage ?? 100) > cutoff + config.batteryHysteresis
+        case .maxDuration:
+            return (inputs.oldestSessionAge ?? 0) < (config.maxSessionDuration ?? .infinity)
         }
     }
 }
