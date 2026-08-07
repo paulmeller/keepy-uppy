@@ -121,14 +121,16 @@ Note that `csreq` only proves a requirement *parses*; it does not prove it
 *matches*. Semantics must be verified with `codesign -R` against binaries
 signed with each real identifier.
 
-**Role is derived structurally, from which Mach service a client connects to**
-— never from anything the client asserts, and never by looking up the peer's
-process ID. The daemon exposes two services:
+**Role — and identity — are derived structurally, from which Mach service a
+client connects to** — never from anything the client asserts, and never by
+looking up the peer's process ID. The daemon exposes one service per client
+role, each pinning a *single* identifier:
 
 | Service | Requirement pins to | Role |
 |---|---|---|
-| `…keepy-uppy.helper` | all four identifiers | ordinary client |
+| `…keepy-uppy.helper` | the app identifier only | app |
 | `…keepy-uppy.helper.agent` | the agent identifier only | agent |
+| `…keepy-uppy.helper.cli` | the CLI identifier only | CLI |
 
 Only the agent may report condition observations. Because the OS enforces each
 listener's signing requirement atomically at connection-accept time, arriving
@@ -139,9 +141,25 @@ which is TOCTOU-prone (a PID can be recycled between accept and lookup);
 both safer and free of undeclared API. It also removes a DEBUG/Release
 asymmetry: role no longer depends on signature checking being compiled in.
 
-**The per-user agent must therefore connect to the agent service.** Connecting
-to the general service leaves it silently treated as an ordinary client, and
-its condition reports would be ignored.
+Choosing which service to *connect to* is client-controlled, so the per-service
+requirement is the whole binding: a one-identifier pin per service is what
+stops the CLI claiming the app's identity. An earlier revision exposed a single
+"general" service admitting app/agent/CLI via a parenthesised OR-group; per-role
+services are strictly tighter and retire that OR-group, and with it the
+`and`-binds-tighter-than-`or` hazard documented above (kept there as guidance,
+since it applies to any OR-group added in future).
+
+**Client identity is `"<role>-<uid>"`,** derived from the accepting listener's
+role plus the peer's authenticated `effectiveUserIdentifier`. Both are
+server-side facts, so identity is unforgeable — and, unlike a per-connection
+UUID, it is *stable across invocations*. That stability is what lets `keepy-uppy
+off` stop a session an earlier `keepy-uppy on` started; while every connection
+minted a fresh id, the own-scoped filter could never match and `off` silently
+did nothing. It also makes the per-owner session cap real, rather than
+something a client sheds by reconnecting.
+
+**Each client must therefore connect to its own service.** Connecting to the
+wrong one is rejected by that service's requirement in any signed build.
 
 Authorisation is separate from role: every client, agent included, may start
 and stop only **its own** sessions. Stopping another client's session is
