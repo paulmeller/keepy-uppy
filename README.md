@@ -31,6 +31,24 @@ silently awake.
 See `docs/superpowers/specs/2026-08-06-keepy-uppy-v2-headless-design.md` for
 the full architecture this section summarises.
 
+## Command line
+
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" setup
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" on
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" on --for 2h
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" on --until 17:00
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" on --while-app com.apple.dt.Xcode
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" off
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" off --all
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" status --json
+    "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" sessions
+
+Run `setup` once on a machine that will never run the menu-bar app — it
+registers the daemon and per-user agent and opens System Settings if
+approval is needed. `on` with no flags starts an indefinite session that
+persists after this command exits; `off` with no flags stops only the
+sessions you started.
+
 ## Prerequisites
 
 - Xcode + Xcode Command Line Tools
@@ -76,6 +94,12 @@ Run through this after any change to `PowerMonitor.swift`, `PowerService.swift`,
 - [ ] The thermal guard stops a session at the configured sensitivity (default Balanced), and the same trigger does not immediately restart it (cooldown/hysteresis, spec §7)
 - [ ] The maximum-duration backstop ends even an indefinite session
 - [ ] Thermal and battery thresholds tighten when the lid is closed and the warn-then-act grace period is skipped, since there's nobody to see the warning
+- [ ] `keepy-uppy setup` registers both background items; approving once is enough
+- [ ] `keepy-uppy on --for 30s` starts a session that ends on its own after 30 seconds
+- [ ] `keepy-uppy on --while-app <bundle id>` ends within ~5s of quitting that app
+- [ ] Killing the agent process (Activity Monitor) does not end `--for`/indefinite sessions, but does end `--while-app` ones
+- [ ] Two terminals opening 25 sessions each are individually capped at 20 and rate-limited within each connection
+- [ ] A trigger rule (once one exists via direct `UserDefaults` write, since there is no UI yet) fires once and does not refire while its session is active
 
 ## Verification status
 
