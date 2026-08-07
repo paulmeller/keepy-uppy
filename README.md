@@ -71,21 +71,33 @@ Run through this after any change to `PowerMonitor.swift`, `PowerService.swift`,
 - [ ] Approving once is enough; no later prompts
 - [ ] Deleting the app while a session is active restores sleep
 - [ ] Killing the agent ends condition-based sessions but not timed ones
-- [ ] A Release build refuses XPC connections from an unsigned binary
-- [ ] A non-agent client's condition report is rejected and logged
+- [x] A Release build refuses XPC connections from an unsigned binary
+- [x] A non-agent client's condition report is rejected and logged
 - [ ] The thermal guard stops a session at the configured sensitivity (default Balanced), and the same trigger does not immediately restart it (cooldown/hysteresis, spec §7)
 - [ ] The maximum-duration backstop ends even an indefinite session
 - [ ] Thermal and battery thresholds tighten when the lid is closed and the warn-then-act grace period is skipped, since there's nobody to see the warning
 
-## Not yet verified
+## Verification status
 
-The daemon's session and safety engines are complete and covered by the unit
-suite (57/57), but nothing here has been exercised as a running system: real
-`SMAppService` registration of the daemon and agent, the one-time System
-Settings approval, the XPC handshake, and end-to-end awake-with-lid-closed
-behaviour all need a signed build, which hasn't happened yet (see spec §10).
-Two components also aren't built yet: the per-user agent has no executable
-target, and `keepy-uppy` (the CLI) is currently a one-line stub. Until those
-land and a signed build has gone through the checklist above, treat "How it
-works" as the design being built toward rather than a verified description
-of this checkout.
+The daemon's session and safety engines are covered by the unit suite (91/91).
+On 7 August 2026, a hardened Release archive signed with the WorkWireless
+Apple Development identity was also exercised as a running system:
+
+- `SMAppService` registered the daemon, which launched as root with both Mach
+  services active.
+- A correctly signed CLI-role probe completed the version, state, session
+  start/list/stop, and sleep-restoration flow over XPC. Server-owned session
+  fields were replaced as designed.
+- An ad-hoc client was rejected by the Release signing requirement, and the
+  CLI-role probe was rejected from the agent-only condition-report method.
+- Moving the app bundle away caused the daemon to restore normal sleep and
+  exit successfully on its next self-check; restoring the bundle allowed an
+  XPC request to launch it again.
+
+Distribution signing and notarization remain unverified: this machine does
+not currently have a Developer ID Application certificate or a stored
+`notarytool` profile. Hardware checks for actual closed-lid wake behaviour and
+the thermal/battery guards also remain outstanding. The per-user agent has no
+executable target and `keepy-uppy` is still a one-line stub, so the plan-2
+headless product is not yet available despite the daemon boundary now being
+verified.
