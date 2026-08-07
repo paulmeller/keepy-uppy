@@ -19,10 +19,12 @@ enum SigningRequirement {
     /// from each other.
     static let agentIdentifier = "au.com.workwireless.keepy-uppy.agent"
 
-    /// Every binary permitted to talk to the daemon, named explicitly.
+    /// Every binary permitted to talk to the daemon, named explicitly. The
+    /// daemon's own identifier is deliberately absent: the daemon never
+    /// connects to itself, so admitting it here would only widen the
+    /// boundary with no legitimate caller to justify it.
     static let identifiers = [
         "au.com.workwireless.keepy-uppy",
-        "au.com.workwireless.keepy-uppy.helper",
         agentIdentifier,
         "au.com.workwireless.keepy-uppy.cli",
     ]

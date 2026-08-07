@@ -69,6 +69,8 @@ targets:
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
         SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
 
   keepy-uppy:
     type: tool
@@ -84,6 +86,8 @@ targets:
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
         SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
 schemes:
   Keepy Uppy:
     build:
