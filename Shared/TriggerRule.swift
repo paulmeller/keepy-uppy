@@ -9,7 +9,23 @@ enum TriggerCondition: Codable, Equatable {
 struct TriggerRule: Codable, Equatable, Identifiable {
     let id: UUID
     var condition: TriggerCondition
-    var sessionKind: SessionKind
+    /// The *relative* intent ("for one hour"), never an absolute deadline.
+    /// A rule outlives the moment it was written by days or weeks; the only
+    /// correct time to turn "for one hour" into a real `SessionKind` is the
+    /// instant the rule actually fires, which is why this is a
+    /// `DefaultSessionKind` and not a `SessionKind`. Storing an absolute
+    /// `SessionKind` here (as this field originally did) meant a rule
+    /// created on Monday and fired on Friday handed the daemon a deadline
+    /// four days in the past: `SessionEngine.apply` calls `removeExpired`
+    /// at the end of every event, so the session was deleted by the same
+    /// call that admitted it, the daemon still replied `.started`, and
+    /// because no live session carried the rule's `triggerID`,
+    /// `triggersToFire` below never de-duped it — the agent refired the
+    /// identical rule every 5s forever, each time a real XPC round-trip and
+    /// a privileged power-assertion write. Materialize with
+    /// `defaultKind.sessionKind(now:)` at fire time (agent) or display time
+    /// (Settings UI).
+    var defaultKind: DefaultSessionKind
     var enabled: Bool
 }
 

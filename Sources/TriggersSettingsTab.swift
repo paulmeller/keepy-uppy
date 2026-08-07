@@ -70,8 +70,11 @@ struct TriggersSettingsTab: View {
         case .externalDisplayConnected: condition = .externalDisplayConnected
         case .acPowerConnected: condition = .acPowerConnected
         }
+        // Store the *relative* choice, not `newSessionKind.sessionKind(now:)`
+        // — the absolute deadline belongs to the moment the rule fires, which
+        // may be weeks from now. See `TriggerRule.defaultKind`.
         let rule = TriggerRule(id: UUID(), condition: condition,
-                               sessionKind: newSessionKind.sessionKind(now: Date()), enabled: true)
+                               defaultKind: newSessionKind, enabled: true)
         rules.append(rule)
         TriggerStore.save(rules)
         newBundleID = ""
@@ -87,8 +90,13 @@ struct TriggersSettingsTab: View {
         return "\(conditionText) — keep awake \(remainingTimeText(for: previewSession(rule), now: Date()).lowercased())"
     }
 
+    /// Materializing against `Date()` is correct *here* precisely because
+    /// this is display-only: the row is answering "what would this rule do
+    /// if it fired right now", which is what the reader wants to see. The
+    /// value is never stored and never sent to the daemon.
     private func previewSession(_ rule: TriggerRule) -> Session {
-        Session(id: UUID(), kind: rule.sessionKind, owner: ClientID(rawValue: "preview"),
+        Session(id: UUID(), kind: rule.defaultKind.sessionKind(now: Date()),
+               owner: ClientID(rawValue: "preview"),
                persistence: .detached, origin: .trigger, startedAt: Date())
     }
 }
