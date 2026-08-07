@@ -86,10 +86,10 @@ final class DaemonRuntime {
     }
 
     /// Bookkeeping only: disappearance handling is driven by the peer's
-    /// signing-derived role in `HelperListenerDelegate`, not by this call,
-    /// so a crash between registering and disconnecting can't leave a stale
-    /// "who's the agent" flag here. This exists so the log shows who
-    /// registered.
+    /// structural role (which Mach service it connected to) in
+    /// `HelperListenerDelegate`, not by this call, so a crash between
+    /// registering and disconnecting can't leave a stale "who's the agent"
+    /// flag here. This exists so the log shows who registered.
     func registerAgent(_ id: ClientID) {
         queue.sync {
             helperLogger.log("Agent connection registered: \(id.rawValue)")

@@ -3,6 +3,14 @@ import Foundation
 /// Mach service name shared by helper, app, and CLI.
 let helperMachServiceName = "au.com.workwireless.keepy-uppy.helper"
 
+/// Mach service name reserved for the agent only. `Helper/main.swift` stands
+/// up a second, dedicated `NSXPCListener` on this service; every connection
+/// accepted there is the agent by construction. Role is therefore a property
+/// of *which service* a peer connected to, not something derived after the
+/// fact from an inherently racy peer pid lookup (the TOCTOU issue the old
+/// `PeerIdentity.isAgent(_:)` had).
+let agentMachServiceName = "au.com.workwireless.keepy-uppy.helper.agent"
+
 /// The session-oriented XPC surface (v2 Task 10): the protocol the agent,
 /// CLI, and UI are all written against.
 ///
@@ -43,9 +51,10 @@ let helperMachServiceName = "au.com.workwireless.keepy-uppy.helper"
     /// `stopSession`.
     func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void)
 
-    /// Agent-only (spec §4): the daemon derives the caller's role from the
-    /// peer's code-signing identity and rejects this from anything else,
-    /// logging the rejection.
+    /// Agent-only (spec §4): the daemon derives the caller's role
+    /// structurally, from which Mach service (`helperMachServiceName` vs.
+    /// `agentMachServiceName`) the connection came in on, and rejects this
+    /// from anything else, logging the rejection.
     func reportConditionEnded(_ sessionID: String, reply: @escaping (Bool, String?) -> Void)
     /// Agent-only. Registers this connection as the user-session observer, so
     /// its disappearance ends sessions whose evidence it was providing.
