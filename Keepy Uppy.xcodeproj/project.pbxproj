@@ -12,6 +12,7 @@
 		04BC14A7FBEA7B5F13A4B8A6 /* ConditionObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3790DF112AE392E103DC407 /* ConditionObservers.swift */; };
 		0764012F70E96AD66B17A6ED /* TriggerRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E55CC0BF317492E02091A315 /* TriggerRuleTests.swift */; };
 		0E878652C4010EDDB54D423A /* KeepyUppyAgent in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		0EC8F535E62CBEF5556D23A3 /* SafetySettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31AF20ED97A301059B1E511 /* SafetySettingsTab.swift */; };
 		102517230889DD8B63948126 /* SafetyEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */; };
 		107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */; };
 		1121990A3C9DA0255DF8E4FE /* EvidenceLoopRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4B9722F7D6FC46A899FC0C /* EvidenceLoopRunner.swift */; };
@@ -201,6 +202,7 @@
 		A48A369672CA8D81AF92B336 /* DaemonConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConnection.swift; sourceTree = "<group>"; };
 		A54DD10487A2C28D32E9A656 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirementTests.swift; sourceTree = "<group>"; };
+		B31AF20ED97A301059B1E511 /* SafetySettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetySettingsTab.swift; sourceTree = "<group>"; };
 		BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLICommand.swift; sourceTree = "<group>"; };
 		BB887944CA21A7FF021348E1 /* CLICommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLICommandTests.swift; sourceTree = "<group>"; };
 		C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.helper.plist"; sourceTree = "<group>"; };
@@ -363,6 +365,7 @@
 				2BBD98DDC9057502F4594A1F /* LoginItemService.swift */,
 				831A5A41A55C3873E0EB9F3A /* MenuContent.swift */,
 				FC93D8F483F729997B0AA625 /* OnboardingService.swift */,
+				B31AF20ED97A301059B1E511 /* SafetySettingsTab.swift */,
 				88D113717593F761307E5CCC /* SessionDisplay.swift */,
 				71B662B63A4E2014F0AC465B /* SettingsView.swift */,
 			);
@@ -575,6 +578,7 @@
 				DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */,
 				FC59D49EDCCE2E89FB26271E /* SafetyConfigStore.swift in Sources */,
 				9E5C1650D13823129E390713 /* SafetyEngine.swift in Sources */,
+				0EC8F535E62CBEF5556D23A3 /* SafetySettingsTab.swift in Sources */,
 				98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */,
 				2046A3653A421150E4076778 /* SessionDisplay.swift in Sources */,
 				F0F7A9114AD24E3E80964B0D /* SessionEngine.swift in Sources */,

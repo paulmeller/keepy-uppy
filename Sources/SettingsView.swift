@@ -7,7 +7,9 @@ struct SettingsView: View {
         TabView {
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            // SafetySettingsTab and TriggersSettingsTab are added in Tasks 7-8.
+            SafetySettingsTab()
+                .tabItem { Label("Safety", systemImage: "shield") }
+            // TriggersSettingsTab is added in Task 7.
         }
         .frame(width: 420, height: 320)
         .onAppear {
