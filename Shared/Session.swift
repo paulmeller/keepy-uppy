@@ -54,10 +54,15 @@ struct Session: Equatable, Codable, Identifiable {
     let persistence: SessionPersistence
     let origin: SessionOrigin
     let startedAt: Date
+    /// The `TriggerRule.id` that started this session, for trigger-originated
+    /// sessions. `nil` for manually-started sessions. Lets `triggersToFire`
+    /// (Shared/TriggerRule.swift) recognize a rule already represented by a
+    /// live session and not refire it every tick.
+    let triggerID: UUID?
 
     init(id: UUID, kind: SessionKind, owner: ClientID, ownerUID: UInt32 = 0,
          persistence: SessionPersistence, origin: SessionOrigin,
-         startedAt: Date) {
+         startedAt: Date, triggerID: UUID? = nil) {
         self.id = id
         self.kind = kind
         self.owner = owner
@@ -65,5 +70,6 @@ struct Session: Equatable, Codable, Identifiable {
         self.persistence = persistence
         self.origin = origin
         self.startedAt = startedAt
+        self.triggerID = triggerID
     }
 }

@@ -135,6 +135,20 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(outcome, .renewed(renewed))
     }
 
+    // Regression: `.renewLease` reconstructed the session by hand and, before this fix, silently
+    // dropped `triggerID`. A renewed trigger-started lease must keep its `triggerID` so
+    // `triggersToFire`'s already-active check doesn't refire the same rule after a renewal.
+    func testRenewLeasePreservesTriggerID() {
+        var engine = SessionEngine()
+        let triggerID = UUID()
+        let session = Session(id: UUID(), kind: .lease(expires: t0.addingTimeInterval(60)),
+                              owner: ClientID(rawValue: "agent"), persistence: .detached,
+                              origin: .trigger, startedAt: t0, triggerID: triggerID)
+        engine.startSession(session, now: t0, liveAgentConnections: 1)
+        _ = engine.renewLease(id: session.id, until: t0.addingTimeInterval(120), now: t0)
+        XCTAssertEqual(engine.sessions.first?.triggerID, triggerID)
+    }
+
     // MARK: - Fix 2: renewLease must not launder a non-lease kind, or accept an unbounded deadline
 
     func testRenewLeaseRejectsNonLeaseKind() {
