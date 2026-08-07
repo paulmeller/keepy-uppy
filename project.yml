@@ -9,6 +9,9 @@ targets:
     sources:
       - Sources
       - Shared
+      - path: Agent
+        excludes:
+          - main.swift
       - Resources/Assets.xcassets
       - path: Launchd/au.com.workwireless.keepy-uppy.helper.plist
         buildPhase:
