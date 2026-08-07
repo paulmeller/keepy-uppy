@@ -1755,6 +1755,31 @@ Sessions cross the XPC boundary as JSON `Data` rather than as objects: `NSSecure
 }
 ```
 
+- [ ] **Step 1b: Close the cross-client isolation gaps (mandatory)**
+
+Task 9's review identified three isolation defects that this task must fix
+rather than inherit. All three are about one client being able to affect
+another's sessions, which contradicts spec §4 ("every client is equally
+entitled to start and stop **its own** sessions").
+
+1. **`stopAllSessions` must scope to the caller by default.** Today
+   `requestKeepAwake(false)` ends every client's sessions, including a
+   `detached` CLI session started by someone else. Default behaviour stops
+   only the caller's own; affecting everyone requires an explicit flag,
+   matching the CLI's documented `off [--all | --session ID]` surface.
+2. **`stopSession(_:)` must verify ownership.** `DaemonRuntime.stopSession(id:)`
+   takes a bare UUID and ends any session regardless of owner. Before exposing
+   it over XPC, check `session.owner == callerClientID` and reject otherwise,
+   logging the rejection.
+3. **`ClientID` must be genuinely unique, not a hash.** It is currently
+   derived from `ObjectIdentifier(connection).hashValue`. Every isolation
+   guarantee rests on client identity, so it must not be a value that can
+   collide: mint a `UUID` per accepted connection instead.
+
+`currentSessions()` returning all sessions daemon-wide is intentional and
+stays — the UI must be able to show *why* the Mac is awake regardless of which
+client started it (spec §9).
+
 - [ ] **Step 2: Enforce the agent role**
 
 Role is derived from the peer's signing identity, not from anything the client asserts. In `HelperListenerDelegate`, capture the connection's `processIdentifier` and resolve its bundle identifier; pass an `isAgent` flag into `HelperService`. In DEBUG, where signature checking is off, treat the flag as `true` and log loudly that role enforcement is disabled.
