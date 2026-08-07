@@ -1,10 +1,10 @@
 import Foundation
 
 final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
-    private let state = HelperState()
+    private let runtime: DaemonRuntime
 
-    func startup() {
-        state.resetToSafeState()
+    init(runtime: DaemonRuntime) {
+        self.runtime = runtime
     }
 
     func listener(_ listener: NSXPCListener,
@@ -15,16 +15,16 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
             helperLogger.error(
                 "⚠️ DEBUG BUILD: XPC peer code-signing requirement NOT enforced. This build must never be distributed.")
         }
-        let id = ObjectIdentifier(newConnection)
+        let id = ClientID(rawValue: String(UInt(bitPattern: ObjectIdentifier(newConnection).hashValue)))
 
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
-        newConnection.exportedObject = HelperService(state: state, clientID: id)
+        newConnection.exportedObject = HelperService(runtime: runtime, clientID: id)
 
-        newConnection.invalidationHandler = { [state] in state.remove(id) }
-        newConnection.interruptionHandler = { [state] in state.remove(id) }
+        newConnection.invalidationHandler = { [runtime] in runtime.clientDisconnected(id) }
+        newConnection.interruptionHandler = { [runtime] in runtime.clientDisconnected(id) }
 
         newConnection.resume()
-        helperLogger.log("Accepted connection \(String(describing: id))")
+        helperLogger.log("Accepted connection \(id.rawValue)")
         return true
     }
 }

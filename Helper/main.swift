@@ -1,7 +1,8 @@
 import Foundation
 
-let delegate = HelperListenerDelegate()
-delegate.startup()
+let runtime = DaemonRuntime()
+let delegate = HelperListenerDelegate(runtime: runtime)
+runtime.start()
 
 let listener = NSXPCListener(machServiceName: helperMachServiceName)
 listener.delegate = delegate
