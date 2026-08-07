@@ -70,26 +70,16 @@ case .on(let kind, let persistence):
         semaphore.signal()
     }
 
-case .off(.all):
-    proxy.stopAllSessions(all: true) { stopped, error in
+case .off(.all), .off(.own):
+    // The two differ only in scope and in what to say when nothing matched;
+    // everything else about reporting a stop was previously written twice.
+    let all = command == .off(.all)
+    proxy.stopAllSessions(all: all) { stopped, error in
         if let error {
             FileHandle.standardError.write("keepy-uppy: \(error)\n".data(using: .utf8)!)
             exitCode = 1
         } else if stopped == 0 {
-            print("No sessions were running.")
-        } else {
-            print("Stopped \(stopped) session(s).")
-        }
-        semaphore.signal()
-    }
-
-case .off(.own):
-    proxy.stopAllSessions(all: false) { stopped, error in
-        if let error {
-            FileHandle.standardError.write("keepy-uppy: \(error)\n".data(using: .utf8)!)
-            exitCode = 1
-        } else if stopped == 0 {
-            print("No sessions of yours were running.")
+            print(all ? "No sessions were running." : "No sessions of yours were running.")
         } else {
             print("Stopped \(stopped) session(s).")
         }
@@ -159,9 +149,9 @@ case .setup:
     }
 
     let daemonNeedsApproval = registerAndReport(
-        "Daemon", SMAppService.daemon(plistName: "au.com.workwireless.keepy-uppy.helper.plist"))
+        "Daemon", SMAppService.daemon(plistName: helperPlistName))
     let agentNeedsApproval = registerAndReport(
-        "Agent", SMAppService.agent(plistName: "au.com.workwireless.keepy-uppy.agent.plist"))
+        "Agent", SMAppService.agent(plistName: agentPlistName))
 
     if daemonNeedsApproval || agentNeedsApproval {
         SMAppService.openSystemSettingsLoginItems()
@@ -193,8 +183,8 @@ case .reset:
         }
     }
 
-    unregisterAndReport("Daemon", SMAppService.daemon(plistName: "au.com.workwireless.keepy-uppy.helper.plist"))
-    unregisterAndReport("Agent", SMAppService.agent(plistName: "au.com.workwireless.keepy-uppy.agent.plist"))
+    unregisterAndReport("Daemon", SMAppService.daemon(plistName: helperPlistName))
+    unregisterAndReport("Agent", SMAppService.agent(plistName: agentPlistName))
     print("Run 'keepy-uppy setup' to register again.")
 
     semaphore.signal()

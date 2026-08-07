@@ -35,6 +35,14 @@ let agentMachServiceName = "au.com.workwireless.keepy-uppy.helper.agent"
 /// (`SigningRequirement.cliRequirement`).
 let cliMachServiceName = "au.com.workwireless.keepy-uppy.helper.cli"
 
+/// The launchd plist filenames embedded in the app bundle and named to
+/// `SMAppService`. Centralised for the same reason the Mach service names
+/// above are: they were bare literals in six places across the CLI and the
+/// onboarding service, where a typo registers nothing and still reports
+/// success.
+let helperPlistName = "au.com.workwireless.keepy-uppy.helper.plist"
+let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
+
 /// The session-oriented XPC surface (v2 Task 10): the protocol the agent,
 /// CLI, and UI are all written against.
 ///

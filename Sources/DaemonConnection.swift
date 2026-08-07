@@ -103,22 +103,12 @@ final class DaemonConnection: ObservableObject {
         }
     }
 
-    /// Sends one XPC message and awaits its reply, resolving to `nil` if the
-    /// connection breaks instead of hanging forever.
-    ///
-    /// This is the core of Item 2. The old shape — a `proxy()` helper whose
-    /// error handler only logged and flipped `isConnected` — had no way to
-    /// reach the continuation that was actually pending, so a connection
-    /// that broke mid-call left every `withCheckedContinuation` below
-    /// unresumed. The 3s poll timer then started a fresh, equally stuck
-    /// `refresh()` task every tick, leaking one task per tick for the
-    /// lifetime of the app. Building the proxy *per call* is what fixes it:
-    /// the error handler closes over that call's own latch, so the failure
-    /// path resumes the very continuation the success path would have.
-    ///
-    /// A non-nil result is also the only thing that sets `isConnected` true,
-    /// since a real reply is the only positive evidence the connection is
-    /// live — `remoteObjectProxyWithErrorHandler` returns a proxy happily
+    /// Thin wrapper over `xpcCall` (Shared/XPCCall.swift), which owns the
+    /// resume-exactly-once and timeout mechanics both XPC clients need. What
+    /// stays here is the part that is genuinely this client's: turning a
+    /// failed call into a disconnect, and treating a real reply as the only
+    /// positive evidence the connection is live —
+    /// `remoteObjectProxyWithErrorHandler` hands back a proxy quite happily
     /// for a connection that is about to fail.
     private func call<T>(
         _ send: @escaping (HelperProtocol, @escaping (T) -> Void) -> Void
@@ -128,41 +118,8 @@ final class DaemonConnection: ObservableObject {
             return nil
         }
 
-        let result: T? = await withCheckedContinuation { continuation in
-            let latch = ContinuationLatch<T?>(continuation)
-
-            // Resuming on reply-or-error is not sufficient on its own. A
-            // daemon that is *registered but never successfully spawns*
-            // (launchd owns the Mach port and keeps retrying the exec)
-            // accepts the connection and queues the message, then neither
-            // replies nor reports an error — so the reply block and the
-            // error handler below both stay silent and the continuation
-            // waits forever. Found by running the real signed build against
-            // exactly that state, which the unit tests could not produce
-            // because they only ever saw "service not registered at all",
-            // which does fail fast. The latch makes this a safe race:
-            // whichever path arrives first wins and the loser is a no-op.
-            let timeout = Task {
-                try? await Task.sleep(for: Self.callTimeout)
-                guard !Task.isCancelled else { return }
-                appLogger.error("XPC call timed out; treating the daemon as unreachable")
-                latch.resume(nil)
-            }
-
-            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                appLogger.error("XPC error: \(error.localizedDescription)")
-                timeout.cancel()
-                latch.resume(nil)
-            } as? HelperProtocol
-            guard let proxy else {
-                timeout.cancel()
-                return latch.resume(nil)
-            }
-            send(proxy) { value in
-                timeout.cancel()
-                latch.resume(value)
-            }
-        }
+        let result: T? = await xpcCall(on: connection, timeout: Self.callTimeout,
+                                       logger: appLogger, send)
 
         if result == nil {
             handleDisconnect(connection)
@@ -216,8 +173,8 @@ final class DaemonConnection: ObservableObject {
     }
 
     func stopAllSessions(all: Bool) async {
-        let _: Bool? = await call { proxy, reply in
-            proxy.stopAllSessions(all: all) { stopped, _ in reply(stopped >= 0) }
+        let _: Int? = await call { proxy, reply in
+            proxy.stopAllSessions(all: all) { stopped, _ in reply(stopped) }
         }
         await refresh()
     }
