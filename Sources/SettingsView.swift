@@ -22,7 +22,7 @@ struct SettingsView: View {
 struct GeneralSettingsTab: View {
     @StateObject private var onboarding = OnboardingService()
     @State private var launchAtLoginEnabled = LoginItemService.status() == .enabled
-    @AppStorage("defaultSessionKind", store: UserDefaults(suiteName: "au.com.workwireless.keepy-uppy"))
+    @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
 
     var body: some View {

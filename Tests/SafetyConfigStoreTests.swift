@@ -18,7 +18,7 @@ final class SafetyConfigStoreTests: XCTestCase {
         // exact degenerate case resolves to the identical underlying
         // preferences file — so clearing `.standard`'s domain here really
         // does reset it.
-        UserDefaults.standard.removePersistentDomain(forName: "au.com.workwireless.keepy-uppy")
+        UserDefaults.standard.removePersistentDomain(forName: PreferencesSuite.name)
     }
 
     func testLoadWithNothingSavedReturnsDefault() {

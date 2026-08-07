@@ -14,7 +14,7 @@ final class TriggerRuleTests: XCTestCase {
         // file — so clearing `.standard`'s domain here really does reset
         // it (mirrors `SafetyConfigStoreTests.setUp()`, which needed the
         // same fix to avoid the prior run's saved rules leaking through).
-        UserDefaults.standard.removePersistentDomain(forName: "au.com.workwireless.keepy-uppy")
+        UserDefaults.standard.removePersistentDomain(forName: PreferencesSuite.name)
     }
 
     struct FakeAppRunning: AppRunningObserving {
