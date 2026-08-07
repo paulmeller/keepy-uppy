@@ -1,23 +1,41 @@
 import SwiftUI
 
-struct SettingsView: View {
-    @ObservedObject var daemon: DaemonConnection
+/// Sizing follows the macOS settings convention: one width for every tab so
+/// switching tabs doesn't resize the window sideways, and a minimum height
+/// that fits the tallest pane. Panes scroll rather than clip if a future one
+/// outgrows it.
+private enum SettingsMetrics {
+    static let width: CGFloat = 560
+    static let minHeight: CGFloat = 440
+}
 
+/// Deliberately observes nothing. It held an `@ObservedObject
+/// DaemonConnection` it never read, so each 3s poll republished, re-evaluated
+/// this body, and re-ran every tab's `@State` default expression — an
+/// `SMAppService` status query and two UserDefaults reads with JSON decodes —
+/// twenty times a minute, all discarded. Tabs own their own state.
+struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
             SafetySettingsTab()
-                .tabItem { Label("Safety", systemImage: "shield") }
+                .tabItem { Label("Safety", systemImage: "exclamationmark.shield") }
             TriggersSettingsTab()
                 .tabItem { Label("Triggers", systemImage: "bolt") }
         }
-        .frame(width: 420, height: 320)
+        .frame(minWidth: SettingsMetrics.width, maxWidth: SettingsMetrics.width,
+               minHeight: SettingsMetrics.minHeight)
         .onAppear {
+            // An LSUIElement app owns no menu bar and is never "frontmost" by
+            // default, so its Settings window opens behind whatever the user
+            // was doing unless it asks for activation explicitly (spec §9).
             NSApp.activate(ignoringOtherApps: true)
         }
     }
 }
+
+// MARK: - General
 
 struct GeneralSettingsTab: View {
     @StateObject private var onboarding = OnboardingService()
@@ -27,35 +45,125 @@ struct GeneralSettingsTab: View {
 
     var body: some View {
         Form {
-            Toggle("Launch at Login", isOn: $launchAtLoginEnabled)
-                .onChange(of: launchAtLoginEnabled) { enabled in
-                    try? enabled ? LoginItemService.register() : LoginItemService.unregister()
-                }
-
-            Picker("Default Session", selection: $defaultKindRaw) {
-                ForEach(DefaultSessionKind.allCases) { kind in
-                    Text(kind.label).tag(kind.rawValue)
-                }
+            Section {
+                Toggle("Launch at login", isOn: $launchAtLoginEnabled)
+                    .onChange(of: launchAtLoginEnabled) { enabled in
+                        try? enabled ? LoginItemService.register() : LoginItemService.unregister()
+                    }
+            } footer: {
+                Text("Opens Keepy Uppy in the menu bar when you log in. The background services below run regardless.")
+                    .settingsFootnote()
             }
 
-            Divider()
-
-            LabeledContent("Background Service") {
-                Text(statusText(onboarding.daemonStatus, onboarding.agentStatus))
-            }
-            if onboarding.daemonStatus != .enabled || onboarding.agentStatus != .enabled {
-                Button("Enable Keepy Uppy") {
-                    onboarding.enable()
+            Section {
+                Picker("Default session", selection: $defaultKindRaw) {
+                    ForEach(DefaultSessionKind.allCases) { kind in
+                        Text(kind.label).tag(kind.rawValue)
+                    }
                 }
+            } footer: {
+                Text("Listed first in the menu's Start menu, so the session you use most is one click away.")
+                    .settingsFootnote()
+            }
+
+            Section {
+                LabeledContent("Status") {
+                    ServiceStatusBadge(state: onboarding.state)
+                }
+
+                // Always present rather than appearing only when something is
+                // wrong: a control that materialises mid-layout shifts
+                // everything below it, and a permanently-visible disabled
+                // button also tells the reader this pane is where you'd fix it.
+                HStack {
+                    Spacer()
+                    Button(onboarding.state == .running ? "Running" : "Enable Keepy Uppy…") {
+                        onboarding.enable()
+                    }
+                    .disabled(onboarding.state == .running)
+                }
+            } header: {
+                Text("Background Services")
+            } footer: {
+                Text(serviceFootnote)
+                    .settingsFootnote()
             }
         }
-        .padding()
+        .formStyle(.grouped)
         .onAppear { onboarding.refresh() }
     }
 
-    private func statusText(_ daemon: ServiceStatus, _ agent: ServiceStatus) -> String {
-        if daemon == .enabled && agent == .enabled { return "Running" }
-        if daemon == .requiresApproval || agent == .requiresApproval { return "Needs approval in System Settings" }
-        return "Not enabled"
+    private var serviceFootnote: String {
+        switch onboarding.state {
+        case .running:
+            // Both are always-on by design: the agent's plist sets RunAtLoad
+            // and KeepAlive, and the daemon has no idle exit. Claiming they
+            // "stop when no session is running" (as this footer briefly did)
+            // is simply false, and misdescribes two processes a user may well
+            // be deciding whether to trust.
+            return "These stay running in the background so a trigger can start a session while you're away. Sleep is only held off while a session is actually active."
+        case .needsApproval:
+            return "macOS needs you to approve these in System Settings → General → Login Items & Extensions before they can run."
+        case .notEnabled:
+            return "Keepy Uppy can't keep this Mac awake until these are enabled."
+        }
+    }
+}
+
+/// A status line reads faster with a shape and a colour than with a bare
+/// word, and colour alone would be unreadable for anyone who can't
+/// distinguish it — so each state pairs a distinct SF Symbol with its tint.
+private struct ServiceStatusBadge: View {
+    let state: OnboardingService.State
+
+    var body: some View {
+        Label {
+            Text(state.title)
+        } icon: {
+            Image(systemName: state.symbol)
+                .foregroundStyle(state.tint)
+        }
+        .labelStyle(.titleAndIcon)
+    }
+}
+
+private extension OnboardingService.State {
+    var title: String {
+        switch self {
+        case .running: return "Running"
+        case .needsApproval: return "Waiting for approval"
+        case .notEnabled: return "Not enabled"
+        }
+    }
+
+    /// Shape as well as colour: colour alone would carry the whole meaning
+    /// for a reader who can't distinguish green from orange.
+    var symbol: String {
+        switch self {
+        case .running: return "checkmark.circle.fill"
+        case .needsApproval: return "exclamationmark.triangle.fill"
+        case .notEnabled: return "xmark.circle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .running: return .green
+        case .needsApproval: return .orange
+        case .notEnabled: return .secondary
+        }
+    }
+}
+
+// MARK: - Shared styling
+
+extension Text {
+    /// Section footers carry most of the explanation in this window, so they
+    /// get one consistent treatment instead of each pane inventing its own.
+    func settingsFootnote() -> some View {
+        self
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
