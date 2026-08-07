@@ -41,9 +41,60 @@ final class DaemonRuntime {
         }
     }
 
-    func stopSession(id: UUID) { queue.sync { _ = sessions.apply(.stop(id: id), now: Date()); _ = applyLocked() } }
+    /// Ends a single session, but only if `requestedBy` owns it (Task 10
+    /// isolation fix: this used to take a bare UUID and end any session
+    /// regardless of owner). The authorization check and the mutation run
+    /// inside the same `queue.sync`, so there is no window between "checked
+    /// ownership" and "removed the session" for a concurrent call to widen.
+    @discardableResult
+    func stopSession(id: UUID, requestedBy: ClientID) -> SessionIsolation.Authorization {
+        queue.sync {
+            let authorization = SessionIsolation.authorize(sessionID: id, requestedBy: requestedBy, among: sessions.sessions)
+            if authorization == .authorized {
+                _ = sessions.apply(.stop(id: id), now: Date())
+                _ = applyLocked()
+            }
+            return authorization
+        }
+    }
 
-    func stopAll() { queue.sync { _ = sessions.apply(.stopAll, now: Date()); _ = applyLocked() } }
+    /// Ends sessions on behalf of `requestedBy`: scoped to their own
+    /// sessions unless `all` is set, in which case every client's sessions
+    /// end (Task 10 isolation fix: this used to always end everyone's
+    /// sessions, including a `detached` session another client started).
+    func stopAll(all: Bool, requestedBy: ClientID) {
+        queue.sync {
+            let ids = SessionIsolation.sessionsToStop(all: all, requestedBy: requestedBy, among: sessions.sessions)
+            for id in ids { _ = sessions.apply(.stop(id: id), now: Date()) }
+            _ = applyLocked()
+        }
+    }
+
+    /// Renews a lease session's deadline. Ownership-checked exactly like
+    /// `stopSession`, for the same reason: a lease belongs to the client
+    /// that started it.
+    @discardableResult
+    func renewLease(id: UUID, until: Date, requestedBy: ClientID) -> SessionIsolation.Authorization {
+        queue.sync {
+            let authorization = SessionIsolation.authorize(sessionID: id, requestedBy: requestedBy, among: sessions.sessions)
+            if authorization == .authorized {
+                _ = sessions.apply(.renewLease(id: id, until: until), now: Date())
+                _ = applyLocked()
+            }
+            return authorization
+        }
+    }
+
+    /// Bookkeeping only: disappearance handling is driven by the peer's
+    /// signing-derived role in `HelperListenerDelegate`, not by this call,
+    /// so a crash between registering and disconnecting can't leave a stale
+    /// "who's the agent" flag here. This exists so the log shows who
+    /// registered.
+    func registerAgent(_ id: ClientID) {
+        queue.sync {
+            helperLogger.log("Agent connection registered: \(id.rawValue)")
+        }
+    }
 
     func clientDisconnected(_ owner: ClientID) {
         queue.sync {

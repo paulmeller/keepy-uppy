@@ -24,6 +24,7 @@
 		39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		50DAB243DD67F7F3C568A2B0 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
+		5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01853618C70A206B6F132D /* SessionIsolationTests.swift */; };
 		5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		6296B8F1A2CB3332CF81AA53 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
 		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
@@ -35,6 +36,7 @@
 		9B26095FAF7C5F4D344163A4 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
 		9E5C1650D13823129E390713 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		A351D4C2C5FB11F6CDCC076F /* PowerControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51C70013B48AA645E69A849 /* PowerControlTests.swift */; };
+		A3E094460E0D0BDB4D19296B /* PeerIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C85DF48AAAC7F0A3CAD02E /* PeerIdentity.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
 		A94B6B3317C441B81B422C13 /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
 		AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
@@ -115,6 +117,7 @@
 		3C4BC286805AEA04137EB99C /* SessionTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTableTests.swift; sourceTree = "<group>"; };
 		3CB173EBACDD623663B735B7 /* PowerMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMonitor.swift; sourceTree = "<group>"; };
 		452D538FFAD2C1D62AC85201 /* DaemonRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonRuntime.swift; sourceTree = "<group>"; };
+		54C85DF48AAAC7F0A3CAD02E /* PeerIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerIdentity.swift; sourceTree = "<group>"; };
 		564C97E2907D353762EC75D8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngineTests.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
@@ -133,6 +136,7 @@
 		D51C70013B48AA645E69A849 /* PowerControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControlTests.swift; sourceTree = "<group>"; };
 		DEA751693CBB332AD0528569 /* PowerSPI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PowerSPI.h; sourceTree = "<group>"; };
 		E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperListenerDelegate.swift; sourceTree = "<group>"; };
+		EE01853618C70A206B6F132D /* SessionIsolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionIsolationTests.swift; sourceTree = "<group>"; };
 		EE06BE4B36F9317997926E86 /* SafetyObservers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyObservers.swift; sourceTree = "<group>"; };
 		F88FDDC055F1833EEBFF2042 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		FBCAD8B2DA4BC93B40EBD9F3 /* SessionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEngineTests.swift; sourceTree = "<group>"; };
@@ -173,6 +177,7 @@
 				E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */,
 				7050454E03C8EC42BB1FA587 /* HelperService.swift */,
 				A54DD10487A2C28D32E9A656 /* main.swift */,
+				54C85DF48AAAC7F0A3CAD02E /* PeerIdentity.swift */,
 				EE06BE4B36F9317997926E86 /* SafetyObservers.swift */,
 			);
 			path = Helper;
@@ -201,6 +206,7 @@
 				029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */,
 				5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */,
 				FBCAD8B2DA4BC93B40EBD9F3 /* SessionEngineTests.swift */,
+				EE01853618C70A206B6F132D /* SessionIsolationTests.swift */,
 				3C4BC286805AEA04137EB99C /* SessionTableTests.swift */,
 			);
 			path = Tests;
@@ -452,6 +458,7 @@
 				1BCE8A4D2A20FF7A0BD0BA90 /* DaemonRuntime.swift in Sources */,
 				107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */,
 				F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */,
+				A3E094460E0D0BDB4D19296B /* PeerIdentity.swift in Sources */,
 				F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */,
 				50DAB243DD67F7F3C568A2B0 /* SafetyEngine.swift in Sources */,
 				D333E95EDBE986A660D87822 /* SafetyObservers.swift in Sources */,
@@ -472,6 +479,7 @@
 				F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */,
 				102517230889DD8B63948126 /* SafetyEngineTests.swift in Sources */,
 				2D4077699E1B2B03321DF720 /* SessionEngineTests.swift in Sources */,
+				5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */,
 				3842107D5EEDA94A4284C102 /* SessionTableTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
