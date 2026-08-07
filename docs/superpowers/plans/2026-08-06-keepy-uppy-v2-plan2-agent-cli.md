@@ -53,6 +53,7 @@
     dependencies:
       - sdk: AppKit.framework
       - sdk: CoreGraphics.framework
+      - sdk: IOKit.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.agent
@@ -61,6 +62,7 @@
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         # See project.yml's KeepyUppyHelper/keepy-uppy for why this is
@@ -1213,11 +1215,10 @@ func fail(_ message: String) -> Never {
 
 let ownerID = ClientID(rawValue: "cli-\(ProcessInfo.processInfo.processIdentifier)")
 
-guard case .success(let command) = parseCLIArguments(Array(CommandLine.arguments.dropFirst())) else {
-    if case .failure(let message) = parseCLIArguments(Array(CommandLine.arguments.dropFirst())) {
-        fail(message)
-    }
-    fail("usage: keepy-uppy on|off|status|sessions")
+let command: CLICommand
+switch parseCLIArguments(Array(CommandLine.arguments.dropFirst())) {
+case .success(let parsed): command = parsed
+case .failure(let message): fail(message)
 }
 
 guard let proxy = connect() else { fail("could not connect to the Keepy Uppy daemon") }
