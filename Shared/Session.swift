@@ -23,6 +23,20 @@ enum SessionKind: Equatable, Codable {
         case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy: return false
         }
     }
+
+    /// The kind's absolute deadline, for kinds that have one. `nil` for
+    /// kinds with no fixed clock-time end (an indefinite session, or a
+    /// condition the agent must observe), which `SessionTable`'s expiry
+    /// tracking therefore ignores.
+    var deadline: Date? {
+        switch self {
+        case .duration(let until), .untilTime(let until), .lease(let until):
+            return until
+        case .indefinite, .whileAppRunning, .whileExternalDisplay,
+             .whileOnACPower, .whileCPUBusy:
+            return nil
+        }
+    }
 }
 
 enum SessionPersistence: String, Codable { case clientBound, detached }

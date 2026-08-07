@@ -28,8 +28,19 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         if SigningRequirement.isEnforced {
             newConnection.setCodeSigningRequirement(signingRequirement)
         } else {
+            // A DEBUG daemon that logged this and accepted anyway was
+            // itself an unauthenticated root daemon: any unprivileged local
+            // process could drive root power state for as long as it
+            // happened to be registered (security review batch B, Fix 5).
+            // Refuse unless the operator explicitly opted in via the
+            // daemon's own environment — never something a client can set.
+            guard InsecureDebugGate.isExplicitlyOptedIn() else {
+                helperLogger.fault(
+                    "Refusing connection: code-signing enforcement is compiled out (DEBUG) and \(InsecureDebugGate.environmentKey)=1 is not set in the daemon's environment. Set it explicitly to run an insecure DEBUG daemon locally; this must never be set by accident or in any distributed build.")
+                return false
+            }
             helperLogger.error(
-                "⚠️ DEBUG BUILD: XPC peer code-signing requirement NOT enforced. This build must never be distributed.")
+                "⚠️ DEBUG BUILD: XPC peer code-signing requirement NOT enforced (\(InsecureDebugGate.environmentKey)=1 set). This build must never be distributed.")
         }
         // A genuinely unique identity per accepted connection: every
         // isolation guarantee (Task 10) rests on `ClientID`, so it must not
@@ -48,17 +59,23 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
 
         newConnection.invalidationHandler = { [runtime] in
             runtime.clientDisconnected(id)
-            // No session outlives its evidence (spec §5): if the connection
-            // that just disappeared was the agent, agent-evaluated sessions
-            // can no longer be verified and must end too.
-            if isAgent { runtime.agentDisappeared() }
+            // No session outlives its evidence (spec §5): once the *last*
+            // live agent connection disappears, agent-evaluated sessions
+            // can no longer be verified and must end too (Fix 4: a single
+            // other user's agent connection closing must not end this
+            // one's sessions on a multi-user Mac).
+            if isAgent { runtime.agentConnectionClosed() }
         }
         newConnection.interruptionHandler = { [runtime] in
             runtime.clientDisconnected(id)
-            if isAgent { runtime.agentDisappeared() }
+            if isAgent { runtime.agentConnectionClosed() }
         }
 
         newConnection.resume()
+        // Paired with the `agentConnectionClosed()` calls above (Fixes 3 &
+        // 4): every accepted agent connection increments the same refcount
+        // exactly once.
+        if isAgent { runtime.agentConnectionOpened() }
         helperLogger.log("Accepted connection \(id.rawValue) (agent: \(isAgent))")
         return true
     }

@@ -28,6 +28,7 @@
 		5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01853618C70A206B6F132D /* SessionIsolationTests.swift */; };
 		5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		6296B8F1A2CB3332CF81AA53 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
+		6321EC183BF4638535315441 /* SigningRequirementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */; };
 		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
@@ -84,20 +85,20 @@
 		6FA1F630841276593EBC478A /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Library/LaunchDaemons;
+			dstPath = Contents/Library/LaunchAgents;
 			dstSubfolderSpec = 1;
 			files = (
-				130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */,
+				5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CCA57C44CCB89A3B1B1FD6CA /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = Contents/Library/LaunchAgents;
+			dstPath = Contents/Library/LaunchDaemons;
 			dstSubfolderSpec = 1;
 			files = (
-				5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */,
+				130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -139,6 +140,7 @@
 		94E34F9ED9B92EB978F72902 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		9D902E0F1599E782E483782C /* PowerControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControl.swift; sourceTree = "<group>"; };
 		A54DD10487A2C28D32E9A656 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirementTests.swift; sourceTree = "<group>"; };
 		C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.helper.plist"; sourceTree = "<group>"; };
 		C24FA183A399A32DA5906A43 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Keepy Uppy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -217,6 +219,7 @@
 				FBCAD8B2DA4BC93B40EBD9F3 /* SessionEngineTests.swift */,
 				EE01853618C70A206B6F132D /* SessionIsolationTests.swift */,
 				3C4BC286805AEA04137EB99C /* SessionTableTests.swift */,
+				AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -491,6 +494,7 @@
 				2D4077699E1B2B03321DF720 /* SessionEngineTests.swift in Sources */,
 				5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */,
 				3842107D5EEDA94A4284C102 /* SessionTableTests.swift in Sources */,
+				6321EC183BF4638535315441 /* SigningRequirementTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -521,6 +525,7 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -528,6 +533,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.cli";
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
@@ -541,6 +547,7 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -548,6 +555,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.helper";
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
@@ -639,6 +647,7 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -646,6 +655,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.helper";
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
@@ -659,6 +669,7 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -666,6 +677,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.cli";
 				SDKROOT = macosx;
 				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;

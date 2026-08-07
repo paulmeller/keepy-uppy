@@ -73,3 +73,23 @@ enum SigningRequirement {
         #endif
     }
 }
+
+/// Gates whether an *unenforced* (DEBUG) daemon accepts XPC connections at
+/// all (security review batch B, Fix 5). Logging that enforcement is
+/// disabled and then accepting the connection anyway means any
+/// unprivileged local process can drive a root daemon's power state for as
+/// long as a Debug build happens to be registered — the exact failure mode
+/// `SigningRequirement.isEnforced`'s doc comment says must never happen
+/// silently. Pulled out as a pure, dependency-injectable predicate so the
+/// "must never be on by accident" property is unit tested directly,
+/// without standing up a real XPC connection.
+enum InsecureDebugGate {
+    static let environmentKey = "KEEPY_UPPY_INSECURE_XPC"
+
+    /// True only when the daemon's own environment has this set to exactly
+    /// "1" — not merely present, not "true"/"yes"/anything else — so a
+    /// stray or truthy-but-wrong value can never accidentally opt in.
+    static func isExplicitlyOptedIn(environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        environment[environmentKey] == "1"
+    }
+}
