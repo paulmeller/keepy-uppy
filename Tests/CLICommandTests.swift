@@ -79,6 +79,12 @@ final class CLICommandParsingTests: XCTestCase {
         }
     }
 
+    func testSetup() {
+        guard case .success(.setup) = parseCLIArguments(["setup"]) else {
+            return XCTFail("expected .setup")
+        }
+    }
+
     func testUnknownCommandFails() {
         guard case .failure = parseCLIArguments(["frobnicate"]) else {
             return XCTFail("expected failure")

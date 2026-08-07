@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 func connect() -> HelperProtocol? {
     let connection = NSXPCConnection(machServiceName: helperMachServiceName, options: .privileged)
@@ -90,6 +91,45 @@ case .sessions:
         }
         semaphore.signal()
     }
+
+case .setup:
+    // Unlike the branches above, this doesn't talk to the daemon over XPC
+    // at all — SMAppService registration is a separate, synchronous call.
+    // There's no async completion handler to signal the semaphore from, so
+    // this branch does the work inline and signals immediately itself,
+    // falling through to the same wait/exit epilogue as every other branch
+    // rather than exiting early or leaving the semaphore unsignaled (which
+    // would hang the process for the full 10s timeout).
+    func registerAndReport(_ label: String, _ service: SMAppService) -> Bool {
+        do {
+            try service.register()
+        } catch {
+            FileHandle.standardError.write("keepy-uppy: \(label) registration failed: \(error.localizedDescription)\n".data(using: .utf8)!)
+            exitCode = 1
+            return false
+        }
+        switch service.status {
+        case .enabled:
+            print("\(label): registered")
+        case .requiresApproval:
+            print("\(label): requires approval — run 'keepy-uppy setup' again after approving in System Settings")
+            return true
+        default:
+            print("\(label): \(service.status)")
+        }
+        return false
+    }
+
+    let daemonNeedsApproval = registerAndReport(
+        "Daemon", SMAppService.daemon(plistName: "au.com.workwireless.keepy-uppy.helper.plist"))
+    let agentNeedsApproval = registerAndReport(
+        "Agent", SMAppService.agent(plistName: "au.com.workwireless.keepy-uppy.agent.plist"))
+
+    if daemonNeedsApproval || agentNeedsApproval {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
+    semaphore.signal()
 }
 
 let waitResult = semaphore.wait(timeout: .now() + 10)

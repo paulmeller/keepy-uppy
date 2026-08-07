@@ -20,13 +20,14 @@ enum CLICommand: Equatable {
     case off(StopTarget)
     case status(json: Bool)
     case sessions
+    case setup
 }
 
 /// Pure: no I/O, no XPC, no process exit — fully testable. `now` is
 /// injected so duration parsing can be tested without depending on the
 /// wall clock.
 func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLICommand, CLIParseError> {
-    guard let command = args.first else { return .failure(CLIParseError(message: "usage: keepy-uppy on|off|status|sessions")) }
+    guard let command = args.first else { return .failure(CLIParseError(message: "usage: keepy-uppy on|off|status|sessions|setup")) }
     let rest = Array(args.dropFirst())
 
     switch command {
@@ -38,8 +39,10 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
         return .success(.status(json: rest.contains("--json")))
     case "sessions":
         return .success(.sessions)
+    case "setup":
+        return .success(.setup)
     default:
-        return .failure(CLIParseError(message: "unknown command '\(command)'; usage: keepy-uppy on|off|status|sessions"))
+        return .failure(CLIParseError(message: "unknown command '\(command)'; usage: keepy-uppy on|off|status|sessions|setup"))
     }
 }
 
