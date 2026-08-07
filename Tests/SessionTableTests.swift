@@ -59,6 +59,85 @@ final class SessionTableTests: XCTestCase {
         XCTAssertTrue(table.desiredKeepAwake)
         XCTAssertEqual(table.sessions.count, 1)
     }
+
+    // MARK: - Fix 1: count/lookup accessors that don't materialise the whole table
+
+    func testCountReflectsInsertsAndRemoves() {
+        var table = SessionTable()
+        XCTAssertEqual(table.count, 0)
+        let a = session("01", owner: alice)
+        table.insert(a)
+        XCTAssertEqual(table.count, 1)
+        table.remove(id: a.id)
+        XCTAssertEqual(table.count, 0)
+    }
+
+    func testCountOwnedByCountsOnlyThatOwner() {
+        var table = SessionTable()
+        table.insert(session("01", owner: alice))
+        table.insert(session("02", owner: alice))
+        table.insert(session("03", owner: bob))
+        XCTAssertEqual(table.count(ownedBy: alice), 2)
+        XCTAssertEqual(table.count(ownedBy: bob), 1)
+    }
+
+    func testSessionLookupByID() {
+        var table = SessionTable()
+        let a = session("01", owner: alice)
+        table.insert(a)
+        XCTAssertEqual(table.session(id: a.id), a)
+        XCTAssertNil(table.session(id: UUID()))
+    }
+
+    // MARK: - Fix 1: removeExpired
+
+    private func timedSession(_ id: String, deadline: Date, owner: ClientID) -> Session {
+        Session(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(id)")!,
+                kind: .duration(until: deadline), owner: owner,
+                persistence: .clientBound, origin: .manual, startedAt: t0)
+    }
+
+    func testRemoveExpiredIsANoOpWhenNothingIsDue() {
+        var table = SessionTable()
+        table.insert(timedSession("01", deadline: t0.addingTimeInterval(3600), owner: alice))
+        XCTAssertTrue(table.removeExpired(at: t0).isEmpty)
+        XCTAssertEqual(table.count, 1)
+    }
+
+    func testRemoveExpiredRemovesOnlyDueSessions() {
+        var table = SessionTable()
+        let due = timedSession("01", deadline: t0.addingTimeInterval(60), owner: alice)
+        let notDue = timedSession("02", deadline: t0.addingTimeInterval(3600), owner: bob)
+        table.insert(due)
+        table.insert(notDue)
+
+        let expired = table.removeExpired(at: t0.addingTimeInterval(61))
+
+        XCTAssertEqual(expired.map(\.id), [due.id])
+        XCTAssertEqual(table.sessions.map(\.id), [notDue.id])
+    }
+
+    func testRemoveExpiredSelfHealsSoALaterDueSessionIsStillCaught() {
+        var table = SessionTable()
+        let soon = timedSession("01", deadline: t0.addingTimeInterval(60), owner: alice)
+        let later = timedSession("02", deadline: t0.addingTimeInterval(120), owner: bob)
+        table.insert(soon)
+        table.insert(later)
+
+        XCTAssertEqual(table.removeExpired(at: t0.addingTimeInterval(61)).map(\.id), [soon.id])
+        // The cached earliest-deadline bound must have been tightened to
+        // `later`'s deadline, not left stale, or this second call would
+        // wrongly report nothing due.
+        XCTAssertEqual(table.removeExpired(at: t0.addingTimeInterval(121)).map(\.id), [later.id])
+        XCTAssertTrue(table.sessions.isEmpty)
+    }
+
+    func testIndefiniteSessionsAreNeverConsideredDue() {
+        var table = SessionTable()
+        table.insert(session("01", owner: alice))
+        XCTAssertTrue(table.removeExpired(at: .distantFuture).isEmpty)
+        XCTAssertEqual(table.count, 1)
+    }
 }
 
 /// `isDaemonEvaluable` decides whether a session survives the agent going

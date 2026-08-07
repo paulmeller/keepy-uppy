@@ -3,6 +3,20 @@ import os
 
 let helperLogger = Logger(subsystem: "au.com.workwireless.keepy-uppy.helper", category: "daemon")
 
+/// `DaemonRuntime.startSession`'s outcome, folding in `SessionAdmission`'s
+/// rejection reasons (Fix 1 caps, Fix 3 "no live agent") plus the
+/// pre-existing `PowerControl` failure path, which this method has always
+/// surfaced to the caller (unlike `stopSession`/`conditionEnded`, which
+/// don't gate their reply on it — starting a session that fails to actually
+/// disable sleep is a real failure worth reporting).
+enum SessionStartResult: Equatable {
+    case started
+    case ownerLimitReached
+    case globalLimitReached
+    case noAgentConnected
+    case failed
+}
+
 /// Serialises both engines behind one queue: XPC replies arrive on arbitrary
 /// threads, and the engines are value types with no locking of their own.
 final class DaemonRuntime {
@@ -12,6 +26,31 @@ final class DaemonRuntime {
     private let observer: SafetyObserving
     private let bundlePath: String
     private var timer: DispatchSourceTimer?
+
+    /// Structural refcount of open connections to the agent-only Mach
+    /// service (Fixes 3 & 4). Tracks *connections*, not explicit
+    /// `registerAsAgent` calls, matching how disappearance is already
+    /// detected structurally in `HelperListenerDelegate` (a connection's
+    /// agent-ness is fixed at accept time by which Mach service it came in
+    /// on, not by anything the client asserts). Two problems share this one
+    /// counter:
+    ///   - Fix 3: an agent-evaluated session must not be startable when no
+    ///     agent has ever connected (e.g. the LaunchAgent never loaded or
+    ///     was never approved) — spec §5 only covers the agent
+    ///     *disappearing*, not never arriving.
+    ///   - Fix 4: agents are per-user but share one Mach service, so firing
+    ///     `.agentDisappeared` on *any* agent connection closing would let
+    ///     one user's logout end another user's `--while-app` session on a
+    ///     multi-user Mac. Firing only when the *last* connection closes
+    ///     fixes that for the common case. It is not full per-user scoping
+    ///     — the daemon does not track which session belongs to which
+    ///     user's agent, so if two different users' agents were ever
+    ///     connected at once, the daemon still cannot tell whose evidence
+    ///     went away when one of them disconnects; the surviving
+    ///     connection merely keeps everyone's agent-evaluated sessions
+    ///     alive until it, too, closes. That is a strict improvement over
+    ///     today (any disconnect ends everyone), not a complete fix.
+    private var liveAgentConnections = 0
 
     init(observer: SafetyObserving = SystemSafetyObserver(),
          bundlePath: String = Bundle.main.bundlePath) {
@@ -34,10 +73,21 @@ final class DaemonRuntime {
         self.timer = timer
     }
 
-    func startSession(_ session: Session) -> Bool {
+    func startSession(_ session: Session) -> SessionStartResult {
         queue.sync {
-            sessions.apply(.start(session), now: Date())
-            return applyLocked()
+            switch sessions.startSession(session, now: Date(), liveAgentConnections: liveAgentConnections) {
+            case .admitted:
+                return applyLocked() ? .started : .failed
+            case .ownerLimitReached:
+                helperLogger.error("Rejected startSession from \(session.owner.rawValue): per-owner session cap (\(SessionAdmission.maxSessionsPerOwner)) reached")
+                return .ownerLimitReached
+            case .globalLimitReached:
+                helperLogger.error("Rejected startSession from \(session.owner.rawValue): global session cap (\(SessionAdmission.maxSessionsGlobal)) reached")
+                return .globalLimitReached
+            case .noAgentConnected:
+                helperLogger.error("Rejected startSession from \(session.owner.rawValue): kind requires a live agent connection to evaluate, and none is connected")
+                return .noAgentConnected
+            }
         }
     }
 
@@ -104,17 +154,41 @@ final class DaemonRuntime {
         }
     }
 
-    func agentDisappeared() {
+    /// Call when a connection to the agent Mach service is accepted
+    /// (Fixes 3 & 4). Must be paired with exactly one `agentConnectionClosed`.
+    func agentConnectionOpened() {
+        queue.sync { liveAgentConnections += 1 }
+    }
+
+    /// Call when a connection to the agent Mach service invalidates or is
+    /// interrupted. Only the *last* live agent connection closing ends
+    /// agent-evaluated sessions daemon-wide — see the doc comment on
+    /// `liveAgentConnections` for why, and its residual limitation.
+    func agentConnectionClosed() {
         queue.sync {
+            liveAgentConnections = max(0, liveAgentConnections - 1)
+            guard liveAgentConnections == 0 else { return }
             let ended = sessions.apply(.agentDisappeared, now: Date())
             if !ended.isEmpty {
-                helperLogger.log("Agent gone; ended \(ended.count) unverifiable session(s)")
+                helperLogger.log("Last agent connection gone; ended \(ended.count) unverifiable session(s)")
             }
             _ = applyLocked()
         }
     }
 
-    func conditionEnded(id: UUID) { queue.sync { _ = sessions.apply(.conditionEnded(id: id), now: Date()); _ = applyLocked() } }
+    /// Ends a session on the agent's report, but only if its kind is one
+    /// the agent has business judging — i.e. not daemon-evaluable (Fix 6).
+    /// Rejection is logged by the caller (`HelperService`), matching how
+    /// `stopSession`/`renewLease` rejections are logged there rather than
+    /// here.
+    @discardableResult
+    func conditionEnded(id: UUID) -> ConditionEndOutcome {
+        queue.sync {
+            let outcome = sessions.endCondition(id: id, now: Date())
+            if case .ended = outcome { _ = applyLocked() }
+            return outcome
+        }
+    }
 
     func currentSessions() -> [Session] { queue.sync { sessions.sessions } }
 

@@ -1,6 +1,15 @@
 import Foundation
 
 final class HelperService: NSObject, HelperProtocol {
+    /// Generous upper bound on an accepted, not-yet-decoded `sessionJSON`
+    /// payload (security review batch B, Fix 1). A legitimate `Session`
+    /// encodes to at most a few hundred bytes — its largest field is
+    /// `whileAppRunning`'s bundle identifier string. 16 KiB leaves well
+    /// over an order of magnitude of headroom while rejecting an attempt to
+    /// make `JSONDecoder` repeatedly chew on an arbitrarily large flood
+    /// payload before any other check even runs.
+    static let maxSessionPayloadBytes = 16 * 1024
+
     private let runtime: DaemonRuntime
     private let clientID: ClientID
     private let isAgent: Bool
@@ -12,6 +21,9 @@ final class HelperService: NSObject, HelperProtocol {
     }
 
     func startSession(_ sessionJSON: Data, reply: @escaping (String?, String?) -> Void) {
+        guard sessionJSON.count <= Self.maxSessionPayloadBytes else {
+            return reply(nil, "session payload too large")
+        }
         guard let requested = try? JSONDecoder().decode(Session.self, from: sessionJSON) else {
             return reply(nil, "invalid session payload")
         }
@@ -23,10 +35,18 @@ final class HelperService: NSObject, HelperProtocol {
         let session = Session(id: UUID(), kind: requested.kind, owner: clientID,
                               persistence: requested.persistence, origin: requested.origin,
                               startedAt: Date())
-        guard runtime.startSession(session) else {
-            return reply(nil, "failed to start session")
+        switch runtime.startSession(session) {
+        case .started:
+            reply(session.id.uuidString, nil)
+        case .ownerLimitReached:
+            reply(nil, "too many sessions for this client; stop one before starting another")
+        case .globalLimitReached:
+            reply(nil, "daemon session limit reached; try again later")
+        case .noAgentConnected:
+            reply(nil, "no agent is connected to evaluate this condition")
+        case .failed:
+            reply(nil, "failed to start session")
         }
-        reply(session.id.uuidString, nil)
     }
 
     func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) {
@@ -74,8 +94,15 @@ final class HelperService: NSObject, HelperProtocol {
             return reply(false, "not authorised")
         }
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
-        runtime.conditionEnded(id: uuid)
-        reply(true, nil)
+        switch runtime.conditionEnded(id: uuid) {
+        case .ended:
+            reply(true, nil)
+        case .notFound:
+            reply(false, "no such session")
+        case .notAgentEvaluated:
+            helperLogger.error("Rejected reportConditionEnded(\(sessionID)) from \(self.clientID.rawValue): session kind is not the agent's to end")
+            reply(false, "not authorised")
+        }
     }
 
     func registerAsAgent(reply: @escaping (Bool, String?) -> Void) {

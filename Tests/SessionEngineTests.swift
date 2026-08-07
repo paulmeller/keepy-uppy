@@ -120,4 +120,168 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(renewed.startedAt, original.startedAt)
         XCTAssertEqual(renewed.kind, .lease(expires: t0.addingTimeInterval(120)), "only the deadline should have moved")
     }
+
+    // MARK: - Fix 2: renewLease must not launder a non-lease kind, or accept an unbounded deadline
+
+    func testRenewLeaseRejectsNonLeaseKind() {
+        var engine = SessionEngine()
+        let session = make(.whileExternalDisplay)
+        _ = engine.apply(.start(session), now: t0)
+
+        _ = engine.apply(.renewLease(id: session.id, until: t0.addingTimeInterval(3600)), now: t0)
+
+        guard let unchanged = engine.sessions.first(where: { $0.id == session.id }) else {
+            return XCTFail("the session must still be present")
+        }
+        XCTAssertEqual(unchanged.kind, .whileExternalDisplay, "must not have been laundered into a daemon-evaluated .lease")
+
+        // Proves the laundering would otherwise have mattered: with the kind
+        // unchanged, the agent disappearing still ends it.
+        XCTAssertEqual(engine.apply(.agentDisappeared, now: t0).count, 1)
+    }
+
+    func testRenewLeaseRejectsDeadlineBeyondMaxSessionDuration() {
+        var engine = SessionEngine()
+        let session = make(.lease(expires: t0.addingTimeInterval(60)))
+        _ = engine.apply(.start(session), now: t0)
+
+        let tooFar = t0.addingTimeInterval(SessionEngine.maxSessionDuration + 1)
+        _ = engine.apply(.renewLease(id: session.id, until: tooFar), now: t0)
+
+        guard let unchanged = engine.sessions.first(where: { $0.id == session.id }) else {
+            return XCTFail("the session must still be present")
+        }
+        XCTAssertEqual(unchanged.kind, .lease(expires: t0.addingTimeInterval(60)), "the original deadline must be untouched")
+    }
+
+    func testRenewLeaseRejectsNonFiniteDeadline() {
+        var engine = SessionEngine()
+        let session = make(.lease(expires: t0.addingTimeInterval(60)))
+        _ = engine.apply(.start(session), now: t0)
+
+        let nonFinite = Date(timeIntervalSinceReferenceDate: .infinity)
+        _ = engine.apply(.renewLease(id: session.id, until: nonFinite), now: t0)
+
+        guard let unchanged = engine.sessions.first(where: { $0.id == session.id }) else {
+            return XCTFail("the session must still be present")
+        }
+        XCTAssertEqual(unchanged.kind, .lease(expires: t0.addingTimeInterval(60)), "the original deadline must be untouched")
+    }
+
+    // MARK: - Fix 1: admission caps
+
+    func testSessionStartCapPerOwnerRejectsBeyondLimit() {
+        var engine = SessionEngine()
+        for _ in 0..<SessionAdmission.maxSessionsPerOwner {
+            let result = engine.startSession(make(.indefinite), now: t0, liveAgentConnections: 0)
+            XCTAssertEqual(result, .admitted)
+        }
+        XCTAssertEqual(engine.sessions.count, SessionAdmission.maxSessionsPerOwner)
+
+        let before = Set(engine.sessions.map(\.id))
+        let rejected = engine.startSession(make(.indefinite), now: t0, liveAgentConnections: 0)
+
+        XCTAssertEqual(rejected, .ownerLimitReached)
+        XCTAssertEqual(engine.sessions.count, SessionAdmission.maxSessionsPerOwner, "a rejected start must not grow the table")
+        XCTAssertEqual(Set(engine.sessions.map(\.id)), before, "a rejected start must not disturb existing sessions")
+    }
+
+    func testSessionStartCapGlobalRejectsBeyondLimitEvenForAFreshOwner() {
+        var engine = SessionEngine()
+        var count = 0
+        var owner = 0
+        while count < SessionAdmission.maxSessionsGlobal {
+            let batch = min(SessionAdmission.maxSessionsPerOwner, SessionAdmission.maxSessionsGlobal - count)
+            for _ in 0..<batch {
+                let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "owner-\(owner)"),
+                                      persistence: .clientBound, origin: .manual, startedAt: t0)
+                XCTAssertEqual(engine.startSession(session, now: t0, liveAgentConnections: 0), .admitted)
+                count += 1
+            }
+            owner += 1
+        }
+        XCTAssertEqual(engine.sessions.count, SessionAdmission.maxSessionsGlobal)
+
+        let before = Set(engine.sessions.map(\.id))
+        // A brand-new owner, nowhere near their own per-owner cap, is still
+        // rejected once the daemon-wide cap is reached.
+        let rejected = engine.startSession(
+            Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "brand-new-owner"),
+                    persistence: .clientBound, origin: .manual, startedAt: t0),
+            now: t0, liveAgentConnections: 0)
+
+        XCTAssertEqual(rejected, .globalLimitReached)
+        XCTAssertEqual(engine.sessions.count, SessionAdmission.maxSessionsGlobal, "a rejected start must not grow the table")
+        XCTAssertEqual(Set(engine.sessions.map(\.id)), before, "a rejected start must not disturb existing sessions")
+    }
+
+    func testExpirySweepStillRunsAfterAdmissionIsCapped() {
+        // Regression guard alongside `testNonTickEventStillSweepsAnExpiredSession`:
+        // the cheap `removeExpired` path introduced for Fix 1 must not
+        // accidentally gate expiry on `.tick` the way the sweep itself must not.
+        var engine = SessionEngine()
+        let expiring = make(.duration(until: t0.addingTimeInterval(60)))
+        XCTAssertEqual(engine.startSession(expiring, now: t0, liveAgentConnections: 0), .admitted)
+
+        let ended = engine.apply(.stop(id: UUID()), now: t0.addingTimeInterval(120))
+
+        XCTAssertEqual(ended.count, 1)
+        XCTAssertEqual(ended.first?.id, expiring.id)
+        XCTAssertFalse(engine.desiredKeepAwake)
+    }
+
+    // MARK: - Fix 3: agent-evaluated kinds require a live agent connection
+
+    func testStartSessionRejectsAgentEvaluatedKindWhenNoAgentConnected() {
+        var engine = SessionEngine()
+        let before = engine.sessions
+
+        let result = engine.startSession(make(.whileExternalDisplay), now: t0, liveAgentConnections: 0)
+
+        XCTAssertEqual(result, .noAgentConnected)
+        XCTAssertEqual(engine.sessions.count, before.count, "a rejected start must not disturb existing sessions")
+        XCTAssertFalse(engine.desiredKeepAwake)
+    }
+
+    func testStartSessionAdmitsAgentEvaluatedKindWhenAnAgentIsConnected() {
+        var engine = SessionEngine()
+        let result = engine.startSession(make(.whileExternalDisplay), now: t0, liveAgentConnections: 1)
+        XCTAssertEqual(result, .admitted)
+        XCTAssertTrue(engine.desiredKeepAwake)
+    }
+
+    func testStartSessionNeverRequiresAnAgentForDaemonEvaluableKinds() {
+        var engine = SessionEngine()
+        let result = engine.startSession(make(.indefinite), now: t0, liveAgentConnections: 0)
+        XCTAssertEqual(result, .admitted)
+    }
+
+    // MARK: - Fix 6: an agent may only end sessions whose kind is agent-evaluated
+
+    func testEndConditionRejectsADaemonEvaluableSession() {
+        var engine = SessionEngine()
+        let session = make(.duration(until: t0.addingTimeInterval(3600)))
+        _ = engine.apply(.start(session), now: t0)
+
+        let outcome = engine.endCondition(id: session.id, now: t0)
+
+        XCTAssertEqual(outcome, .notAgentEvaluated)
+        XCTAssertEqual(engine.sessions.count, 1, "the session must survive an out-of-scope condition report")
+    }
+
+    func testEndConditionEndsAnAgentEvaluatedSession() {
+        var engine = SessionEngine()
+        let session = make(.whileExternalDisplay)
+        _ = engine.apply(.start(session), now: t0)
+
+        let outcome = engine.endCondition(id: session.id, now: t0)
+
+        XCTAssertEqual(outcome, .ended(session))
+        XCTAssertTrue(engine.sessions.isEmpty)
+    }
+
+    func testEndConditionOnUnknownSessionIsNotFound() {
+        var engine = SessionEngine()
+        XCTAssertEqual(engine.endCondition(id: UUID(), now: t0), .notFound)
+    }
 }
