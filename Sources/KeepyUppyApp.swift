@@ -6,10 +6,14 @@ struct KeepyUppyApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(monitor: appDelegate.monitor)
+            MenuContent(daemon: appDelegate.daemon)
         } label: {
-            MenuBarIcon(monitor: appDelegate.monitor)
+            MenuBarIcon(daemon: appDelegate.daemon)
         }
         .menuBarExtraStyle(.menu)
+
+        Settings {
+            SettingsView(daemon: appDelegate.daemon)
+        }
     }
 }
