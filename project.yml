@@ -15,6 +15,11 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchDaemons
+      - path: Launchd/au.com.workwireless.keepy-uppy.agent.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
     dependencies:
       - target: KeepyUppyHelper
         embed: true
