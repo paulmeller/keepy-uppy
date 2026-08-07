@@ -2,11 +2,13 @@
 
 ![Two laptops playing keepy-uppy with a red balloon](assets/keepy-uppy.png)
 
-Keeps a MacBook awake with the lid closed by toggling `pmset -a disablesleep`
-through a menu-bar balloon icon. See
-`docs/superpowers/specs/2026-08-06-keepy-uppy-swift-design.md` for the full
-design rationale (and `2026-08-06-keepy-uppy-design.md` for the original
-Rust/objc2 design this superseded).
+Keeps a MacBook awake with the lid closed. Keepy Uppy is headless-first: a
+root daemon and a per-user agent do the actual work, a command-line client
+drives the same daemon over SSH, and the menu-bar balloon icon is one
+optional way to control it. See "How it works" below for the architecture,
+`docs/superpowers/specs/2026-08-06-keepy-uppy-swift-design.md` for the v1
+design rationale, and `2026-08-06-keepy-uppy-design.md` for the original
+Rust/objc2 design this superseded.
 
 ## How it works
 
@@ -56,13 +58,12 @@ Run through this after any change to `PowerMonitor.swift`, `PowerService.swift`,
 `LoginItemService.swift`, `MenuContent.swift`, or `AppDelegate.swift`:
 
 - [ ] Clicking the icon (left or right click, both open the same menu) shows correct status text, toggle wording, and login-item checkbox state
-- [ ] Toggling on prompts for admin password, icon fills in, `pmset -g | grep SleepDisabled` shows `1`
-- [ ] Toggling off reverses all of the above
-- [ ] Canceling the admin dialog is a silent no-op (no crash, no error dialog)
+- [ ] Toggling on starts a session with no password/Touch ID prompt (the one-time System Settings approval below is the only prompt that ever appears), icon fills in, `pmset -g | grep SleepDisabled` shows `1`
+- [ ] Toggling off ends the session and reverses all of the above, with no prompt
 - [ ] "Launch at Login" registers/unregisters and is reflected in System Settings → General → Login Items
 - [ ] External `sudo pmset -a disablesleep 1/0` is reflected in the icon within 30 seconds
-- [ ] Low-battery auto-off re-enables sleep and posts a notification when tested with a lowered threshold
-- [ ] Quitting while enabled re-enables sleep (one final admin prompt) before the app exits
+- [ ] Low-battery auto-off re-enables sleep and posts a notification when tested with a lowered threshold — completes unattended, with no prompt, including with the lid closed
+- [ ] Quitting the app while it owns an active session ends that session (no prompt); sessions owned by other clients (CLI, other logins) are left running
 - [ ] The app has no Dock icon and shows the balloon in the menu bar
 - [ ] The app's Finder/Get Info icon shows the balloon (Task 8)
 - [ ] The exported, notarized `.app` opens without Gatekeeper warnings
@@ -72,12 +73,19 @@ Run through this after any change to `PowerMonitor.swift`, `PowerService.swift`,
 - [ ] Killing the agent ends condition-based sessions but not timed ones
 - [ ] A Release build refuses XPC connections from an unsigned binary
 - [ ] A non-agent client's condition report is rejected and logged
+- [ ] The thermal guard stops a session at the configured sensitivity (default Balanced), and the same trigger does not immediately restart it (cooldown/hysteresis, spec §7)
+- [ ] The maximum-duration backstop ends even an indefinite session
+- [ ] Thermal and battery thresholds tighten when the lid is closed and the warn-then-act grace period is skipped, since there's nobody to see the warning
 
-## Known limitation
+## Not yet verified
 
-Low-battery auto-off needs a password/Touch ID prompt to re-enable sleep,
-same as every other state change (see spec §5's privilege model). If the
-lid is closed and the Mac is unattended, that prompt has nobody to answer
-it, so auto-off can't complete in exactly the scenario it exists for. It
-works whenever the machine is attended. A future privileged-helper-daemon
-version (SMAppService + XPC) would remove this gap — see spec §4 and §9.
+The daemon's session and safety engines are complete and covered by the unit
+suite (57/57), but nothing here has been exercised as a running system: real
+`SMAppService` registration of the daemon and agent, the one-time System
+Settings approval, the XPC handshake, and end-to-end awake-with-lid-closed
+behaviour all need a signed build, which hasn't happened yet (see spec §10).
+Two components also aren't built yet: the per-user agent has no executable
+target, and `keepy-uppy` (the CLI) is currently a one-line stub. Until those
+land and a signed build has gone through the checklist above, treat "How it
+works" as the design being built toward rather than a verified description
+of this checkout.
