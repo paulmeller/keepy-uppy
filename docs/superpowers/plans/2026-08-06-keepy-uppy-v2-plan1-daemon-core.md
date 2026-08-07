@@ -126,6 +126,18 @@ Add to `targets:` (alongside the existing `Keepy Uppy` and `Keepy UppyTests`):
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        # Discovered against a real Developer ID archive, not caught by any
+        # ad-hoc-signed test: without this, xcodebuild archive additionally
+        # installs this target standalone at its default /usr/local/bin
+        # path, on top of embedding it in the app. That leaves the
+        # archive's Products/ directory containing more than a single
+        # Applications/*.app item, which makes Xcode's distribution-method
+        # manager stop recognizing the archive as an app archive at all —
+        # every app-specific method (including Developer ID) is silently
+        # rejected in favor of generic fallbacks, and `just export` fails
+        # with an opaque "expected one {} but found developer-id" that
+        # gives no hint the real problem is here.
+        SKIP_INSTALL: YES
 
   keepy-uppy:
     type: tool
@@ -138,6 +150,8 @@ Add to `targets:` (alongside the existing `Keepy Uppy` and `Keepy UppyTests`):
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
+        # See the matching comment on KeepyUppyHelper above — same reason.
+        SKIP_INSTALL: YES
 ```
 
 On the `Keepy Uppy` target, add `Shared` and the plist to `sources:`, and add the `dependencies:` block:
