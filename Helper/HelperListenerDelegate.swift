@@ -90,9 +90,15 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         newConnection.exportedObject = HelperService(
             runtime: runtime, clientID: id, userID: userID, isAgent: isAgent,
             connectionProven: { [runtime] in
-                guard proof.proveOnce() else { return }
-                runtime.clientConnected(id)
-                if isAgent { runtime.agentConnectionOpened(userID: userID) }
+                // The runtime calls are the latch's *body*, not something done
+                // after consulting it: they run under its lock, so this
+                // increment happens-before the matching decrement below rather
+                // than merely being decided before it. See
+                // `ConnectionProofLatch.proveOnce`.
+                proof.proveOnce {
+                    runtime.clientConnected(id)
+                    if isAgent { runtime.agentConnectionOpened(userID: userID) }
+                }
             })
 
         // One guard, not two. Both refcounts are decremented from the same
@@ -105,23 +111,29 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // `interruptionHandler` can both fire for one connection, each on an
         // arbitrary thread, and every refcount here must be decremented at
         // most once per *counted* connection however many teardown callbacks
-        // run. That check-and-set now lives inside the latch (which has to
-        // hold a lock anyway, since prove and release genuinely race: a
-        // message can be in flight while the connection tears down), and
-        // `releaseOnce()` folds in the second half of this fix — it reports
-        // `true` only for a connection that was actually counted, so a rogue
-        // that connects and vanishes without ever passing the requirement
-        // decrements nothing it never incremented.
+        // run. That check-and-set lives inside the latch (which has to hold a
+        // lock anyway, since prove and release genuinely race: a message can
+        // be in flight while the connection tears down), and `releaseOnce`
+        // folds in the second half of this fix — it runs its body only for a
+        // connection that was actually counted, so a rogue that connects and
+        // vanishes without ever passing the requirement decrements nothing it
+        // never incremented.
+        //
+        // Passing the work as the body rather than branching on a returned
+        // `Bool` is what orders it against the increment above: both run
+        // under the same per-connection lock, so they cannot interleave into
+        // the runtime backwards.
         let tearDownOnce: () -> Void = { [runtime] in
-            guard proof.releaseOnce() else { return }
-
-            // Order preserved from when these were separate guards.
-            runtime.clientDisconnected(id)
-            // No session outlives its evidence (spec §5): once the *last*
-            // live agent connection disappears, agent-evaluated sessions can
-            // no longer be verified and must end too (Fix 4: one user's agent
-            // connection closing must not end another's sessions).
-            if isAgent { runtime.agentConnectionClosed(userID: userID) }
+            proof.releaseOnce {
+                // Order preserved from when these were separate guards.
+                runtime.clientDisconnected(id)
+                // No session outlives its evidence (spec §5): once the *last*
+                // live agent connection disappears, agent-evaluated sessions
+                // can no longer be verified and must end too (Fix 4: one
+                // user's agent connection closing must not end another's
+                // sessions).
+                if isAgent { runtime.agentConnectionClosed(userID: userID) }
+            }
         }
 
         newConnection.invalidationHandler = tearDownOnce
