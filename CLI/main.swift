@@ -1,6 +1,9 @@
 import Foundation
 import ServiceManagement
 
+let semaphore = DispatchSemaphore(value: 0)
+var exitCode: Int32 = 0
+
 func connect() -> HelperProtocol? {
     // The CLI-ONLY Mach service, never the app's. That is what makes the
     // daemon see this process as the CLI, and therefore what gives every
@@ -21,6 +24,13 @@ func connect() -> HelperProtocol? {
     connection.resume()
     return connection.remoteObjectProxyWithErrorHandler { error in
         FileHandle.standardError.write("keepy-uppy: \(error.localizedDescription)\n".data(using: .utf8)!)
+        // End the wait here rather than letting the 10s timeout deliver it.
+        // A connection error is already conclusive, and the slow path is most
+        // likely to be hit exactly when a client and daemon disagree about
+        // which Mach services exist — the mixed-version window during an
+        // upgrade — where a 10s stall reads as a hang.
+        exitCode = 1
+        semaphore.signal()
     } as? HelperProtocol
 }
 
@@ -45,9 +55,6 @@ case .failure(let error): fail(error.message)
 
 guard let proxy = connect() else { fail("could not connect to the Keepy Uppy daemon") }
 
-let semaphore = DispatchSemaphore(value: 0)
-var exitCode: Int32 = 0
-
 switch command {
 case .on(let kind, let persistence):
     let session = Session(id: UUID(), kind: kind, owner: ownerID, persistence: persistence,
@@ -64,14 +71,28 @@ case .on(let kind, let persistence):
     }
 
 case .off(.all):
-    proxy.stopAllSessions(all: true) { ok, error in
-        if !ok { FileHandle.standardError.write("keepy-uppy: \(error ?? "failed")\n".data(using: .utf8)!); exitCode = 1 }
+    proxy.stopAllSessions(all: true) { stopped, error in
+        if let error {
+            FileHandle.standardError.write("keepy-uppy: \(error)\n".data(using: .utf8)!)
+            exitCode = 1
+        } else if stopped == 0 {
+            print("No sessions were running.")
+        } else {
+            print("Stopped \(stopped) session(s).")
+        }
         semaphore.signal()
     }
 
 case .off(.own):
-    proxy.stopAllSessions(all: false) { ok, error in
-        if !ok { FileHandle.standardError.write("keepy-uppy: \(error ?? "failed")\n".data(using: .utf8)!); exitCode = 1 }
+    proxy.stopAllSessions(all: false) { stopped, error in
+        if let error {
+            FileHandle.standardError.write("keepy-uppy: \(error)\n".data(using: .utf8)!)
+            exitCode = 1
+        } else if stopped == 0 {
+            print("No sessions of yours were running.")
+        } else {
+            print("Stopped \(stopped) session(s).")
+        }
         semaphore.signal()
     }
 

@@ -69,10 +69,10 @@ final class HelperService: NSObject, HelperProtocol {
         }
     }
 
-    func stopAllSessions(all: Bool, reply: @escaping (Bool, String?) -> Void) {
+    func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) {
         helperLogger.log("stopAllSessions(all: \(all)) from \(self.clientID.rawValue)")
-        runtime.stopAll(all: all, requestedBy: clientID)
-        reply(true, nil)
+        let stopped = runtime.stopAll(all: all, requestedBy: clientID)
+        reply(stopped, nil)
     }
 
     func listSessions(reply: @escaping (Data?, String?) -> Void) {
