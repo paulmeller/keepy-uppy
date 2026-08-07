@@ -53,7 +53,6 @@
 		75D494F1A529955A7113FF53 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		77A18ABA6A6384086F59C5B4 /* EvidenceLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */; };
 		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
-		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
 		8EE316A0540244088048694F /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
 		9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
 		98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
@@ -65,6 +64,7 @@
 		AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 		AD5D3430BAA216127965342D /* ConditionObserving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662677939368E57BBCCF74F9 /* ConditionObserving.swift */; };
 		AF8893B05DF9B1829320A0CD /* EvidenceLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */; };
+		BAAC2D55C2089A28C45FD5B5 /* DaemonConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C137B6CBBDFC003C4D6E6E /* DaemonConnection.swift */; };
 		B24BB0CBA33407554586D264 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1086C7B6913D7589DE52E386 /* main.swift */; };
 		BE2891D20DBC6B2FD239440C /* CLICommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB887944CA21A7FF021348E1 /* CLICommandTests.swift */; };
 		BF46A8320FE63E1D0D3CD140 /* TriggerRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5567693DBB46649F15660F65 /* TriggerRule.swift */; };
@@ -165,7 +165,6 @@
 		0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEngine.swift; sourceTree = "<group>"; };
 		1086C7B6913D7589DE52E386 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1875D33C618D88DEBDDB7CEB /* SessionTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTable.swift; sourceTree = "<group>"; };
-		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
 		1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.agent.plist"; sourceTree = "<group>"; };
 		218D3338E5E977B7C598642C /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
@@ -190,6 +189,7 @@
 		94E34F9ED9B92EB978F72902 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		985633E51E87910741A868B9 /* EvidenceLoopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceLoopTests.swift; sourceTree = "<group>"; };
 		9D902E0F1599E782E483782C /* PowerControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControl.swift; sourceTree = "<group>"; };
+		A0C137B6CBBDFC003C4D6E6E /* DaemonConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConnection.swift; sourceTree = "<group>"; };
 		A54DD10487A2C28D32E9A656 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirementTests.swift; sourceTree = "<group>"; };
 		BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLICommand.swift; sourceTree = "<group>"; };
@@ -345,11 +345,11 @@
 			isa = PBXGroup;
 			children = (
 				564C97E2907D353762EC75D8 /* AppDelegate.swift */,
+				A0C137B6CBBDFC003C4D6E6E /* DaemonConnection.swift */,
 				6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */,
 				2BBD98DDC9057502F4594A1F /* LoginItemService.swift */,
 				831A5A41A55C3873E0EB9F3A /* MenuContent.swift */,
 				3CB173EBACDD623663B735B7 /* PowerMonitor.swift */,
-				1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -551,13 +551,13 @@
 				FC178B9E631E011DE37D5CFB /* CLICommand.swift in Sources */,
 				0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */,
 				E33CE1EF5DDFC4135E801A93 /* ConditionObserving.swift in Sources */,
+				BAAC2D55C2089A28C45FD5B5 /* DaemonConnection.swift in Sources */,
 				77A18ABA6A6384086F59C5B4 /* EvidenceLoop.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
 				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
 				DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */,
 				28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */,
-				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
 				9E5C1650D13823129E390713 /* SafetyEngine.swift in Sources */,
 				98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */,
 				F0F7A9114AD24E3E80964B0D /* SessionEngine.swift in Sources */,
