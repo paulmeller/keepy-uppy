@@ -69,3 +69,53 @@ final class DaemonConnectionFailurePathTests: XCTestCase {
         }
     }
 }
+
+/// `ContinuationLatch` is the primitive the fix above is built on, and as of
+/// fix wave D it is shared (`Shared/ContinuationLatch.swift`) by BOTH XPC
+/// clients — the app's, exercised directly above, and the agent's
+/// (`Agent/DaemonConnection.swift`), which had the identical unfixed
+/// continuation leak until the same wave.
+///
+/// The agent's client deliberately has no XCTest here, and cannot have one:
+/// it declares a type also named `DaemonConnection`, so it cannot join the
+/// app target alongside `Sources/DaemonConnection.swift`, and compiled into
+/// the test target instead it could not see the internal `Shared` symbols
+/// (`HelperProtocol`, `agentMachServiceName`, `Session`) it is written
+/// against. It is instead verified by compiling the real, unmodified file
+/// into a standalone executable with the real `Shared` sources and driving it
+/// against the (unregistered) daemon Mach service — pre-fix that run trips
+/// "SWIFT TASK CONTINUATION MISUSE: listSessions() leaked its continuation
+/// without resuming it" and hangs; post-fix all three calls return. See
+/// `.superpowers/sdd/final-review-fixwave-D-report.md` for the transcript.
+///
+/// What is testable here, and now matters twice over, is the latch's own
+/// contract: it exists because NSXPC's reply block and its error handler
+/// arrive on arbitrary queues, and resuming a `CheckedContinuation` twice
+/// traps at runtime — a crash would be a strictly worse outcome than the hang
+/// the latch prevents.
+final class ContinuationLatchTests: XCTestCase {
+    func testASecondResumeIsDroppedRatherThanTrapping() async {
+        let value: Int = await withCheckedContinuation { continuation in
+            let latch = ContinuationLatch(continuation)
+            latch.resume(1)
+            // Without the latch this is `CheckedContinuation` misuse and
+            // traps the process.
+            latch.resume(2)
+        }
+        XCTAssertEqual(value, 1, "the first resume must win")
+    }
+
+    /// The real shape of the race: the reply block and the error handler are
+    /// on different queues, so "check then resume" without a lock is not
+    /// enough. Repeated so a lost race is not a one-in-a-thousand flake that
+    /// only shows up in production.
+    func testConcurrentResumesDeliverExactlyOneValue() async {
+        for _ in 0..<250 {
+            let value: Int = await withCheckedContinuation { continuation in
+                let latch = ContinuationLatch(continuation)
+                DispatchQueue.concurrentPerform(iterations: 8) { latch.resume($0) }
+            }
+            XCTAssertTrue((0..<8).contains(value), "unexpected value \(value)")
+        }
+    }
+}
