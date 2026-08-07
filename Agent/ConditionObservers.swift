@@ -33,14 +33,12 @@ struct CPUBusyWindow {
 }
 
 // MARK: - Observing protocols (so the evidence loop in Task 4 never touches a framework)
-
-protocol AppRunningObserving {
-    func isRunning(bundleID: String) -> Bool
-}
-
-protocol DisplayObserving {
-    func hasExternalDisplay() -> Bool
-}
+//
+// AppRunningObserving and DisplayObserving live in Shared/ConditionObserving.swift,
+// not here: Task 5's triggersToFire(...) needs them too, and Shared/ is compiled
+// into every target, including the daemon and CLI, which must not gain this
+// file's AppKit/CoreGraphics dependency. CPUBusyObserving stays here — nothing
+// outside the agent evaluates CPU-busy conditions.
 
 protocol CPUBusyObserving {
     /// Fraction 0...1, or nil if the sample could not be taken.

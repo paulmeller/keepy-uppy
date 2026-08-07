@@ -204,8 +204,10 @@ struct SessionEngine {
                 break
             }
             table.insert(Session(id: existing.id, kind: .lease(expires: until),
-                                 owner: existing.owner, persistence: existing.persistence,
-                                 origin: existing.origin, startedAt: existing.startedAt))
+                                 owner: existing.owner, ownerUID: existing.ownerUID,
+                                 persistence: existing.persistence,
+                                 origin: existing.origin, startedAt: existing.startedAt,
+                                 triggerID: existing.triggerID))
 
         case .tick:
             break
