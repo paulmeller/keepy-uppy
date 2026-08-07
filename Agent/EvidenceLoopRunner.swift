@@ -1,11 +1,14 @@
 import Foundation
 
-/// Polls the daemon every 5s for its current session list and reports back
-/// any agent-evaluated session whose condition has ended (`sessionsToEnd`,
-/// in EvidenceLoop.swift). Talks to the daemon over `DaemonConnection`
-/// (Task 2's agent-only XPC client), so this type is agent-executable-only
-/// — it must never be compiled into the GUI app bundle, unlike the pure
-/// `sessionsToEnd` function it wraps.
+/// Polls the daemon every 5s for its current session list and: (1) reports
+/// back any agent-evaluated session whose condition has ended
+/// (`sessionsToEnd`, in EvidenceLoop.swift), and (2) evaluates
+/// `TriggerStore`'s rules against fresh observer readings and originates a
+/// new session (`triggersToFire`, in Shared/TriggerRule.swift) for any that
+/// fired. Talks to the daemon over `DaemonConnection` (Task 2's agent-only
+/// XPC client), so this type is agent-executable-only — it must never be
+/// compiled into the GUI app bundle, unlike the pure `sessionsToEnd` and
+/// `triggersToFire` functions it wraps.
 @MainActor
 final class EvidenceLoop {
     private let connection: DaemonConnection
@@ -37,6 +40,26 @@ final class EvidenceLoop {
                                   cpu: &cpuWindows, busyNow: cpuObserver.currentBusyFraction(), now: Date())
         for id in ended {
             _ = await connection.reportConditionEnded(id.uuidString)
+        }
+
+        let rules = TriggerStore.load()
+        let onACPower = PowerControl.batteryState().source == .acPower
+        let fired = triggersToFire(rules, activeSessions: sessions, appRunning: appRunning,
+                                   display: display, onACPower: onACPower)
+        for rule in fired {
+            let session = Session(id: UUID(), kind: rule.sessionKind, owner: ClientID(rawValue: "agent"),
+                                  persistence: .detached, origin: .trigger, startedAt: Date(),
+                                  triggerID: rule.id)
+            let (sessionID, error) = await connection.startSession(session)
+            if sessionID == nil {
+                // A `.triggerSuppressed` ("cooldown") rejection here is
+                // expected, ordinary behavior during a safety episode, not
+                // an error worth alarming on — the daemon's admission path
+                // (Shared/SessionEngine.swift) already made the real
+                // decision; the agent just logs and moves on to the next
+                // tick rather than crashing or retry-looping.
+                agentLogger.log("Trigger \(rule.id) did not start a session: \(error ?? "unknown")")
+            }
         }
     }
 }

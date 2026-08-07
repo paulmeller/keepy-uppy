@@ -37,7 +37,7 @@ final class HelperService: NSObject, HelperProtocol {
         let session = Session(id: UUID(), kind: requested.kind, owner: clientID,
                               ownerUID: userID,
                               persistence: requested.persistence, origin: requested.origin,
-                              startedAt: Date())
+                              startedAt: Date(), triggerID: requested.triggerID)
         switch runtime.startSession(session) {
         case .started:
             reply(session.id.uuidString, nil)
