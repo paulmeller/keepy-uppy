@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # The daemon, agent and CLI are all macOS-only and the suite drives real
+    # IOKit/ServiceManagement types, so this cannot run on a Linux runner.
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        # The .xcodeproj is generated from project.yml, so regenerating here
+        # also checks that the committed one is not silently out of date.
+        run: xcodegen generate
+
+      - name: Build all four targets
+        # CODE_SIGN_IDENTITY=- is ad-hoc signing: CI has no Developer ID, and
+        # none is needed to compile or to run the unit suite. It does mean
+        # SigningRequirement.isEnforced is false in these builds (DEBUG), so
+        # the XPC boundary's real enforcement is NOT exercised here — that is
+        # covered by the signed-build manual checklist in the README.
+        run: |
+          xcodebuild build \
+            -project "Keepy Uppy.xcodeproj" \
+            -scheme "Keepy Uppy" \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=-
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project "Keepy Uppy.xcodeproj" \
+            -scheme "Keepy Uppy" \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=-
