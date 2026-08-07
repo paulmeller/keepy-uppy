@@ -204,9 +204,28 @@ actuation outside it, so root-side logic is fully unit-testable from synthetic
 inputs.
 
 - **Thermal.** `ProcessInfo.processInfo.thermalState` (public, verified) with
-  `NSProcessInfoThermalStateDidChangeNotification`. At `.serious` or
-  `.critical`, all sessions end. This answers the "a Mac running in a closed
-  bag has nowhere to dump heat" warning that no competitor addresses.
+  `NSProcessInfoThermalStateDidChangeNotification`. This answers the "a Mac
+  running in a closed bag has nowhere to dump heat" warning that no competitor
+  addresses.
+
+  The cutoff is **user-configurable**, because the right answer is a genuine
+  safety-versus-usability trade and depends on how the machine is used. It is
+  exposed as a named sensitivity rather than as raw thermal levels, which are
+  jargon:
+
+  | Sensitivity | Lid closed | Lid open |
+  |---|---|---|
+  | Cautious | `.fair` | `.serious` |
+  | **Balanced** (default) | `.serious` | `.critical` |
+  | Permissive | `.critical` | `.critical` |
+  | Off | — | — |
+
+  **Balanced is the default deliberately.** `.fair` merely means fans are
+  audible — a sustained build with the lid shut reaches it within minutes, so
+  defaulting to a `.fair` cutoff would stop the very sessions the product
+  exists to sustain, reading as "the feature is broken" rather than "the guard
+  worked". `.serious` means the machine is actually throttling, which is a
+  real signal. Users who want maximum caution can choose it explicitly.
 - **Low battery.** Configurable cutoff (Off / 5 / 10 / 15 / 20%, default 10%)
   via the public `IOPSCopyPowerSourcesInfo` API.
 - **Maximum duration backstop.** A global ceiling (default 8 hours) ending
@@ -230,10 +249,18 @@ session, the still-connected external display re-triggers it, forever.
 
 After any safety-initiated stop, trigger-driven starts are suppressed until
 the triggering condition clears **with hysteresis** (thermal back to
-`.nominal`; battery recovered several points above the cutoff) and never
-before a minimum cooldown. Manual starts are always honoured and logged — a
-user deliberately overriding a guard is their prerogative. Triggers never
-override safety.
+`.nominal`; battery recovered several points above the cutoff) **and has then
+stayed clear for a continuous cooldown**.
+
+The cooldown is measured from the moment conditions recover, **not** from when
+the episode began. Anchoring it to the episode start inverts the risk profile:
+a long, severe overheating episode would already have outlived the cooldown by
+the time it finally cooled, so triggers would re-arm on the very first good
+reading with no settling time — while a brief episode would wait the full
+period. The severe case is exactly where more confidence is wanted, not less.
+
+Manual starts are always honoured and logged — a user deliberately overriding
+a guard is their prerogative. Triggers never override safety.
 
 ## 8. Triggers
 
