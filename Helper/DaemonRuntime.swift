@@ -75,7 +75,19 @@ final class DaemonRuntime {
 
     func startSession(_ session: Session) -> SessionStartResult {
         queue.sync {
-            switch sessions.startSession(session, now: Date(), liveAgentConnections: liveAgentConnections) {
+            let now = Date()
+            // Sweep expired sessions before evaluating admission (Fix 3a).
+            // `SessionAdmission`'s per-owner/global caps are computed
+            // against whatever is currently in the table; a rejection below
+            // returns before `sessions.startSession` ever reaches `apply`,
+            // which is otherwise the only place expiry gets swept. Without
+            // this, an already-expired session keeps occupying a cap slot —
+            // and keeps `desiredKeepAwake` true — for up to 5s, until the
+            // next timer tick catches it. `.tick` has no effect of its own
+            // beyond the unconditional sweep `apply` always performs at the
+            // end of every event.
+            _ = sessions.apply(.tick, now: now)
+            switch sessions.startSession(session, now: now, liveAgentConnections: liveAgentConnections) {
             case .admitted:
                 return applyLocked() ? .started : .failed
             case .ownerLimitReached:
@@ -184,7 +196,15 @@ final class DaemonRuntime {
     @discardableResult
     func conditionEnded(id: UUID) -> ConditionEndOutcome {
         queue.sync {
-            let outcome = sessions.endCondition(id: id, now: Date())
+            let now = Date()
+            // Same pre-sweep as `startSession`, and for the same reason
+            // (Fix 3a): `endCondition`'s `.notFound`/`.notAgentEvaluated`
+            // paths return before `apply` ever runs, so a *different*,
+            // already-expired session sitting in the table — unrelated to
+            // `id` — would otherwise keep counting toward the caps and
+            // `desiredKeepAwake` until the next tick.
+            _ = sessions.apply(.tick, now: now)
+            let outcome = sessions.endCondition(id: id, now: now)
             if case .ended = outcome { _ = applyLocked() }
             return outcome
         }

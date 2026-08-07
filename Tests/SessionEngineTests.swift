@@ -284,4 +284,99 @@ final class SessionEngineTests: XCTestCase {
         var engine = SessionEngine()
         XCTAssertEqual(engine.endCondition(id: UUID(), now: t0), .notFound)
     }
+
+    // MARK: - Security re-review Fix 3a: DaemonRuntime sweeps expiry before
+    // evaluating admission/authorization, not only as a side effect of
+    // `apply`. `DaemonRuntime.startSession`/`.conditionEnded` cannot be unit
+    // tested directly (`Helper/` is not part of the test target's module
+    // graph), so these tests exercise the exact call sequence the fix adds
+    // there — `engine.apply(.tick, now:)` immediately before the
+    // caps/authorization check — directly against `SessionEngine`'s public
+    // API, proving the sequence is what actually closes the gap.
+
+    func testPreSweepingBeforeStartSessionStopsAnExpiredSessionCountingTowardTheOwnerCap() {
+        func buildOwnerAtCapWithOneAlreadyExpired() -> (SessionEngine, expiredID: UUID) {
+            var engine = SessionEngine()
+            let expired = make(.duration(until: t0.addingTimeInterval(60)))
+            XCTAssertEqual(engine.startSession(expired, now: t0, liveAgentConnections: 0), .admitted)
+            for _ in 0..<(SessionAdmission.maxSessionsPerOwner - 1) {
+                XCTAssertEqual(engine.startSession(make(.indefinite), now: t0, liveAgentConnections: 0), .admitted)
+            }
+            XCTAssertEqual(engine.sessions.count, SessionAdmission.maxSessionsPerOwner)
+            return (engine, expired.id)
+        }
+
+        let later = t0.addingTimeInterval(120) // past the expired session's deadline
+
+        // Without the pre-sweep (the pre-fix behaviour): the expired session
+        // is still sitting in the table when the cap is evaluated, so a
+        // brand-new, entirely legitimate session is wrongly rejected —
+        // exactly the bug Fix 3a closes.
+        var (withoutSweep, _) = buildOwnerAtCapWithOneAlreadyExpired()
+        XCTAssertEqual(withoutSweep.startSession(make(.indefinite), now: later, liveAgentConnections: 0),
+                       .ownerLimitReached,
+                       "documents the bug: an expired-but-unswept session still occupies a cap slot")
+
+        // With the pre-sweep `DaemonRuntime.startSession` now performs
+        // before evaluating admission (Fix 3a): the expired session is gone
+        // before the cap is even checked, so the new session is admitted
+        // immediately — not after waiting for the next 5s timer tick.
+        var (withSweep, expiredID) = buildOwnerAtCapWithOneAlreadyExpired()
+        _ = withSweep.apply(.tick, now: later)
+        XCTAssertFalse(withSweep.sessions.contains(where: { $0.id == expiredID }), "the sweep must have already removed it")
+        XCTAssertEqual(withSweep.startSession(make(.indefinite), now: later, liveAgentConnections: 0), .admitted)
+    }
+
+    func testPreSweepingBeforeStartSessionDropsDesiredKeepAwakeImmediately() {
+        var engine = SessionEngine()
+        let expired = make(.duration(until: t0.addingTimeInterval(60)))
+        XCTAssertEqual(engine.startSession(expired, now: t0, liveAgentConnections: 0), .admitted)
+        XCTAssertTrue(engine.desiredKeepAwake)
+
+        let later = t0.addingTimeInterval(120)
+        // Not yet due for its own reasons: still true until something
+        // sweeps, proving the assertion below isn't vacuous.
+        XCTAssertTrue(engine.desiredKeepAwake, "the expired session hasn't been swept yet")
+
+        // The pre-sweep `DaemonRuntime.startSession` now performs before
+        // evaluating admission — `desiredKeepAwake` reflects reality on the
+        // very next call, not only after the next timer tick.
+        _ = engine.apply(.tick, now: later)
+        XCTAssertFalse(engine.desiredKeepAwake, "the only session present had already expired")
+    }
+
+    func testPreSweepingBeforeEndConditionStopsAnUnrelatedExpiredSessionSurviving() {
+        // `endCondition`'s *success* path already reaches `apply` (which
+        // always sweeps at the end), so it can't demonstrate the gap. The
+        // gap is on the early-return paths — `.notFound` here — which never
+        // reach `apply` at all: a report about some other/unknown id must
+        // not let a separately-expired session sit in the table.
+        func buildTableWithAnExpiredSession() -> (SessionEngine, expiredID: UUID) {
+            var engine = SessionEngine()
+            let expired = make(.duration(until: t0.addingTimeInterval(60)))
+            XCTAssertEqual(engine.startSession(expired, now: t0, liveAgentConnections: 0), .admitted)
+            return (engine, expired.id)
+        }
+
+        let later = t0.addingTimeInterval(120) // past the expired session's deadline
+
+        // Without the pre-sweep: `endCondition` on an unrelated/unknown id
+        // returns `.notFound` before `apply` ever runs on this call, so the
+        // separately-expired session is left in the table — still counting
+        // toward `desiredKeepAwake` — even though the call itself succeeded
+        // in the sense of returning a well-formed answer.
+        var (withoutSweep, expiredID1) = buildTableWithAnExpiredSession()
+        XCTAssertEqual(withoutSweep.endCondition(id: UUID(), now: later), .notFound)
+        XCTAssertTrue(withoutSweep.sessions.contains(where: { $0.id == expiredID1 }),
+                      "documents the bug: an unrelated expired session survives the call")
+
+        // With the pre-sweep `DaemonRuntime.conditionEnded` now performs
+        // before looking anything up (Fix 3a): the expired session is gone
+        // immediately, regardless of which session's condition was reported.
+        var (withSweep, expiredID2) = buildTableWithAnExpiredSession()
+        _ = withSweep.apply(.tick, now: later)
+        XCTAssertEqual(withSweep.endCondition(id: UUID(), now: later), .notFound)
+        XCTAssertFalse(withSweep.sessions.contains(where: { $0.id == expiredID2 }), "the pre-sweep must have already removed it")
+        XCTAssertFalse(withSweep.desiredKeepAwake)
+    }
 }

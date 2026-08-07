@@ -57,6 +57,31 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
         newConnection.exportedObject = HelperService(runtime: runtime, clientID: id, isAgent: isAgent)
 
+        // One-shot guard around `agentConnectionClosed()`: both
+        // `invalidationHandler` and `interruptionHandler` below can fire for
+        // the same connection, and each is documented to potentially run on
+        // an arbitrary thread. Nobody has shown both actually firing for one
+        // connection today, but nothing rules it out either, and the
+        // refcount in `DaemonRuntime` must be decremented at most once per
+        // accepted connection no matter how many teardown callbacks run.
+        // `NSLock` makes the check-and-set atomic; the flag itself is
+        // captured per connection (a fresh one per `shouldAcceptNewConnection`
+        // call), not shared across connections.
+        let closeLock = NSLock()
+        var closed = false
+        // Explicit `[runtime]` capture, same as the handlers below: captures
+        // the `DaemonRuntime` value itself, not `self`, so this closure
+        // (held by `newConnection`, not by the delegate) cannot extend the
+        // delegate's lifetime.
+        let closeAgentConnectionOnce: () -> Void = { [runtime] in
+            closeLock.lock()
+            let alreadyClosed = closed
+            closed = true
+            closeLock.unlock()
+            guard !alreadyClosed else { return }
+            runtime.agentConnectionClosed()
+        }
+
         newConnection.invalidationHandler = { [runtime] in
             runtime.clientDisconnected(id)
             // No session outlives its evidence (spec §5): once the *last*
@@ -64,18 +89,21 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
             // can no longer be verified and must end too (Fix 4: a single
             // other user's agent connection closing must not end this
             // one's sessions on a multi-user Mac).
-            if isAgent { runtime.agentConnectionClosed() }
+            if isAgent { closeAgentConnectionOnce() }
         }
         newConnection.interruptionHandler = { [runtime] in
             runtime.clientDisconnected(id)
-            if isAgent { runtime.agentConnectionClosed() }
+            if isAgent { closeAgentConnectionOnce() }
         }
 
-        newConnection.resume()
-        // Paired with the `agentConnectionClosed()` calls above (Fixes 3 &
-        // 4): every accepted agent connection increments the same refcount
-        // exactly once.
+        // Paired with the `closeAgentConnectionOnce()` calls above (Fixes 3
+        // & 4): every accepted agent connection increments the same
+        // refcount exactly once. Incremented *before* `resume()`, not
+        // after, so the refcount can never be observed out of order
+        // relative to the connection becoming live — there is no window
+        // where the connection is live but the count hasn't been bumped yet.
         if isAgent { runtime.agentConnectionOpened() }
+        newConnection.resume()
         helperLogger.log("Accepted connection \(id.rawValue) (agent: \(isAgent))")
         return true
     }
