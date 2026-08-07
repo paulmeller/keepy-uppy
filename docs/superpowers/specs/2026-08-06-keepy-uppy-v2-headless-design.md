@@ -121,10 +121,33 @@ Note that `csreq` only proves a requirement *parses*; it does not prove it
 *matches*. Semantics must be verified with `codesign -R` against binaries
 signed with each real identifier.
 
-Bundle identifiers distinguish **role**, not authorisation: only the agent may
-report condition observations, and the daemon ignores observation messages
-from anything else. Every client is equally entitled to start and stop its own
-sessions.
+**Role is derived structurally, from which Mach service a client connects to**
+— never from anything the client asserts, and never by looking up the peer's
+process ID. The daemon exposes two services:
+
+| Service | Requirement pins to | Role |
+|---|---|---|
+| `…keepy-uppy.helper` | all four identifiers | ordinary client |
+| `…keepy-uppy.helper.agent` | the agent identifier only | agent |
+
+Only the agent may report condition observations. Because the OS enforces each
+listener's signing requirement atomically at connection-accept time, arriving
+on the agent service *is* proof of being the agent — there is no lookup to
+race. An earlier design resolved the role from `connection.processIdentifier`,
+which is TOCTOU-prone (a PID can be recycled between accept and lookup);
+`NSXPCConnection` exposes no public `auditToken`, so the structural approach is
+both safer and free of undeclared API. It also removes a DEBUG/Release
+asymmetry: role no longer depends on signature checking being compiled in.
+
+**The per-user agent must therefore connect to the agent service.** Connecting
+to the general service leaves it silently treated as an ordinary client, and
+its condition reports would be ignored.
+
+Authorisation is separate from role: every client, agent included, may start
+and stop only **its own** sessions. Stopping another client's session is
+rejected and logged; affecting every client's sessions requires an explicit
+opt-in. Reading the session list is deliberately unrestricted, so any client
+can show *why* the Mac is awake.
 
 **Development asymmetry.** Ad-hoc builds have no Team ID, so enforcement is
 compiled out under `#if DEBUG` with a loud `os.Logger` error on every
