@@ -1,5 +1,20 @@
 import Foundation
 
+// A build that runs `xcodebuild archive` directly instead of `just archive`
+// never has REPLACE_WITH_TEAM_ID substituted. The signing requirement still
+// parses in that case — it just matches nothing, so the daemon becomes
+// silently unreachable. That looks like "the app is broken", and the wrong
+// fix for that misdiagnosis is loosening the requirement. Refuse to start
+// instead, loudly, so the real cause is obvious. Compiled out in DEBUG,
+// where the placeholder is expected (ad-hoc builds have no Team ID at all —
+// see SigningRequirement.isEnforced).
+#if !DEBUG
+guard SigningRequirement.teamID != "REPLACE_WITH_TEAM_ID" else {
+    helperLogger.fault("Refusing to start: Team ID placeholder was not substituted at build time. Archive with `just archive`, not a bare `xcodebuild archive`.")
+    exit(1)
+}
+#endif
+
 let runtime = DaemonRuntime()
 runtime.start()
 
