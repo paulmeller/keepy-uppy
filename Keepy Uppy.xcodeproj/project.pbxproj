@@ -20,7 +20,6 @@
 		1BCE8A4D2A20FF7A0BD0BA90 /* DaemonRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452D538FFAD2C1D62AC85201 /* DaemonRuntime.swift */; };
 		1D9D459531B25AD044DBEFA3 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
 		1E0BE3C1E4729694626E7157 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C24FA183A399A32DA5906A43 /* Assets.xcassets */; };
-		21AE97E55DEE234796BFC5E0 /* DaemonConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */; };
 		23DBA7C2CA5CFE2B085AD2C5 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
 		257CA45431B1F2736E17EBD9 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB173EBACDD623663B735B7 /* PowerMonitor.swift */; };
@@ -516,7 +515,6 @@
 			files = (
 				5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */,
 				0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */,
-				21AE97E55DEE234796BFC5E0 /* DaemonConnection.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
 				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
