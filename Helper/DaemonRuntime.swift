@@ -14,7 +14,17 @@ enum SessionStartResult: Equatable {
     case ownerLimitReached
     case globalLimitReached
     case noAgentConnected
+    case conditionNotMet
+    case triggerSuppressed
     case failed
+}
+
+enum LeaseRenewalResult: Equatable {
+    case renewed
+    case notFound
+    case forbidden
+    case notLease
+    case invalidDeadline
 }
 
 /// Serialises both engines behind one queue: XPC replies arrive on arbitrary
@@ -27,30 +37,21 @@ final class DaemonRuntime {
     private let bundlePath: String
     private var timer: DispatchSourceTimer?
 
-    /// Structural refcount of open connections to the agent-only Mach
-    /// service (Fixes 3 & 4). Tracks *connections*, not explicit
+    /// Per-user structural refcounts of open connections to the agent-only
+    /// Mach service. Tracks *connections*, not explicit
     /// `registerAsAgent` calls, matching how disappearance is already
     /// detected structurally in `HelperListenerDelegate` (a connection's
     /// agent-ness is fixed at accept time by which Mach service it came in
-    /// on, not by anything the client asserts). Two problems share this one
-    /// counter:
+    /// on, not by anything the client asserts). Two problems share this map:
     ///   - Fix 3: an agent-evaluated session must not be startable when no
     ///     agent has ever connected (e.g. the LaunchAgent never loaded or
     ///     was never approved) — spec §5 only covers the agent
     ///     *disappearing*, not never arriving.
-    ///   - Fix 4: agents are per-user but share one Mach service, so firing
-    ///     `.agentDisappeared` on *any* agent connection closing would let
-    ///     one user's logout end another user's `--while-app` session on a
-    ///     multi-user Mac. Firing only when the *last* connection closes
-    ///     fixes that for the common case. It is not full per-user scoping
-    ///     — the daemon does not track which session belongs to which
-    ///     user's agent, so if two different users' agents were ever
-    ///     connected at once, the daemon still cannot tell whose evidence
-    ///     went away when one of them disconnects; the surviving
-    ///     connection merely keeps everyone's agent-evaluated sessions
-    ///     alive until it, too, closes. That is a strict improvement over
-    ///     today (any disconnect ends everyone), not a complete fix.
-    private var liveAgentConnections = 0
+    ///   - Agents are per-user but share one Mach service. Counts are keyed
+    ///     by the authenticated peer UID, matching `Session.ownerUID`, so a
+    ///     logout ends exactly that user's agent-evaluated sessions without
+    ///     disturbing or lending evidence to another login session.
+    private var liveAgentConnectionsByUser: [UInt32: Int] = [:]
 
     init(observer: SafetyObserving = SystemSafetyObserver(),
          bundlePath: String = Bundle.main.bundlePath) {
@@ -87,9 +88,24 @@ final class DaemonRuntime {
             // beyond the unconditional sweep `apply` always performs at the
             // end of every event.
             _ = sessions.apply(.tick, now: now)
-            switch sessions.startSession(session, now: now, liveAgentConnections: liveAgentConnections) {
+            let powerSource = observer.batteryState().source
+            let liveAgentConnections = liveAgentConnectionsByUser[session.ownerUID, default: 0]
+            switch sessions.startSession(
+                session, now: now,
+                liveAgentConnections: liveAgentConnections,
+                onACPower: powerSource == .acPower,
+                triggersSuppressed: safety.triggersSuppressed) {
             case .admitted:
-                return applyLocked() ? .started : .failed
+                guard applyLocked() else {
+                    // Starting is transactional: never retain a session whose
+                    // id the caller will not receive. Otherwise a later retry
+                    // can turn a reported failure into an unmanageable live
+                    // session, especially when it is detached.
+                    _ = sessions.apply(.stop(id: session.id), now: now)
+                    _ = applyLocked()
+                    return .failed
+                }
+                return .started
             case .ownerLimitReached:
                 helperLogger.error("Rejected startSession from \(session.owner.rawValue): per-owner session cap (\(SessionAdmission.maxSessionsPerOwner)) reached")
                 return .ownerLimitReached
@@ -99,6 +115,11 @@ final class DaemonRuntime {
             case .noAgentConnected:
                 helperLogger.error("Rejected startSession from \(session.owner.rawValue): kind requires a live agent connection to evaluate, and none is connected")
                 return .noAgentConnected
+            case .conditionNotMet:
+                return .conditionNotMet
+            case .triggerSuppressed:
+                helperLogger.error("Rejected trigger-driven startSession from \(session.owner.rawValue): safety cooldown is active")
+                return .triggerSuppressed
             }
         }
     }
@@ -136,14 +157,28 @@ final class DaemonRuntime {
     /// `stopSession`, for the same reason: a lease belongs to the client
     /// that started it.
     @discardableResult
-    func renewLease(id: UUID, until: Date, requestedBy: ClientID) -> SessionIsolation.Authorization {
+    func renewLease(id: UUID, until: Date, requestedBy: ClientID) -> LeaseRenewalResult {
         queue.sync {
+            let now = Date()
+            _ = sessions.apply(.tick, now: now)
             let authorization = SessionIsolation.authorize(sessionID: id, requestedBy: requestedBy, among: sessions.sessions)
-            if authorization == .authorized {
-                _ = sessions.apply(.renewLease(id: id, until: until), now: Date())
-                _ = applyLocked()
+            switch authorization {
+            case .notFound: return .notFound
+            case .forbidden: return .forbidden
+            case .authorized: break
             }
-            return authorization
+
+            switch sessions.renewLease(id: id, until: until, now: now) {
+            case .renewed:
+                _ = applyLocked()
+                return .renewed
+            case .notFound:
+                return .notFound
+            case .notLease:
+                return .notLease
+            case .invalidDeadline:
+                return .invalidDeadline
+            }
         }
     }
 
@@ -168,21 +203,25 @@ final class DaemonRuntime {
 
     /// Call when a connection to the agent Mach service is accepted
     /// (Fixes 3 & 4). Must be paired with exactly one `agentConnectionClosed`.
-    func agentConnectionOpened() {
-        queue.sync { liveAgentConnections += 1 }
+    func agentConnectionOpened(userID: UInt32) {
+        queue.sync { liveAgentConnectionsByUser[userID, default: 0] += 1 }
     }
 
     /// Call when a connection to the agent Mach service invalidates or is
-    /// interrupted. Only the *last* live agent connection closing ends
-    /// agent-evaluated sessions daemon-wide — see the doc comment on
-    /// `liveAgentConnections` for why, and its residual limitation.
-    func agentConnectionClosed() {
+    /// interrupted. Only the last live connection for this UID ends that
+    /// user's agent-evaluated sessions.
+    func agentConnectionClosed(userID: UInt32) {
         queue.sync {
-            liveAgentConnections = max(0, liveAgentConnections - 1)
-            guard liveAgentConnections == 0 else { return }
-            let ended = sessions.apply(.agentDisappeared, now: Date())
+            let remaining = max(0, liveAgentConnectionsByUser[userID, default: 0] - 1)
+            if remaining == 0 {
+                liveAgentConnectionsByUser.removeValue(forKey: userID)
+            } else {
+                liveAgentConnectionsByUser[userID] = remaining
+            }
+            guard remaining == 0 else { return }
+            let ended = sessions.apply(.agentDisappeared(userID: userID), now: Date())
             if !ended.isEmpty {
-                helperLogger.log("Last agent connection gone; ended \(ended.count) unverifiable session(s)")
+                helperLogger.log("Last agent connection for uid \(userID) gone; ended \(ended.count) unverifiable session(s)")
             }
             _ = applyLocked()
         }
@@ -194,7 +233,7 @@ final class DaemonRuntime {
     /// `stopSession`/`renewLease` rejections are logged there rather than
     /// here.
     @discardableResult
-    func conditionEnded(id: UUID) -> ConditionEndOutcome {
+    func conditionEnded(id: UUID, reportedByUserID userID: UInt32) -> ConditionEndOutcome {
         queue.sync {
             let now = Date()
             // Same pre-sweep as `startSession`, and for the same reason
@@ -204,7 +243,7 @@ final class DaemonRuntime {
             // `id` — would otherwise keep counting toward the caps and
             // `desiredKeepAwake` until the next tick.
             _ = sessions.apply(.tick, now: now)
-            let outcome = sessions.endCondition(id: id, now: now)
+            let outcome = sessions.endCondition(id: id, reportedByUserID: userID, now: now)
             if case .ended = outcome { _ = applyLocked() }
             return outcome
         }
@@ -226,11 +265,20 @@ final class DaemonRuntime {
         let now = Date()
         _ = sessions.apply(.tick, now: now)
 
+        let battery = observer.batteryState()
+        let onBattery = battery.source == .battery
+        if battery.source != .acPower {
+            let ended = sessions.apply(.acPowerDisconnected, now: now)
+            if !ended.isEmpty {
+                helperLogger.log("AC power unavailable; ended \(ended.count) AC-bound session(s)")
+            }
+        }
+
         let oldest = sessions.sessions.map { now.timeIntervalSince($0.startedAt) }.max()
         let outcome = safety.evaluate(SafetyInputs(
             thermal: observer.thermalLevel(),
-            batteryPercentage: observer.batteryPercentage(),
-            onBattery: observer.isOnBatteryPower(),
+            batteryPercentage: battery.percentage,
+            onBattery: onBattery,
             lidClosed: observer.isLidClosed(),
             oldestSessionAge: oldest,
             now: now))

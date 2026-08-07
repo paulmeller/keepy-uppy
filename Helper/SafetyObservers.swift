@@ -5,8 +5,7 @@ import IOKit
 /// engine's tests never touch a framework.
 protocol SafetyObserving {
     func thermalLevel() -> ThermalLevel
-    func batteryPercentage() -> Int?
-    func isOnBatteryPower() -> Bool
+    func batteryState() -> BatteryState
     func isLidClosed() -> Bool
 }
 
@@ -21,9 +20,7 @@ struct SystemSafetyObserver: SafetyObserving {
         }
     }
 
-    func batteryPercentage() -> Int? { PowerControl.batteryState().percentage }
-
-    func isOnBatteryPower() -> Bool { PowerControl.batteryState().source == .battery }
+    func batteryState() -> BatteryState { PowerControl.batteryState() }
 
     /// AppleClamshellState on IOPMrootDomain reports whether the lid is
     /// actually shut — the genuinely dangerous configuration, where the
