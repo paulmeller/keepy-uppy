@@ -134,6 +134,13 @@ import os
 
 let agentLogger = Logger(subsystem: "au.com.workwireless.keepy-uppy.agent", category: "agent")
 
+/// `Result`'s `Failure` parameter requires `Error` conformance, which bare
+/// `String` lacks — `Result<String, String>` below does not compile
+/// without this. Added rather than a new named error type since the
+/// interface is deliberately a plain human-readable message, matching
+/// every other reply closure on `HelperProtocol`.
+extension String: @retroactive Error {}
+
 /// The agent's XPC client. Connects to the daemon's AGENT-ONLY Mach
 /// service — never the general one — so the daemon's structural role
 /// derivation (plan 1, spec §4) sees this process as the agent.
@@ -216,8 +223,18 @@ final class DaemonConnection {
 ```swift
 import Foundation
 
-let connection = DaemonConnection()
-connection.connect()
+// Top-level code in a `main.swift` tool target is a synchronous,
+// actor-nonisolated context — it is NOT implicitly @MainActor, even
+// though it always runs on the main thread in practice. Calling the
+// @MainActor-isolated `DaemonConnection()` / `connect()` directly here
+// does not compile ("call to main actor-isolated ... in a synchronous
+// nonisolated context"). `assumeIsolated` proves to the type system what
+// is already true at runtime. Do not use `Task { @MainActor in ... }`
+// instead: a `connection` local to that closure would be deallocated
+// (and its XPC connection torn down) the instant the closure returns —
+// `connection` must stay a top-level `let` so it lives for the process.
+let connection = MainActor.assumeIsolated { DaemonConnection() }
+MainActor.assumeIsolated { connection.connect() }
 
 RunLoop.main.run()
 ```
