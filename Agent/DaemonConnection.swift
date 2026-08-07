@@ -3,15 +3,6 @@ import os
 
 let agentLogger = Logger(subsystem: "au.com.workwireless.keepy-uppy.agent", category: "agent")
 
-/// `Result`'s `Failure` parameter requires `Error` conformance, which bare
-/// `String` lacks. The task brief's `startSession` interface is specified
-/// as `Result<String, String>` — a plain human-readable message on the
-/// error side, matching every other reply closure on `HelperProtocol`
-/// (`(Bool, String?)`, `(String?, String?)`, ...), not a typed error enum —
-/// so this conformance is added to satisfy that literal signature rather
-/// than introducing a new error type the brief didn't ask for.
-extension String: @retroactive Error {}
-
 /// The agent's XPC client. Connects to the daemon's AGENT-ONLY Mach
 /// service — never the general one — so the daemon's structural role
 /// derivation (plan 1, spec §4) sees this process as the agent.
@@ -57,13 +48,13 @@ final class DaemonConnection {
         } as? HelperProtocol
     }
 
-    func startSession(_ session: Session) async -> Result<String, String> {
-        guard let data = try? JSONEncoder().encode(session) else { return .failure("encode failed") }
+    func startSession(_ session: Session) async -> (id: String?, error: String?) {
+        guard let data = try? JSONEncoder().encode(session) else { return (nil, "encode failed") }
         return await withCheckedContinuation { continuation in
-            guard let proxy = proxy() else { return continuation.resume(returning: .failure("not connected")) }
+            guard let proxy = proxy() else { return continuation.resume(returning: (nil, "not connected")) }
             proxy.startSession(data) { sessionID, error in
-                if let sessionID { continuation.resume(returning: .success(sessionID)) }
-                else { continuation.resume(returning: .failure(error ?? "unknown")) }
+                if let sessionID { continuation.resume(returning: (sessionID, nil)) }
+                else { continuation.resume(returning: (nil, error ?? "unknown")) }
             }
         }
     }
