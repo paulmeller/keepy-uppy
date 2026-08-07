@@ -68,12 +68,16 @@ final class DaemonRuntime {
     /// and "this owner is gone" were the same statement, so
     /// `clientDisconnected` could end the owner's `clientBound` sessions
     /// outright. Now several live connections can legitimately share one
-    /// identity — two overlapping `keepy-uppy` invocations, or the menu-bar
-    /// app's reconnect logic (`Sources/DaemonConnection.swift`), which builds
-    /// the replacement connection while the old one is still being torn down
-    /// — and the first teardown to run would otherwise end sessions belonging
+    /// identity — two overlapping `keepy-uppy` invocations, for instance —
+    /// and the first teardown to run would otherwise end sessions belonging
     /// to a client that is still there. Only the last connection for an
     /// identity ends its sessions.
+    ///
+    /// Note this is *not* motivated by the menu-bar app's reconnect logic:
+    /// `Sources/DaemonConnection.swift` invalidates the dead connection and
+    /// only then waits before rebuilding, so its connections do not overlap
+    /// and its `clientBound` sessions still end on a daemon restart — which
+    /// is the intended behaviour, not a regression this refcount papers over.
     ///
     /// Deliberately separate from `liveAgentConnectionsByUser` above rather
     /// than folded into it: that one is keyed by uid (not identity), counts
@@ -174,11 +178,27 @@ final class DaemonRuntime {
     /// sessions unless `all` is set, in which case every client's sessions
     /// end (Task 10 isolation fix: this used to always end everyone's
     /// sessions, including a `detached` session another client started).
-    func stopAll(all: Bool, requestedBy: ClientID) {
+    /// Returns how many sessions were actually ended, so the caller can tell
+    /// "stopped three" from "matched nothing". Replying with a bare `true`
+    /// regardless is what let `keepy-uppy off` silently no-op for an entire
+    /// release: every invocation minted a fresh `ClientID`, so the own-scoped
+    /// filter never matched, and the command still exited 0 and printed
+    /// nothing. The identity fix removes that cause; reporting the count
+    /// removes the *silence*, so any future scoping mismatch says so out loud
+    /// instead of looking like success.
+    @discardableResult
+    func stopAll(all: Bool, requestedBy: ClientID) -> Int {
         queue.sync {
             let ids = SessionIsolation.sessionsToStop(all: all, requestedBy: requestedBy, among: sessions.sessions)
-            for id in ids { _ = sessions.apply(.stop(id: id), now: Date()) }
+            var stopped = 0
+            for id in ids {
+                // `apply` also returns anything swept for expiry in the same
+                // pass, so match on the id to count only real stops.
+                let ended = sessions.apply(.stop(id: id), now: Date())
+                if ended.contains(where: { $0.id == id }) { stopped += 1 }
+            }
             _ = applyLocked()
+            return stopped
         }
     }
 

@@ -217,7 +217,7 @@ final class DaemonConnection: ObservableObject {
 
     func stopAllSessions(all: Bool) async {
         let _: Bool? = await call { proxy, reply in
-            proxy.stopAllSessions(all: all) { ok, _ in reply(ok) }
+            proxy.stopAllSessions(all: all) { stopped, _ in reply(stopped >= 0) }
         }
         await refresh()
     }

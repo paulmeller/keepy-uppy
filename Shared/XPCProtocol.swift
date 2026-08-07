@@ -63,7 +63,11 @@ let cliMachServiceName = "au.com.workwireless.keepy-uppy.helper.cli"
     /// documented `off [--all | --session ID]` surface. (Task 10 isolation
     /// fix: this used to unconditionally end every client's sessions,
     /// including a `detached` session someone else started.)
-    func stopAllSessions(all: Bool, reply: @escaping (Bool, String?) -> Void)
+    /// Replies with how many sessions were actually ended (and an error
+    /// string on failure). The count exists so a caller can distinguish
+    /// "stopped three" from "matched nothing" — a bare success reply is
+    /// what let a scoping mismatch masquerade as a working `off`.
+    func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void)
 
     /// Replies with a JSON-encoded `[Session]` — every session daemon-wide,
     /// regardless of owner. This is intentional, not a fourth isolation gap:
