@@ -1,34 +1,12 @@
 import AppKit
 import Foundation
 
-/// The small, fixed set of quick-start choices shown in the menu and
-/// configurable as a default in Settings' General tab. Deliberately not
-/// arbitrary custom durations or `--while-app` (the CLI already covers
-/// those, per spec §9's CLI/UI split) — the menu is meant to cover the
-/// common case with one or two clicks, not replicate every CLI flag.
-enum DefaultSessionKind: String, CaseIterable, Codable, Identifiable {
-    case indefinite, oneHour, fourHours, eightHours
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .indefinite: return "Indefinitely"
-        case .oneHour: return "For 1 Hour"
-        case .fourHours: return "For 4 Hours"
-        case .eightHours: return "For 8 Hours"
-        }
-    }
-
-    func sessionKind(now: Date) -> SessionKind {
-        switch self {
-        case .indefinite: return .indefinite
-        case .oneHour: return .duration(until: now.addingTimeInterval(3600))
-        case .fourHours: return .duration(until: now.addingTimeInterval(4 * 3600))
-        case .eightHours: return .duration(until: now.addingTimeInterval(8 * 3600))
-        }
-    }
-}
+// `DefaultSessionKind` used to live here. It moved to
+// `Shared/DefaultSessionKind.swift` so `Shared/TriggerRule.swift` and the
+// agent's evidence loop can both see it — see that file's comment. What
+// remains below is app-UI-only formatting with an AppKit (`NSWorkspace`)
+// dependency, which must NOT move into `Shared/`: `Shared/` compiles into
+// the daemon and CLI, and neither may gain an AppKit dependency.
 
 func remainingTimeText(for session: Session, now: Date) -> String {
     switch session.kind {

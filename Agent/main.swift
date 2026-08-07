@@ -12,4 +12,21 @@ import Foundation
 let connection = MainActor.assumeIsolated { DaemonConnection() }
 MainActor.assumeIsolated { connection.connect() }
 
+// The whole reason this executable exists. Without this the agent is a
+// process that connects and then does nothing: `.whileAppRunning`,
+// `.whileExternalDisplay` and `.whileCPUBusy` sessions never get their
+// `reportConditionEnded` call when the condition actually ends (they would
+// linger until the daemon's fail-safes — agent disconnect or the 8h
+// backstop — rather than ending when the app quits or the display
+// unplugs), and every trigger rule the Settings UI saves is dead storage
+// nothing ever reads.
+//
+// Top-level `let` for the same reason as `connection` above: the runner
+// owns the repeating `Timer` and must outlive this file's straight-line
+// execution. A `Task`- or closure-scoped binding would be deallocated the
+// instant the closure returned, silently taking the timer with it and
+// restoring exactly the do-nothing behavior this line fixes.
+let evidenceLoop = MainActor.assumeIsolated { EvidenceLoopRunner(connection: connection) }
+MainActor.assumeIsolated { evidenceLoop.start() }
+
 RunLoop.main.run()

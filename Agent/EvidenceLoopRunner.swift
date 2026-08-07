@@ -10,7 +10,7 @@ import Foundation
 /// compiled into the GUI app bundle, unlike the pure `sessionsToEnd` and
 /// `triggersToFire` functions it wraps.
 @MainActor
-final class EvidenceLoop {
+final class EvidenceLoopRunner {
     private let connection: DaemonConnection
     private let appRunning: AppRunningObserving
     private let display: DisplayObserving
@@ -47,8 +47,15 @@ final class EvidenceLoop {
         let fired = triggersToFire(rules, activeSessions: sessions, appRunning: appRunning,
                                    display: display, onACPower: onACPower)
         for rule in fired {
-            let session = Session(id: UUID(), kind: rule.sessionKind, owner: ClientID(rawValue: "agent"),
-                                  persistence: .detached, origin: .trigger, startedAt: Date(),
+            // The rule stores relative intent; the absolute deadline is
+            // computed HERE, at the instant the rule actually fires. A rule
+            // written weeks ago must still buy a full hour of wakefulness
+            // now — see `TriggerRule.defaultKind` for what going the other
+            // way costs (a permanent 5s refire loop against the daemon).
+            let now = Date()
+            let session = Session(id: UUID(), kind: rule.defaultKind.sessionKind(now: now),
+                                  owner: ClientID(rawValue: "agent"),
+                                  persistence: .detached, origin: .trigger, startedAt: now,
                                   triggerID: rule.id)
             let (sessionID, error) = await connection.startSession(session)
             if sessionID == nil {

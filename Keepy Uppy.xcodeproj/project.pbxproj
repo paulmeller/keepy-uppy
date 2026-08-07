@@ -54,11 +54,14 @@
 		6D3CD27C18972F228A162EDA /* OnboardingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC93D8F483F729997B0AA625 /* OnboardingService.swift */; };
 		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		75D494F1A529955A7113FF53 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
+		770C9F3FFCAFBB6B55F001AB /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
 		77A18ABA6A6384086F59C5B4 /* EvidenceLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */; };
+		7DDCF27B3537F1F93EEBD2F1 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
 		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
 		832845DF92892B7EC3D10B34 /* TriggersSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6053E3730063486EB2B7F47E /* TriggersSettingsTab.swift */; };
 		8EE316A0540244088048694F /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
 		9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		975F27F013825BDCA91E0F56 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
 		98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
 		9B26095FAF7C5F4D344163A4 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
 		9E5C1650D13823129E390713 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
@@ -93,6 +96,7 @@
 		F0F7A9114AD24E3E80964B0D /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
 		F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7050454E03C8EC42BB1FA587 /* HelperService.swift */; };
 		F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		F4D800917751BE14692CAC81 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
 		F8F1EDA29C310995A649B60A /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
 		FC178B9E631E011DE37D5CFB /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
 		FC59D49EDCCE2E89FB26271E /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
@@ -186,6 +190,7 @@
 		5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngineTests.swift; sourceTree = "<group>"; };
 		5D4B9722F7D6FC46A899FC0C /* EvidenceLoopRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceLoopRunner.swift; sourceTree = "<group>"; };
 		6053E3730063486EB2B7F47E /* TriggersSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriggersSettingsTab.swift; sourceTree = "<group>"; };
+		63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultSessionKind.swift; sourceTree = "<group>"; };
 		662677939368E57BBCCF74F9 /* ConditionObserving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObserving.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
 		6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObserverTests.swift; sourceTree = "<group>"; };
@@ -344,6 +349,7 @@
 			children = (
 				BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */,
 				662677939368E57BBCCF74F9 /* ConditionObserving.swift */,
+				63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */,
 				9D902E0F1599E782E483782C /* PowerControl.swift */,
 				DEA751693CBB332AD0528569 /* PowerSPI.h */,
 				6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */,
@@ -573,6 +579,7 @@
 				0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */,
 				E33CE1EF5DDFC4135E801A93 /* ConditionObserving.swift in Sources */,
 				3C0396EB9AC444542A4976B3 /* DaemonConnection.swift in Sources */,
+				7DDCF27B3537F1F93EEBD2F1 /* DefaultSessionKind.swift in Sources */,
 				77A18ABA6A6384086F59C5B4 /* EvidenceLoop.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
@@ -600,6 +607,7 @@
 			files = (
 				3B6A0865CE0A13D715C5979B /* CLICommand.swift in Sources */,
 				AD5D3430BAA216127965342D /* ConditionObserving.swift in Sources */,
+				F4D800917751BE14692CAC81 /* DefaultSessionKind.swift in Sources */,
 				9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */,
 				F8F1EDA29C310995A649B60A /* SafetyConfigStore.swift in Sources */,
 				36FEDB5B2CBA73979F19BA0B /* SafetyEngine.swift in Sources */,
@@ -621,6 +629,7 @@
 				04BC14A7FBEA7B5F13A4B8A6 /* ConditionObservers.swift in Sources */,
 				38873D6FB38ED6F0E275ABBE /* ConditionObserving.swift in Sources */,
 				4474CB1CFA5268DEA6B28DE0 /* DaemonConnection.swift in Sources */,
+				770C9F3FFCAFBB6B55F001AB /* DefaultSessionKind.swift in Sources */,
 				AF8893B05DF9B1829320A0CD /* EvidenceLoop.swift in Sources */,
 				1121990A3C9DA0255DF8E4FE /* EvidenceLoopRunner.swift in Sources */,
 				2DA8B158C4508F47C5B42354 /* PowerControl.swift in Sources */,
@@ -643,6 +652,7 @@
 				5FDF183125F827921A79CBB8 /* CLICommand.swift in Sources */,
 				59317C33FAD7B86792FEFF6A /* ConditionObserving.swift in Sources */,
 				1BCE8A4D2A20FF7A0BD0BA90 /* DaemonRuntime.swift in Sources */,
+				975F27F013825BDCA91E0F56 /* DefaultSessionKind.swift in Sources */,
 				107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */,
 				F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */,
 				F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */,

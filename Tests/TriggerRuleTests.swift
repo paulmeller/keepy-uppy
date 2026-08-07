@@ -26,8 +26,8 @@ final class TriggerRuleTests: XCTestCase {
         func hasExternalDisplay() -> Bool { external }
     }
 
-    private func rule(_ condition: TriggerCondition, kind: SessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
-        TriggerRule(id: UUID(), condition: condition, sessionKind: kind, enabled: enabled)
+    private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
+        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
     }
 
     func testDisabledRuleNeverFires() {
@@ -64,7 +64,8 @@ final class TriggerRuleTests: XCTestCase {
     /// by a live session must not fire again every tick.
     func testAlreadyActiveTriggerDoesNotFireAgain() {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
-        let already = Session(id: UUID(), kind: r.sessionKind, owner: ClientID(rawValue: "agent"),
+        let already = Session(id: UUID(), kind: r.defaultKind.sessionKind(now: Date()),
+                              owner: ClientID(rawValue: "agent"),
                               persistence: .detached, origin: .trigger, startedAt: Date(),
                               triggerID: r.id)
         let fired = triggersToFire([r], activeSessions: [already],
@@ -80,12 +81,64 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertTrue(fired.isEmpty)
     }
 
+    /// Final whole-branch review, Finding 2. A rule created today and fired
+    /// next week must keep the Mac awake for an hour *from when it fired*.
+    /// Before the fix the rule stored an absolute `SessionKind` frozen at
+    /// creation time, so the deadline here landed seven days in the past —
+    /// the daemon's `removeExpired` sweep then deleted the session in the
+    /// same call that admitted it, and the agent refired the rule forever.
+    func testRuleFiredLongAfterCreationGetsADeadlineInTheFuture() {
+        let creation = Date(timeIntervalSince1970: 1_000_000)
+        let fire = creation.addingTimeInterval(7 * 24 * 3600)
+        // Exactly what TriggersSettingsTab.addRule() does, at `creation`.
+        let r = rule(.acPowerConnected, kind: .oneHour)
+        // Exactly what EvidenceLoopRunner does when the rule fires, at `fire`.
+        let session = Session(id: UUID(), kind: r.defaultKind.sessionKind(now: fire),
+                              owner: ClientID(rawValue: "agent"),
+                              persistence: .detached, origin: .trigger, startedAt: fire, triggerID: r.id)
+        XCTAssertGreaterThan(session.kind.deadline ?? .distantPast, fire,
+                             "a rule fired at `fire` must produce a session that outlives `fire`")
+        XCTAssertEqual(session.kind, .duration(until: fire.addingTimeInterval(3600)))
+    }
+
+    /// The structural half of the same guarantee: one stored rule, two
+    /// materializations far apart, two deadlines that differ by exactly the
+    /// gap between them. A rule holding a frozen `Date` could not do this —
+    /// both materializations would return the identical value.
+    func testTheSameRuleMaterializesADifferentDeadlineAtEachFireTime() {
+        let r = rule(.externalDisplayConnected, kind: .oneHour)
+        let first = Date(timeIntervalSince1970: 1_000_000)
+        let gap: TimeInterval = 30 * 24 * 3600
+        let second = first.addingTimeInterval(gap)
+
+        guard case .duration(let firstDeadline) = r.defaultKind.sessionKind(now: first),
+              case .duration(let secondDeadline) = r.defaultKind.sessionKind(now: second)
+        else { return XCTFail("expected .duration from a .oneHour rule") }
+
+        XCTAssertEqual(secondDeadline.timeIntervalSince(firstDeadline), gap, accuracy: 1,
+                       "the deadline must track the fire time, not be frozen at construction")
+        XCTAssertEqual(firstDeadline.timeIntervalSince(first), 3600, accuracy: 1)
+        XCTAssertEqual(secondDeadline.timeIntervalSince(second), 3600, accuracy: 1)
+    }
+
     func testStoreSaveThenLoadRoundTrips() {
-        let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"),
-                     kind: .duration(until: Date().addingTimeInterval(3600)), enabled: false)
+        let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"), kind: .oneHour, enabled: false)
         TriggerStore.save([r])
 
         let loaded = TriggerStore.load()
         XCTAssertEqual(loaded, [r])
+    }
+
+    /// The round-trip above is only meaningful if what got persisted was the
+    /// relative intent. A rule that survives a save/load cycle and *then*
+    /// fires must still produce a deadline relative to the firing, which is
+    /// only possible if no absolute date was ever written to disk.
+    func testAPersistedRuleStillMaterializesRelativeToFireTime() {
+        TriggerStore.save([rule(.acPowerConnected, kind: .fourHours)])
+        guard let loaded = TriggerStore.load().first else { return XCTFail("nothing round-tripped") }
+
+        let fire = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertEqual(loaded.defaultKind.sessionKind(now: fire),
+                       .duration(until: fire.addingTimeInterval(4 * 3600)))
     }
 }
