@@ -31,6 +31,11 @@ targets:
         codeSign: true
         copy:
           destination: executables
+      - target: KeepyUppyAgent
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
       - sdk: IOKit.framework
     settings:
       base:
@@ -104,6 +109,33 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         # See the matching comment on KeepyUppyHelper above — same reason.
+        SKIP_INSTALL: YES
+
+  KeepyUppyAgent:
+    type: tool
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources: [Agent, Shared]
+    dependencies:
+      - sdk: AppKit.framework
+      - sdk: CoreGraphics.framework
+      - sdk: IOKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.agent
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Manual
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        # See project.yml's KeepyUppyHelper/keepy-uppy for why this is
+        # mandatory, not optional: without it this target additionally
+        # installs standalone at /usr/local/bin during archiving, which
+        # breaks `xcodebuild -exportArchive` for the whole app in a way
+        # that produces no useful error message.
         SKIP_INSTALL: YES
 schemes:
   Keepy Uppy:
