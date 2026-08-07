@@ -34,27 +34,15 @@ struct TriggerRule: Codable, Equatable, Identifiable {
 /// which is the only thing that will ever populate this beyond the
 /// empty default.
 ///
-/// `UserDefaults(suiteName:)` returns `nil` when `suiteName` equals the
-/// *calling process's own* bundle identifier (an Apple-documented special
-/// case, not a bug in this code) — and that is exactly the app target's
-/// bundle identifier here (`au.com.workwireless.keepy-uppy`, see
-/// `project.yml`). So from the app process (where the future Triggers
-/// Settings tab this store exists for will actually run),
-/// `UserDefaults(suiteName: suiteName)` is nil and `.standard` is the
-/// correct fallback: for this exact degenerate case `.standard` resolves
-/// to the identical underlying preferences file suite-named lookup would
-/// have used, so the daemon (bundle id `...helper`, unaffected by this
-/// case) and CLI still read back whatever the app wrote. Mirrors
-/// `SafetyConfigStore`'s identical fix, confirmed empirically there via
-/// `SafetyConfigStoreTests`, which runs inside the app process as the
-/// test host and would silently no-op on save/load without this fallback.
+/// Stored in `PreferencesSuite` — the one shared suite, also used by
+/// `SafetyConfigStore` and the UI's `@AppStorage` call sites. That constant
+/// is where the `.standard` fallback and the reason it is required are
+/// documented; the suite name was hardcoded separately here until the final
+/// whole-branch review (Item 5) consolidated it.
 enum TriggerStore {
-    private static let suiteName = "au.com.workwireless.keepy-uppy"
     private static let key = "triggerRules"
 
-    private static var defaults: UserDefaults {
-        UserDefaults(suiteName: suiteName) ?? .standard
-    }
+    private static var defaults: UserDefaults { PreferencesSuite.defaults }
 
     static func load() -> [TriggerRule] {
         guard let data = defaults.data(forKey: key),
