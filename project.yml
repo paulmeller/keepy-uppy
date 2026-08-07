@@ -73,6 +73,17 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        # This target must never install standalone at its default
+        # /usr/local/bin path during an archive — it should only ever exist
+        # embedded inside Keepy Uppy.app (via the app target's `dependencies:
+        # embed: true`). Without this, xcodebuild archive additionally
+        # installs it as a top-level Products/usr/local/bin/ item, which
+        # makes Xcode's distribution-method manager stop recognizing the
+        # archive as a clean single-app archive at all — every app-specific
+        # distribution method (including Developer ID) gets silently
+        # rejected in favor of generic fallbacks, with no useful error until
+        # export time.
+        SKIP_INSTALL: YES
 
   keepy-uppy:
     type: tool
@@ -92,6 +103,8 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: Shared/PowerSPI.h
         GENERATE_INFOPLIST_FILE: YES
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        # See the matching comment on KeepyUppyHelper above — same reason.
+        SKIP_INSTALL: YES
 schemes:
   Keepy Uppy:
     build:
