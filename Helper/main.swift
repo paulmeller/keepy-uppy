@@ -25,20 +25,32 @@ guard SigningRequirement.teamID != "REPLACE_WITH_TEAM_ID" else {
 let runtime = DaemonRuntime()
 runtime.start()
 
-// Two Mach services, two listeners: role is established structurally by
-// which service a peer connects to, rather than derived after acceptance
-// from the peer's pid (TOCTOU-prone — a pid can be recycled between accept
-// and lookup). Both listeners set their code-signing requirement before
-// `resume()`, exactly as before.
+// One Mach service per client role, one listener each: role is established
+// structurally by which service a peer connects to, rather than derived
+// after acceptance from the peer's pid (TOCTOU-prone — a pid can be recycled
+// between accept and lookup). Every listener sets its code-signing
+// requirement before `resume()`, exactly as before, and each of those
+// requirements now admits exactly one bundle identifier — which is what lets
+// the accepting listener also supply the peer's stable `ClientID`
+// (`ClientRole.clientID(forUserID:)`).
+//
+// Adding a role means adding a case to `ClientRole`, a line here, and a
+// `MachServices` entry in `Launchd/au.com.workwireless.keepy-uppy.helper.plist`
+// — a listener whose service is not declared there never receives anything.
 
-let generalDelegate = HelperListenerDelegate(runtime: runtime, isAgent: false)
-let generalListener = NSXPCListener(machServiceName: helperMachServiceName)
-generalListener.delegate = generalDelegate
-generalListener.resume()
+let appDelegate = HelperListenerDelegate(runtime: runtime, role: .app)
+let appListener = NSXPCListener(machServiceName: ClientRole.app.machServiceName)
+appListener.delegate = appDelegate
+appListener.resume()
 
-let agentDelegate = HelperListenerDelegate(runtime: runtime, isAgent: true)
-let agentListener = NSXPCListener(machServiceName: agentMachServiceName)
+let agentDelegate = HelperListenerDelegate(runtime: runtime, role: .agent)
+let agentListener = NSXPCListener(machServiceName: ClientRole.agent.machServiceName)
 agentListener.delegate = agentDelegate
 agentListener.resume()
+
+let cliDelegate = HelperListenerDelegate(runtime: runtime, role: .cli)
+let cliListener = NSXPCListener(machServiceName: ClientRole.cli.machServiceName)
+cliListener.delegate = cliDelegate
+cliListener.resume()
 
 RunLoop.main.run()

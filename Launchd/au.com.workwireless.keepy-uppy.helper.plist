@@ -17,6 +17,8 @@
         <true/>
         <key>au.com.workwireless.keepy-uppy.helper.agent</key>
         <true/>
+        <key>au.com.workwireless.keepy-uppy.helper.cli</key>
+        <true/>
     </dict>
     <key>AssociatedBundleIdentifiers</key>
     <array>

@@ -37,14 +37,20 @@ enum SessionAdmission: Equatable {
     case conditionNotMet
     case triggerSuppressed
 
-    /// A single client (XPC connection) legitimately runs very few
-    /// concurrent sessions; 20 is generous headroom over that while
-    /// bounding what one misbehaving or compromised client can grow the
-    /// table by.
+    /// A single client legitimately runs very few concurrent sessions; 20 is
+    /// generous headroom over that while bounding what one misbehaving or
+    /// compromised client can grow the table by.
+    ///
+    /// This only became a real bound once `ClientID` became stable
+    /// (`ClientRole.clientID(forUserID:)`). While every accepted connection
+    /// minted a fresh random identity, an owner's allowance reset on every
+    /// reconnect, so the cap was close to decorative — reconnecting 20 times
+    /// bought 400 sessions. There are now exactly (roles × uids) possible
+    /// owners, and reconnecting returns to the same one.
     static let maxSessionsPerOwner = 20
-    /// Each XPC connection gets a fresh, unique `ClientID`
-    /// (`HelperListenerDelegate`), so a per-owner cap alone does not bound
-    /// the daemon against a flood of short-lived connections. 200 — 10x the
+    /// A backstop the per-owner cap cannot provide: on a multi-user Mac
+    /// there is one owner per role per logged-in uid, so the per-owner cap
+    /// alone scales with however many identities exist. 200 — 10x the
     /// per-owner cap — keeps the whole table, and every O(n) operation over
     /// it, in the low hundreds regardless of how many distinct clients
     /// connect.

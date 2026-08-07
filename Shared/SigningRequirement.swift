@@ -13,74 +13,89 @@ enum SigningRequirement {
     /// Substituted at build time from KEEPY_UPPY_TEAM_ID (Task 10).
     static let teamID = "REPLACE_WITH_TEAM_ID"
 
-    /// The agent's bundle identifier. Named once here so `identifiers` below
-    /// and `agentRequirement` (which pins the dedicated agent Mach service to
-    /// this identifier alone — see `agentMachServiceName`) cannot drift apart
-    /// from each other.
+    // MARK: - Inbound: one requirement per Mach service, one identifier each
+    //
+    // The daemon exposes one Mach service per client role
+    // (`Shared/XPCProtocol.swift`) and each listener pins the matching
+    // requirement below, so an accepted connection's role is established
+    // structurally by the OS at accept time. There is deliberately no
+    // "general" requirement admitting several identifiers any more: the
+    // single service that used to admit all three clients was what forced
+    // the daemon to invent a random per-connection `ClientID`, since arriving
+    // on that service said nothing about *which* client had arrived. Three
+    // single-identifier services are strictly tighter than that shape, not
+    // looser — every service now admits exactly one binary.
+    //
+    // The daemon's own identifier is deliberately absent from all three: the
+    // daemon never connects to itself, so admitting it inbound would only
+    // widen the boundary with no legitimate caller to justify it. It appears
+    // only in `helperRequirement`, which is the *outbound* constant clients
+    // pin the daemon peer with.
+
+    /// The menu-bar app's bundle identifier.
+    static let appIdentifier = "au.com.workwireless.keepy-uppy"
+
+    /// The agent's bundle identifier.
     static let agentIdentifier = "au.com.workwireless.keepy-uppy.agent"
 
-    /// Every binary permitted to talk to the daemon, named explicitly. The
-    /// daemon's own identifier is deliberately absent: the daemon never
-    /// connects to itself, so admitting it here would only widen the
-    /// boundary with no legitimate caller to justify it.
-    static let identifiers = [
-        "au.com.workwireless.keepy-uppy",
-        agentIdentifier,
-        "au.com.workwireless.keepy-uppy.cli",
-    ]
+    /// The `keepy-uppy` CLI's bundle identifier.
+    static let cliIdentifier = "au.com.workwireless.keepy-uppy.cli"
 
     /// The `anchor apple generic` + Team ID clauses shared by every
-    /// requirement string below, factored out once so `requirement` and
-    /// `agentRequirement` are built from the same pieces and cannot drift
-    /// apart from each other.
+    /// requirement string below, factored out once so all four are built
+    /// from the same pieces and cannot drift apart from each other.
     private static let anchorAndTeam =
         "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""
 
-    // NOTE: the identifier group MUST stay parenthesised. `and` binds
-    // tighter than `or` in this grammar, so an unparenthesised
+    // HISTORICAL NOTE, deliberately kept — it cost real debugging effort and
+    // anyone adding an OR-group here must know it. `and` binds tighter than
+    // `or` in the code-signing requirement grammar, so an unparenthesised
     // "... and identifier = A or identifier = B" parses as
     // "(... and A) or (B)" — admitting anything claiming identifier B with
-    // no Team ID check at all. That is a privilege-escalation hole into a
-    // root daemon.
-    static let requirement =
-        anchorAndTeam + " and ("
-        + identifiers.map { "identifier = \"\($0)\"" }.joined(separator: " or ")
-        + ")"
+    // no Team ID check at all, i.e. a privilege-escalation path into a root
+    // daemon. Any multi-identifier group MUST be wrapped in parentheses.
+    //
+    // As of the three-service split, no live string in this file contains an
+    // `or` at all: every requirement below pins exactly one identifier, so
+    // the hazard cannot currently be tripped. The rule is recorded because
+    // the moment someone widens one of these to admit a second identifier,
+    // it applies again immediately.
 
-    /// Pins the dedicated agent Mach service (`agentMachServiceName`)
-    /// exclusively to the agent's bundle identifier, so a connection
-    /// accepted there can only ever be the agent binary. Built from the same
-    /// `anchorAndTeam` clause as `requirement` above so the two cannot drift
-    /// apart.
-    ///
-    /// NOTE: the same parenthesisation rule documented above still applies —
-    /// `and` binds tighter than `or` in this grammar. A single identifier
-    /// needs no OR-group today, but if this requirement ever grows to admit
-    /// more than one identifier, that group MUST be parenthesised exactly as
-    /// `requirement`'s is, for the same privilege-escalation reason.
+    /// Pins the app-only Mach service (`helperMachServiceName`) to the
+    /// menu-bar app's bundle identifier alone.
+    static let appRequirement =
+        anchorAndTeam + " and identifier = \"\(appIdentifier)\""
+
+    /// Pins the agent-only Mach service (`agentMachServiceName`) to the
+    /// agent's bundle identifier alone, so a connection accepted there can
+    /// only ever be the agent binary.
     static let agentRequirement =
         anchorAndTeam + " and identifier = \"\(agentIdentifier)\""
 
+    /// Pins the CLI-only Mach service (`cliMachServiceName`) to the
+    /// `keepy-uppy` binary's bundle identifier alone.
+    static let cliRequirement =
+        anchorAndTeam + " and identifier = \"\(cliIdentifier)\""
+
+    // MARK: - Outbound: what clients pin the daemon with
+
     /// The daemon's own bundle identifier, named once for the same reason
-    /// `agentIdentifier` is: so it and `helperRequirement` below cannot
-    /// drift apart. Deliberately not a member of `identifiers` — see that
-    /// property's comment.
+    /// the three client identifiers are: so it and `helperRequirement` below
+    /// cannot drift apart. Deliberately absent from every inbound
+    /// requirement — see the MARK comment above.
     static let helperIdentifier = "au.com.workwireless.keepy-uppy.helper"
 
-    /// Pins the daemon's own identity. Unused today: nothing in this
-    /// codebase opens an outbound `NSXPCConnection` yet, because the daemon
-    /// is the only thing that hosts an `NSXPCListener` so far — it never
-    /// connects to itself, so there is no caller for this constant right
-    /// now. It exists for plan 2, when the CLI, menu-bar app, and agent
-    /// become real XPC *clients* of the daemon: spec §4 requires both ends
-    /// of every connection to pin a code-signing requirement before
-    /// `resume()`, and this is what those clients must pin the daemon with
-    /// when they do. Built from the same `anchorAndTeam` clause as
-    /// `requirement`/`agentRequirement` so all three cannot drift apart.
-    /// Left here specifically so that work doesn't re-add the daemon's own
-    /// identifier into the *inbound* `identifiers` list (deliberately
-    /// removed — see its comment) or invent an ad hoc requirement string out
-    /// of confusion about what a client should pin against.
+    /// Pins the daemon's own identity. This is what the app, CLI, and agent
+    /// each pass to `setCodeSigningRequirement` on their outbound
+    /// connection: that call validates the **peer**, never the caller's own
+    /// identity, so a client must pin a requirement describing the *daemon*.
+    /// Spec §4 requires both ends of every connection to pin a requirement
+    /// before `resume()`; this is the clients' end. Built from the same
+    /// `anchorAndTeam` clause as the inbound requirements above so all four
+    /// cannot drift apart. Deliberately distinct from them, and must stay
+    /// so: pinning an inbound requirement client-side rejects the daemon on
+    /// the first real message (verified with `codesign -R` against a real
+    /// `KeepyUppyHelper` binary — see `SigningRequirementIdentifierTests`).
     static let helperRequirement =
         anchorAndTeam + " and identifier = \"\(helperIdentifier)\""
 

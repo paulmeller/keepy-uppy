@@ -1,15 +1,39 @@
 import Foundation
 
-/// Mach service name shared by helper, app, and CLI.
+// MARK: - Mach services: one per client role
+//
+// `Helper/main.swift` stands up one dedicated `NSXPCListener` per service
+// below, and each listener pins a code-signing requirement admitting exactly
+// ONE bundle identifier (`Shared/SigningRequirement.swift`). So a peer's role
+// is a property of *which service accepted it* — established atomically by
+// the OS at accept time — not something derived after the fact from an
+// inherently racy peer pid lookup (the TOCTOU issue the old
+// `PeerIdentity.isAgent(_:)` had), and never something the client asserts
+// about itself.
+//
+// This started as two services (a general one admitting any of the three
+// client identifiers, plus an agent-only one). It is three now because
+// `ClientID` is derived from the role as well (`Shared/ClientIdentity.swift`):
+// one service per role is what makes that identity both stable and
+// unforgeable. It is also *strictly tighter* than the two-service shape —
+// every service now admits exactly one binary, where one of them used to
+// admit three.
+
+/// Mach service reserved for the menu-bar app only. Keeps its original,
+/// unsuffixed name because it is the service name already baked into
+/// registered launchd jobs and shipped app bundles; only its pinned
+/// requirement narrowed, from "any of the three clients" to
+/// `SigningRequirement.appRequirement` (the app's identifier alone).
 let helperMachServiceName = "au.com.workwireless.keepy-uppy.helper"
 
-/// Mach service name reserved for the agent only. `Helper/main.swift` stands
-/// up a second, dedicated `NSXPCListener` on this service; every connection
-/// accepted there is the agent by construction. Role is therefore a property
-/// of *which service* a peer connected to, not something derived after the
-/// fact from an inherently racy peer pid lookup (the TOCTOU issue the old
-/// `PeerIdentity.isAgent(_:)` had).
+/// Mach service reserved for the agent only; every connection accepted here
+/// is the agent by construction (`SigningRequirement.agentRequirement`).
 let agentMachServiceName = "au.com.workwireless.keepy-uppy.helper.agent"
+
+/// Mach service reserved for the CLI only; every connection accepted here is
+/// the `keepy-uppy` binary by construction
+/// (`SigningRequirement.cliRequirement`).
+let cliMachServiceName = "au.com.workwireless.keepy-uppy.helper.cli"
 
 /// The session-oriented XPC surface (v2 Task 10): the protocol the agent,
 /// CLI, and UI are all written against.
@@ -52,9 +76,9 @@ let agentMachServiceName = "au.com.workwireless.keepy-uppy.helper.agent"
     func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void)
 
     /// Agent-only (spec §4): the daemon derives the caller's role
-    /// structurally, from which Mach service (`helperMachServiceName` vs.
-    /// `agentMachServiceName`) the connection came in on, and rejects this
-    /// from anything else, logging the rejection.
+    /// structurally, from which Mach service (`helperMachServiceName` /
+    /// `agentMachServiceName` / `cliMachServiceName`) the connection came in
+    /// on, and rejects this from anything else, logging the rejection.
     func reportConditionEnded(_ sessionID: String, reply: @escaping (Bool, String?) -> Void)
     /// Agent-only. Registers this connection as the user-session observer, so
     /// its disappearance ends sessions whose evidence it was providing.
@@ -93,6 +117,14 @@ enum SessionIsolation {
     /// if `all` is true — an explicit, logged escalation — otherwise only
     /// the caller's own, so `off` with no flags can never end a `detached`
     /// session someone else started.
+    ///
+    /// The `all: false` scoping is only useful if "the caller" means the same
+    /// thing across separate invocations. It did not: the daemon used to mint
+    /// a fresh random `ClientID` per accepted connection, so every
+    /// `keepy-uppy` process was a different owner than the one that started
+    /// the session and `off` matched nothing while reporting success. See
+    /// `ClientRole.clientID(forUserID:)` (Shared/ClientIdentity.swift) for the
+    /// stable, server-derived identity that makes this filter meaningful.
     static func sessionsToStop(all: Bool, requestedBy caller: ClientID, among sessions: [Session]) -> [UUID] {
         if all {
             return sessions.map(\.id)
