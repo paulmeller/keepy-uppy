@@ -44,12 +44,15 @@ final class DaemonRuntime {
     private let bundlePath: String
     private var timer: DispatchSourceTimer?
 
-    /// Per-user structural refcounts of open connections to the agent-only
-    /// Mach service. Tracks *connections*, not explicit
-    /// `registerAsAgent` calls, matching how disappearance is already
-    /// detected structurally in `HelperListenerDelegate` (a connection's
-    /// agent-ness is fixed at accept time by which Mach service it came in
-    /// on, not by anything the client asserts). Two problems share this map:
+    /// Per-user structural refcounts of *proven* open connections to the
+    /// agent-only Mach service — proven meaning the peer has satisfied that
+    /// service's code-signing requirement, evidenced by any message reaching
+    /// `HelperService` (see `clientConnected`). Still tracks *connections*,
+    /// not explicit `registerAsAgent` calls, matching how disappearance is
+    /// already detected structurally in `HelperListenerDelegate` (a
+    /// connection's agent-ness is fixed at accept time by which Mach service
+    /// it came in on, not by anything the client asserts). Two problems share
+    /// this map:
     ///   - Fix 3: an agent-evaluated session must not be startable when no
     ///     agent has ever connected (e.g. the LaunchAgent never loaded or
     ///     was never approved) — spec §5 only covers the agent
@@ -60,8 +63,10 @@ final class DaemonRuntime {
     ///     disturbing or lending evidence to another login session.
     private var liveAgentConnectionsByUser: [UInt32: Int] = [:]
 
-    /// Per-identity refcount of open connections, keyed by the same stable
-    /// `ClientID` that owns sessions (`ClientRole.clientID(forUserID:)`).
+    /// Per-identity refcount of *proven* open connections (again: peers that
+    /// have actually satisfied the accepting listener's requirement, not
+    /// merely been accepted), keyed by the same stable `ClientID` that owns
+    /// sessions (`ClientRole.clientID(forUserID:)`).
     ///
     /// Needed only because that identity became stable. While every accepted
     /// connection minted its own random `ClientID`, "this connection closed"
@@ -242,10 +247,19 @@ final class DaemonRuntime {
         }
     }
 
-    /// Call when a connection is accepted, before it is resumed. Must be
-    /// paired with exactly one `clientDisconnected` — `HelperListenerDelegate`
-    /// enforces that with a one-shot latch, since invalidation and
-    /// interruption can both fire for the same connection.
+    /// Call when a connection has *proven itself* — i.e. when its first
+    /// message reaches `HelperService`, which XPC delivers only once the
+    /// listener's code-signing requirement has been adjudicated in the peer's
+    /// favour. Deliberately not at accept time: accepting is something any
+    /// local process can provoke, so counting there let an unverified peer
+    /// hold this count above zero and suppress the `clientBound` cleanup
+    /// below.
+    ///
+    /// Must be paired with at most one `clientDisconnected` —
+    /// `HelperListenerDelegate` enforces that with a one-shot latch
+    /// (`ConnectionProofLatch`), since invalidation and interruption can both
+    /// fire for the same connection, and a connection that was never proven
+    /// must not decrement what it never incremented.
     func clientConnected(_ owner: ClientID) {
         queue.sync { liveConnectionsByClient[owner, default: 0] += 1 }
     }
@@ -265,8 +279,13 @@ final class DaemonRuntime {
         }
     }
 
-    /// Call when a connection to the agent Mach service is accepted
-    /// (Fixes 3 & 4). Must be paired with exactly one `agentConnectionClosed`.
+    /// Call when a connection to the agent Mach service has proven itself
+    /// (Fixes 3 & 4) — same trigger, and same reason, as `clientConnected`
+    /// above, and more load-bearing here: this count is the whole of the
+    /// evidence behind `SessionAdmission`'s `noAgentConnected` check, so
+    /// counting an unverified peer meant a rogue could make the daemon
+    /// believe an agent was present when none was. Must be paired with at
+    /// most one `agentConnectionClosed`.
     func agentConnectionOpened(userID: UInt32) {
         queue.sync { liveAgentConnectionsByUser[userID, default: 0] += 1 }
     }
