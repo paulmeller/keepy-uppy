@@ -122,6 +122,6 @@ Distribution signing and notarization remain unverified: this machine does
 not currently have a Developer ID Application certificate or a stored
 `notarytool` profile. Hardware checks for actual closed-lid wake behaviour and
 the thermal/battery guards also remain outstanding. The per-user agent has no
-executable target and `keepy-uppy` is still a one-line stub, so the plan-2
-headless product is not yet available despite the daemon boundary now being
-verified.
+executable target; however, the plan-2 headless product is now fully available
+with the CLI implementation (`setup`, `on`, `off`, `status`, `sessions`)
+verified as working in the daemon boundary testing described above.
