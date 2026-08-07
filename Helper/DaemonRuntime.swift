@@ -32,7 +32,7 @@ enum LeaseRenewalResult: Equatable {
 final class DaemonRuntime {
     private let queue = DispatchQueue(label: "au.com.workwireless.keepy-uppy.helper.runtime")
     private var sessions = SessionEngine()
-    private var safety = SafetyEngine(config: .default)
+    private var safety = SafetyEngine(config: SafetyConfigStore.load())
     private let observer: SafetyObserving
     private let bundlePath: String
     private var timer: DispatchSourceTimer?
@@ -264,6 +264,9 @@ final class DaemonRuntime {
 
         let now = Date()
         _ = sessions.apply(.tick, now: now)
+
+        let freshConfig = SafetyConfigStore.load()
+        if freshConfig != safety.config { safety.config = freshConfig }
 
         let battery = observer.batteryState()
         let onBattery = battery.source == .battery
