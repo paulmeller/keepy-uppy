@@ -22,6 +22,7 @@
 		36FEDB5B2CBA73979F19BA0B /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		3842107D5EEDA94A4284C102 /* SessionTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4BC286805AEA04137EB99C /* SessionTableTests.swift */; };
 		39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
+		5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */; };
 		50DAB243DD67F7F3C568A2B0 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
 		5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01853618C70A206B6F132D /* SessionIsolationTests.swift */; };
@@ -83,6 +84,16 @@
 		6FA1F630841276593EBC478A /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchAgents;
+			dstSubfolderSpec = 1;
+			files = (
+				5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CCA57C44CCB89A3B1B1FD6CA /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
 			dstPath = Contents/Library/LaunchDaemons;
 			dstSubfolderSpec = 1;
 			files = (
@@ -112,6 +123,7 @@
 		1086C7B6913D7589DE52E386 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		1875D33C618D88DEBDDB7CEB /* SessionTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTable.swift; sourceTree = "<group>"; };
 		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
+		1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.agent.plist"; sourceTree = "<group>"; };
 		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
 		3C4BC286805AEA04137EB99C /* SessionTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTableTests.swift; sourceTree = "<group>"; };
 		3CB173EBACDD623663B735B7 /* PowerMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMonitor.swift; sourceTree = "<group>"; };
@@ -263,6 +275,7 @@
 		D2E6C3D891CF027C4629BB3F /* Launchd */ = {
 			isa = PBXGroup;
 			children = (
+				1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */,
 				C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */,
 			);
 			path = Launchd;
@@ -307,6 +320,7 @@
 				0FC8DCC8AF9E1943D5A6736B /* Sources */,
 				371E1AFD2D6A5AD27CD7D8EB /* Resources */,
 				6FA1F630841276593EBC478A /* CopyFiles */,
+				CCA57C44CCB89A3B1B1FD6CA /* CopyFiles */,
 				07F816936C8B191D190B81AA /* Frameworks */,
 				D55898A12A803EC9066CA345 /* Embed Dependencies */,
 			);

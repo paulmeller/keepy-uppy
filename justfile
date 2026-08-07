@@ -36,7 +36,7 @@ test: generate
 run: build
     open "{{app_path}}"
 
-archive: generate
+archive: generate teamid
     @test -n "{{signing_identity}}" || { echo "Set KEEPY_UPPY_SIGNING_IDENTITY (see README)"; exit 1; }
     @test -n "{{team_id}}" || { echo "Set KEEPY_UPPY_TEAM_ID (see README)"; exit 1; }
     xcodebuild archive \
@@ -55,6 +55,20 @@ export: archive
         -archivePath "{{archive_path}}" \
         -exportPath "{{export_path}}" \
         -exportOptionsPlist "{{derived_data}}/ExportOptions.plist"
+    just restore-teamid
+
+# Substitutes the real Team ID into the code-signing requirement so it is
+# compiled into the Release binaries. Never committed: `export` restores the
+# placeholder afterwards (see restore-teamid) so the working tree never sits
+# with a real Team ID checked in.
+teamid:
+    @test -n "{{team_id}}" || { echo "Set KEEPY_UPPY_TEAM_ID (see README)"; exit 1; }
+    sed -i '' 's/REPLACE_WITH_TEAM_ID/{{team_id}}/g' Shared/SigningRequirement.swift
+    @echo "Substituted Team ID into SigningRequirement.swift"
+
+# Reverts the substitution `teamid` made, restoring the committed placeholder.
+restore-teamid:
+    git checkout -- Shared/SigningRequirement.swift
 
 dmg: export
     rm -f "{{dmg_path}}"
