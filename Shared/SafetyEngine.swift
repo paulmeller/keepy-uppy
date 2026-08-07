@@ -48,6 +48,20 @@ struct SafetyConfig: Codable, Equatable {
     /// Still governs the battery cutoff: tighter while the lid is genuinely
     /// shut and the machine cannot breathe.
     var lidClosedStricter: Bool
+
+    /// Percentage points added to `batteryCutoff` while the lid is shut.
+    /// Named once here because both `breach(_:)` and the Settings pane need
+    /// it: the pane tells the user the effective threshold, and a literal
+    /// duplicated across that boundary would keep printing the old number
+    /// after the engine changed, with no compile error and no failing test.
+    static let lidClosedMargin = 5
+
+    /// The cutoff actually applied for a given lid state, or nil when the
+    /// guard is off entirely.
+    func effectiveBatteryCutoff(lidClosed: Bool) -> Int? {
+        guard let batteryCutoff else { return nil }
+        return (lidClosed && lidClosedStricter) ? batteryCutoff + Self.lidClosedMargin : batteryCutoff
+    }
     var gracePeriod: TimeInterval
     var cooldown: TimeInterval
     /// Percentage points above the cutoff the battery must recover before
@@ -132,9 +146,8 @@ struct SafetyEngine {
            inputs.thermal >= limit {
             return .thermal
         }
-        if let cutoff = config.batteryCutoff, inputs.onBattery,
-           let level = inputs.batteryPercentage {
-            let effective = (inputs.lidClosed && config.lidClosedStricter) ? cutoff + 5 : cutoff
+        if inputs.onBattery, let level = inputs.batteryPercentage,
+           let effective = config.effectiveBatteryCutoff(lidClosed: inputs.lidClosed) {
             if level <= effective { return .lowBattery }
         }
         if let maximum = config.maxSessionDuration, let age = inputs.oldestSessionAge,

@@ -75,14 +75,44 @@ struct MenuContent: View {
 
         Divider()
 
-        Button("Settings…") {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            NSApp.activate(ignoringOtherApps: true)
+        // `SettingsLink` is the only supported way to open the `Settings`
+        // scene, but it needs macOS 14 and this ships back to 13. The 13
+        // fallback sends `showSettingsWindow:`, which is undocumented and —
+        // confirmed the hard way on macOS 26 — silently does nothing on
+        // current systems: the menu item was simply inert. So the modern path
+        // is not a nicety here, it is the one that works; the selector is kept
+        // only to keep the 13.0 deployment target honest.
+        if #available(macOS 14, *) {
+            OpenSettingsButton()
+        } else {
+            Button("Settings…") {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            .keyboardShortcut(",")
         }
-        .keyboardShortcut(",")
 
         Button("Quit Keepy Uppy") {
             NSApplication.shared.terminate(nil)
         }
+    }
+}
+
+
+/// `SettingsLink` opens the scene but cannot also activate the app, and
+/// `SettingsView.onAppear` only fires the first time — so with the window
+/// already open behind another app, clicking Settings did nothing visible.
+/// `openSettings` is the same action as an invocable closure, so activation
+/// can follow it every time.
+@available(macOS 14, *)
+private struct OpenSettingsButton: View {
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button("Settings…") {
+            openSettings()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .keyboardShortcut(",")
     }
 }
