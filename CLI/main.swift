@@ -92,5 +92,9 @@ case .sessions:
     }
 }
 
-_ = semaphore.wait(timeout: .now() + 10)
+let waitResult = semaphore.wait(timeout: .now() + 10)
+if waitResult == .timedOut {
+    FileHandle.standardError.write("keepy-uppy: timed out waiting for the daemon\n".data(using: .utf8)!)
+    exitCode = 1
+}
 exit(exitCode)
