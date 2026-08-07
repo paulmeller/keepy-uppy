@@ -5,7 +5,13 @@ func connect() -> HelperProtocol? {
     let connection = NSXPCConnection(machServiceName: helperMachServiceName, options: .privileged)
     connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
     if SigningRequirement.isEnforced {
-        connection.setCodeSigningRequirement(SigningRequirement.requirement)
+        // Pins the PEER (the daemon), not this process's own identity —
+        // `setCodeSigningRequirement` validates the other end of the
+        // connection. `SigningRequirement.requirement` is the *inbound*
+        // requirement the daemon applies to its clients, and it deliberately
+        // excludes the daemon's own identifier, so pinning it here rejects
+        // the daemon on the first real message.
+        connection.setCodeSigningRequirement(SigningRequirement.helperRequirement)
     }
     connection.resume()
     return connection.remoteObjectProxyWithErrorHandler { error in

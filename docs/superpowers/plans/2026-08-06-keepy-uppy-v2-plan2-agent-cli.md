@@ -23,7 +23,7 @@
 - **`SKIP_INSTALL: YES` on the agent target from the start.** Plan 1's Task 11 shipped without this on the two `tool` targets and it silently broke every subsequent archive export until root-caused against a real signed build — see plan 1's Task 1 for the full mechanism. Do not repeat that mistake here.
 - Agent and CLI both pin a code-signing requirement before using their connection, per spec §4:
   - Agent connects to `agentMachServiceName`, pins `SigningRequirement.helperRequirement` (pins the daemon's own identifier — this is that constant's first real caller).
-  - CLI connects to `helperMachServiceName`, pins `SigningRequirement.requirement` (the general one, already admits the CLI's own identifier).
+  - CLI connects to `helperMachServiceName`, pins `SigningRequirement.helperRequirement` — the same constant the agent pins, for the same reason. **Corrected by the final whole-branch review:** this line originally said to pin `SigningRequirement.requirement` "the general one, already admits the CLI's own identifier", and that reasoning is wrong. `setCodeSigningRequirement` validates the **peer** at the other end of the connection, never the caller's own identity, so what a client pins must describe the *daemon*. `SigningRequirement.requirement` is the daemon's *inbound* requirement for its clients and deliberately excludes the daemon's own identifier (see that property's comment), so pinning it client-side rejects the daemon on the first real message — in any signed build the CLI would only ever error. Verified with `codesign -R` against a real `KeepyUppyHelper` binary: `requirement` fails (exit 3), `helperRequirement` succeeds (exit 0).
   - Both respect `SigningRequirement.isEnforced`/`InsecureDebugGate` exactly as the daemon does — copy the pattern, do not invent a new one.
 - **Fairness fix, closing the spec §5 known limitation — read the spec section itself, not a paraphrase.** The documented gap is specifically that orphaned `detached` sessions (legitimate ones — that persistence exists so `keepy-uppy on --for 2h` survives its own process exiting) can accumulate from disconnected owners and exhaust the shared 200-session global cap, starving every other client including the menu-bar app. A per-connection rate limiter does not fix this (an attacker can just open connections slowly, one at a time); Task 7 implements the spec's own suggested fix instead — reserving global-cap headroom by sub-capping detached sessions specifically, since only detached sessions can ever become orphaned garbage (`clientBound` ones die with their owner by construction).
 - **Trigger-suppression enforcement already has a real gate — it just has no caller yet.** `SessionAdmission.evaluate` already rejects `.trigger`-origin starts while `SafetyEngine.triggersSuppressed` is true, and this is already unit-tested. Nothing has ever exercised that path end-to-end simply because nothing could originate a trigger-started session before this plan's agent exists. Task 6 is agent-side wiring only — do not re-implement the daemon-side check, it is already there.
@@ -1205,7 +1205,7 @@ git commit -m "Add pure CLI argument and duration parsing"
 - Modify: `CLI/main.swift`
 
 **Interfaces:**
-- Consumes: `parseCLIArguments`, `CLICommand` (Task 8); `HelperProtocol`, `SigningRequirement.requirement` (plan 1).
+- Consumes: `parseCLIArguments`, `CLICommand` (Task 8); `HelperProtocol`, `SigningRequirement.helperRequirement` (plan 1).
 - Produces: the working `keepy-uppy` binary.
 
 - [ ] **Step 1: Implement**
@@ -1217,7 +1217,8 @@ func connect() -> HelperProtocol? {
     let connection = NSXPCConnection(machServiceName: helperMachServiceName, options: .privileged)
     connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
     if SigningRequirement.isEnforced {
-        connection.setCodeSigningRequirement(SigningRequirement.requirement)
+        // Pins the PEER (the daemon), not the CLI's own identity.
+        connection.setCodeSigningRequirement(SigningRequirement.helperRequirement)
     }
     connection.resume()
     return connection.remoteObjectProxyWithErrorHandler { error in

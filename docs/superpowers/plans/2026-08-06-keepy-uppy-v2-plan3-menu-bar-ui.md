@@ -8,7 +8,7 @@
 
 **Scope:** Plan 3 of 3, covering spec §9's UI paragraph in full: session list with remaining time/condition/origin, start-session submenu, per-session stop, Settings (General/Safety/Triggers tabs), Quit.
 
-**Architecture:** `Sources/` (the existing v1 app target) stops talking to `pmset`/`osascript` entirely and becomes an XPC client of the daemon, structurally the same client role the CLI and agent already have (plan 2) — connects to `helperMachServiceName`, pins `SigningRequirement.requirement`. `Sources/PowerService.swift` (the osascript/pmset shell-out layer) is deleted outright: v2's daemon is the only process on the machine allowed to touch `pmset`/`IOPMSetSystemPowerSetting`, and the UI must not have its own back door around that boundary.
+**Architecture:** `Sources/` (the existing v1 app target) stops talking to `pmset`/`osascript` entirely and becomes an XPC client of the daemon, structurally the same client role the CLI and agent already have (plan 2) — connects to `helperMachServiceName`, pins `SigningRequirement.helperRequirement`. **Corrected by the final whole-branch review:** this originally said `SigningRequirement.requirement`. `setCodeSigningRequirement` validates the **peer** (the daemon), never the caller's own identity, so a client must pin a requirement describing the *daemon*. `SigningRequirement.requirement` is the daemon's *inbound* requirement for its clients and deliberately omits the daemon's own identifier, so pinning it app-side invalidates the connection on the first real message and the menu bar shows "Not connected" forever in any signed build. `Sources/PowerService.swift` (the osascript/pmset shell-out layer) is deleted outright: v2's daemon is the only process on the machine allowed to touch `pmset`/`IOPMSetSystemPowerSetting`, and the UI must not have its own back door around that boundary.
 
 **Tech Stack:** SwiftUI (`MenuBarExtra`, `Settings` scene), `NSXPCConnection` (same pattern as plan 2's agent/CLI clients), `SMAppService` (both `.mainApp` for the UI's own login item — already wired in `LoginItemService.swift` — and `.daemon`/`.agent` for onboarding, paralleling the CLI's `setup` command from plan 2 Task 10), `UserDefaults(suiteName:)` (reads/writes the same shared suite as plan 2's `TriggerStore`, plus a new `SafetyConfigStore`).
 
@@ -20,7 +20,7 @@
 - **Safety config is not currently user-configurable at all** — `Helper/DaemonRuntime.swift` hardcodes `SafetyEngine(config: .default)` at daemon startup and never reads it from anywhere else. A Safety settings tab that writes to `UserDefaults` and nothing reads would be a UI that changes nothing. Task 6 makes `SafetyConfig` a first-class, daemon-read, live-reloadable setting *before* Task 7 builds a tab over it — do these in that order.
 - Trigger rules and safety config both live in the same shared, unsandboxed `UserDefaults(suiteName: "au.com.workwireless.keepy-uppy")` suite plan 2's `TriggerStore` already established — reuse that suite name exactly, do not invent a second one.
 - **Deployment target is `13.0`** (confirmed in `project.yml`, all four targets). SwiftUI APIs introduced in macOS 14+ are not available: notably the two-parameter `.onChange(of:) { oldValue, newValue in }` (use the one-parameter `.onChange(of:) { newValue in }` form instead) and `SettingsLink` (Task 3 uses the pre-14 `NSApp.sendAction(Selector(("showSettingsWindow:")), ...)` idiom instead — do not swap it for `SettingsLink`). Check any other SwiftUI API introduced after macOS 13 the same way before using it.
-- This plan reuses plan 2's `SessionKind`/`Session`/`TriggerRule`/`TriggerStore` types and the `HelperProtocol`/`SigningRequirement.requirement` XPC pattern verbatim — read `Shared/XPCProtocol.swift`, `Shared/Session.swift`, and `Shared/TriggerRule.swift` (once plan 2 lands) before Task 1, the same discipline plan 2 itself required against plan 1's output.
+- This plan reuses plan 2's `SessionKind`/`Session`/`TriggerRule`/`TriggerStore` types and the `HelperProtocol`/`SigningRequirement.helperRequirement` XPC pattern verbatim — read `Shared/XPCProtocol.swift`, `Shared/Session.swift`, and `Shared/TriggerRule.swift` (once plan 2 lands) before Task 1, the same discipline plan 2 itself required against plan 1's output.
 - Dev/test builds: `-derivedDataPath build CODE_SIGN_IDENTITY=-`. Never run a command that could trigger a macOS password/permission dialog, and never programmatically drive the actual menu-bar UI (clicking `MenuBarExtra` items, opening `Settings`, granting notification/login-item permissions) — those need a human on a signed build. Building and unit tests (for the pure logic pieces) are this plan's automated verification; the interactive flows are the manual checklist in Task 9.
 - Commit style, `.xcodeproj` UUID churn expectations, and the review discipline all carry over unchanged from plans 1 and 2.
 - **This is the last plan.** Task 9 ends with the spec §10-mandated "dedicated security review of the XPC boundary before merge" — run it against the *whole* branch (all three plans), not just this plan's diff, since plan 1's own review (already done, per its plan) predates plan 2's new XPC clients and plan 3's new Settings-writable surface.
@@ -34,7 +34,7 @@
 - Delete: `Sources/PowerService.swift`
 
 **Interfaces:**
-- Consumes: `HelperProtocol`, `helperMachServiceName`, `SigningRequirement.requirement`, `Session` (all `Shared/`, plans 1-2).
+- Consumes: `HelperProtocol`, `helperMachServiceName`, `SigningRequirement.helperRequirement` (the constant that pins the daemon peer — **not** `.requirement`, which is the daemon's inbound requirement for clients), `Session` (all `Shared/`, plans 1-2).
 - Produces: `DaemonConnection`, an `ObservableObject` with `@Published private(set) var sessions: [Session]`, `@Published private(set) var keepingAwake: Bool`, polling on a timer (same shape as plan 2's agent `EvidenceLoop` — XPC has no push mechanism here, so polling is the established pattern, not a new one), plus `startSession(_:)`/`stopSession(_:)`/`stopAllSessions(all:)` methods the UI calls directly.
 
 - [ ] **Step 1: Implement**
@@ -67,7 +67,8 @@ final class DaemonConnection: ObservableObject {
         let new = NSXPCConnection(machServiceName: helperMachServiceName, options: .privileged)
         new.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
         if SigningRequirement.isEnforced {
-            new.setCodeSigningRequirement(SigningRequirement.requirement)
+            // Pins the PEER (the daemon), not the app's own identity.
+            new.setCodeSigningRequirement(SigningRequirement.helperRequirement)
         }
         new.invalidationHandler = { [weak self] in
             Task { @MainActor in self?.isConnected = false }
