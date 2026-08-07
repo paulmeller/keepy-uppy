@@ -110,7 +110,7 @@ final class DaemonRuntime {
                 helperLogger.error("Rejected startSession from \(session.owner.rawValue): per-owner session cap (\(SessionAdmission.maxSessionsPerOwner)) reached")
                 return .ownerLimitReached
             case .globalLimitReached:
-                helperLogger.error("Rejected startSession from \(session.owner.rawValue): global session cap (\(SessionAdmission.maxSessionsGlobal)) reached")
+                helperLogger.error("Rejected startSession from \(session.owner.rawValue): session cap reached (global \(SessionAdmission.maxSessionsGlobal), detached sub-cap \(SessionAdmission.maxDetachedSessionsGlobal)); persistence=\(session.persistence.rawValue)")
                 return .globalLimitReached
             case .noAgentConnected:
                 helperLogger.error("Rejected startSession from \(session.owner.rawValue): kind requires a live agent connection to evaluate, and none is connected")
