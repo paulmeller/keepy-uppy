@@ -10,6 +10,7 @@ targets:
       - Sources
       - Shared
       - path: Agent/ConditionObservers.swift
+      - path: Agent/EvidenceLoop.swift
       - Resources/Assets.xcassets
       - path: Launchd/au.com.workwireless.keepy-uppy.helper.plist
         buildPhase:
