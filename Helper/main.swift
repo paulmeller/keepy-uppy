@@ -8,10 +8,17 @@ import Foundation
 // instead, loudly, so the real cause is obvious. Compiled out in DEBUG,
 // where the placeholder is expected (ad-hoc builds have no Team ID at all —
 // see SigningRequirement.isEnforced).
+//
+// exit(0), not exit(1): the launchd plist sets KeepAlive.SuccessfulExit =
+// false, which respawns the daemon on *any non-zero* exit. exit(1) here
+// would crash-loop a mis-archived build roughly every 10 seconds forever,
+// faulting each time and never reaching `runtime.start()` to converge sleep
+// back to enabled. `DaemonRuntime.tickLocked()`'s "app bundle is gone" exit
+// follows the same pattern for the same reason: this must not auto-restart.
 #if !DEBUG
 guard SigningRequirement.teamID != "REPLACE_WITH_TEAM_ID" else {
     helperLogger.fault("Refusing to start: Team ID placeholder was not substituted at build time. Archive with `just archive`, not a bare `xcodebuild archive`.")
-    exit(1)
+    exit(0)
 }
 #endif
 

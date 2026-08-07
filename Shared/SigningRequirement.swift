@@ -61,6 +61,29 @@ enum SigningRequirement {
     static let agentRequirement =
         anchorAndTeam + " and identifier = \"\(agentIdentifier)\""
 
+    /// The daemon's own bundle identifier, named once for the same reason
+    /// `agentIdentifier` is: so it and `helperRequirement` below cannot
+    /// drift apart. Deliberately not a member of `identifiers` — see that
+    /// property's comment.
+    static let helperIdentifier = "au.com.workwireless.keepy-uppy.helper"
+
+    /// Pins the daemon's own identity. Unused today: nothing in this
+    /// codebase opens an outbound `NSXPCConnection` yet, because the daemon
+    /// is the only thing that hosts an `NSXPCListener` so far — it never
+    /// connects to itself, so there is no caller for this constant right
+    /// now. It exists for plan 2, when the CLI, menu-bar app, and agent
+    /// become real XPC *clients* of the daemon: spec §4 requires both ends
+    /// of every connection to pin a code-signing requirement before
+    /// `resume()`, and this is what those clients must pin the daemon with
+    /// when they do. Built from the same `anchorAndTeam` clause as
+    /// `requirement`/`agentRequirement` so all three cannot drift apart.
+    /// Left here specifically so that work doesn't re-add the daemon's own
+    /// identifier into the *inbound* `identifiers` list (deliberately
+    /// removed — see its comment) or invent an ad hoc requirement string out
+    /// of confusion about what a client should pin against.
+    static let helperRequirement =
+        anchorAndTeam + " and identifier = \"\(helperIdentifier)\""
+
     /// Ad-hoc builds have no Team ID, so the requirement cannot be satisfied
     /// locally. Enforcement is therefore compiled out in DEBUG — loudly.
     /// A build that silently skipped verification would be far worse than one
