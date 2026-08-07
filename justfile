@@ -36,9 +36,26 @@ test: generate
 run: build
     open "{{app_path}}"
 
+# Both credentials are validated *before* the source file is touched, so a
+# missing one aborts with a clean tree. The `trap ... EXIT` is installed
+# before the substitution and runs on normal exit, a failing `xcodebuild`,
+# and an interrupt alike — an end-of-recipe restore line only runs after
+# success, which is exactly the gap that used to leave a real Team ID sitting
+# in a tracked, committable file. This recipe used to depend on a separate
+# `teamid` recipe (substitute) and rely on `export` calling a separate
+# `restore-teamid` (restore) after `xcodebuild -exportArchive`; both are
+# folded in here since `-exportArchive` repackages an already-built archive
+# and never rereads Shared/SigningRequirement.swift, so nothing downstream
+# needs the substitution to still be present once `archive`'s own
+# `xcodebuild` call has finished.
+# Substitutes the real Team ID into the signing requirement, archives, and restores the placeholder on every exit path.
 archive: generate
-    @test -n "{{signing_identity}}" || { echo "Set KEEPY_UPPY_SIGNING_IDENTITY (see README)"; exit 1; }
-    @test -n "{{team_id}}" || { echo "Set KEEPY_UPPY_TEAM_ID (see README)"; exit 1; }
+    #!/usr/bin/env bash
+    set -euo pipefail
+    test -n "{{signing_identity}}" || { echo "Set KEEPY_UPPY_SIGNING_IDENTITY (see README)"; exit 1; }
+    test -n "{{team_id}}" || { echo "Set KEEPY_UPPY_TEAM_ID (see README)"; exit 1; }
+    trap 'git checkout -- Shared/SigningRequirement.swift' EXIT
+    sed -i '' 's/REPLACE_WITH_TEAM_ID/{{team_id}}/g' Shared/SigningRequirement.swift
     xcodebuild archive \
         -project "{{project}}" \
         -scheme "{{scheme}}" \

@@ -1,0 +1,118 @@
+import Foundation
+
+/// Code-signing requirement pinning both ends of the XPC connection.
+///
+/// The code-signing requirement grammar has no prefix/wildcard operator for
+/// `identifier` — `=` is an exact match and `*` is a literal asterisk
+/// (verified empirically with `codesign -R` against ad-hoc-signed binaries).
+/// So each admitted binary is named explicitly instead. This also means
+/// widening the boundary — admitting one more binary — is a single,
+/// deliberate, reviewable line rather than a pattern someone could
+/// unknowingly broaden.
+enum SigningRequirement {
+    /// Substituted at build time from KEEPY_UPPY_TEAM_ID (Task 10).
+    static let teamID = "REPLACE_WITH_TEAM_ID"
+
+    /// The agent's bundle identifier. Named once here so `identifiers` below
+    /// and `agentRequirement` (which pins the dedicated agent Mach service to
+    /// this identifier alone — see `agentMachServiceName`) cannot drift apart
+    /// from each other.
+    static let agentIdentifier = "au.com.workwireless.keepy-uppy.agent"
+
+    /// Every binary permitted to talk to the daemon, named explicitly. The
+    /// daemon's own identifier is deliberately absent: the daemon never
+    /// connects to itself, so admitting it here would only widen the
+    /// boundary with no legitimate caller to justify it.
+    static let identifiers = [
+        "au.com.workwireless.keepy-uppy",
+        agentIdentifier,
+        "au.com.workwireless.keepy-uppy.cli",
+    ]
+
+    /// The `anchor apple generic` + Team ID clauses shared by every
+    /// requirement string below, factored out once so `requirement` and
+    /// `agentRequirement` are built from the same pieces and cannot drift
+    /// apart from each other.
+    private static let anchorAndTeam =
+        "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""
+
+    // NOTE: the identifier group MUST stay parenthesised. `and` binds
+    // tighter than `or` in this grammar, so an unparenthesised
+    // "... and identifier = A or identifier = B" parses as
+    // "(... and A) or (B)" — admitting anything claiming identifier B with
+    // no Team ID check at all. That is a privilege-escalation hole into a
+    // root daemon.
+    static let requirement =
+        anchorAndTeam + " and ("
+        + identifiers.map { "identifier = \"\($0)\"" }.joined(separator: " or ")
+        + ")"
+
+    /// Pins the dedicated agent Mach service (`agentMachServiceName`)
+    /// exclusively to the agent's bundle identifier, so a connection
+    /// accepted there can only ever be the agent binary. Built from the same
+    /// `anchorAndTeam` clause as `requirement` above so the two cannot drift
+    /// apart.
+    ///
+    /// NOTE: the same parenthesisation rule documented above still applies —
+    /// `and` binds tighter than `or` in this grammar. A single identifier
+    /// needs no OR-group today, but if this requirement ever grows to admit
+    /// more than one identifier, that group MUST be parenthesised exactly as
+    /// `requirement`'s is, for the same privilege-escalation reason.
+    static let agentRequirement =
+        anchorAndTeam + " and identifier = \"\(agentIdentifier)\""
+
+    /// The daemon's own bundle identifier, named once for the same reason
+    /// `agentIdentifier` is: so it and `helperRequirement` below cannot
+    /// drift apart. Deliberately not a member of `identifiers` — see that
+    /// property's comment.
+    static let helperIdentifier = "au.com.workwireless.keepy-uppy.helper"
+
+    /// Pins the daemon's own identity. Unused today: nothing in this
+    /// codebase opens an outbound `NSXPCConnection` yet, because the daemon
+    /// is the only thing that hosts an `NSXPCListener` so far — it never
+    /// connects to itself, so there is no caller for this constant right
+    /// now. It exists for plan 2, when the CLI, menu-bar app, and agent
+    /// become real XPC *clients* of the daemon: spec §4 requires both ends
+    /// of every connection to pin a code-signing requirement before
+    /// `resume()`, and this is what those clients must pin the daemon with
+    /// when they do. Built from the same `anchorAndTeam` clause as
+    /// `requirement`/`agentRequirement` so all three cannot drift apart.
+    /// Left here specifically so that work doesn't re-add the daemon's own
+    /// identifier into the *inbound* `identifiers` list (deliberately
+    /// removed — see its comment) or invent an ad hoc requirement string out
+    /// of confusion about what a client should pin against.
+    static let helperRequirement =
+        anchorAndTeam + " and identifier = \"\(helperIdentifier)\""
+
+    /// Ad-hoc builds have no Team ID, so the requirement cannot be satisfied
+    /// locally. Enforcement is therefore compiled out in DEBUG — loudly.
+    /// A build that silently skipped verification would be far worse than one
+    /// that refuses to run.
+    static var isEnforced: Bool {
+        #if DEBUG
+        return false
+        #else
+        return true
+        #endif
+    }
+}
+
+/// Gates whether an *unenforced* (DEBUG) daemon accepts XPC connections at
+/// all (security review batch B, Fix 5). Logging that enforcement is
+/// disabled and then accepting the connection anyway means any
+/// unprivileged local process can drive a root daemon's power state for as
+/// long as a Debug build happens to be registered — the exact failure mode
+/// `SigningRequirement.isEnforced`'s doc comment says must never happen
+/// silently. Pulled out as a pure, dependency-injectable predicate so the
+/// "must never be on by accident" property is unit tested directly,
+/// without standing up a real XPC connection.
+enum InsecureDebugGate {
+    static let environmentKey = "KEEPY_UPPY_INSECURE_XPC"
+
+    /// True only when the daemon's own environment has this set to exactly
+    /// "1" — not merely present, not "true"/"yes"/anything else — so a
+    /// stray or truthy-but-wrong value can never accidentally opt in.
+    static func isExplicitlyOptedIn(environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        environment[environmentKey] == "1"
+    }
+}

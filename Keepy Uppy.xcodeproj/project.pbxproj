@@ -7,17 +7,127 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3790DF112AE392E103DC407 /* ConditionObservers.swift */; };
+		01657073F548D34921633BBC /* PreferencesSuite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44F5DE9CD3A3DC285C4AE799 /* PreferencesSuite.swift */; };
+		045FA35366F0289479EF43B0 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
+		04BC14A7FBEA7B5F13A4B8A6 /* ConditionObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3790DF112AE392E103DC407 /* ConditionObservers.swift */; };
+		0764012F70E96AD66B17A6ED /* TriggerRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E55CC0BF317492E02091A315 /* TriggerRuleTests.swift */; };
+		0E878652C4010EDDB54D423A /* KeepyUppyAgent in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		0EC8F535E62CBEF5556D23A3 /* SafetySettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31AF20ED97A301059B1E511 /* SafetySettingsTab.swift */; };
+		102517230889DD8B63948126 /* SafetyEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */; };
+		107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */; };
+		1121990A3C9DA0255DF8E4FE /* EvidenceLoopRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4B9722F7D6FC46A899FC0C /* EvidenceLoopRunner.swift */; };
+		11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
+		130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */; };
+		16D842B032F1D3F4E51C6D15 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
+		194C25842A48E7780A0C815B /* TriggerRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5567693DBB46649F15660F65 /* TriggerRule.swift */; };
+		1B190889A1E8D20C6AB041A4 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
+		1BCE8A4D2A20FF7A0BD0BA90 /* DaemonRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452D538FFAD2C1D62AC85201 /* DaemonRuntime.swift */; };
+		1CE05C76A69AFB6AAC2A15D5 /* EvidenceLoopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 985633E51E87910741A868B9 /* EvidenceLoopTests.swift */; };
+		1D9D459531B25AD044DBEFA3 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
 		1E0BE3C1E4729694626E7157 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C24FA183A399A32DA5906A43 /* Assets.xcassets */; };
-		28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB173EBACDD623663B735B7 /* PowerMonitor.swift */; };
+		2046A3653A421150E4076778 /* SessionDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88D113717593F761307E5CCC /* SessionDisplay.swift */; };
+		23DBA7C2CA5CFE2B085AD2C5 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
+		257CA45431B1F2736E17EBD9 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
+		2D4077699E1B2B03321DF720 /* SessionEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBCAD8B2DA4BC93B40EBD9F3 /* SessionEngineTests.swift */; };
+		2DA8B158C4508F47C5B42354 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
 		3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 831A5A41A55C3873E0EB9F3A /* MenuContent.swift */; };
+		36FEDB5B2CBA73979F19BA0B /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
+		3842107D5EEDA94A4284C102 /* SessionTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4BC286805AEA04137EB99C /* SessionTableTests.swift */; };
+		38873D6FB38ED6F0E275ABBE /* ConditionObserving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662677939368E57BBCCF74F9 /* ConditionObserving.swift */; };
+		39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
+		3B6A0865CE0A13D715C5979B /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
+		3C0396EB9AC444542A4976B3 /* DaemonConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A48A369672CA8D81AF92B336 /* DaemonConnection.swift */; };
+		3DFE4877ECEA5CDD9E3E7C0F /* ConditionObserverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */; };
+		3E4EC5309AC785D43EC1F761 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
+		4095E84F4D3EF1D4D5EB0A17 /* DaemonConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F526CDD4DB4BC396C71F12A /* DaemonConnectionTests.swift */; };
+		4474CB1CFA5268DEA6B28DE0 /* DaemonConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */; };
+		4A027F4527C9F85C4215DC2C /* ContinuationLatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29BBFE918D05E898A2DFCFA /* ContinuationLatch.swift */; };
+		5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */; };
+		50DAB243DD67F7F3C568A2B0 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564C97E2907D353762EC75D8 /* AppDelegate.swift */; };
-		8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */; };
+		54CC3E88C8BD3C35432C6E28 /* TriggerRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5567693DBB46649F15660F65 /* TriggerRule.swift */; };
+		56EC2A17EFA3EDBF6542F298 /* AppKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 52D17C8B8EC0110BBE4FDAD0 /* AppKit.framework */; };
+		59317C33FAD7B86792FEFF6A /* ConditionObserving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662677939368E57BBCCF74F9 /* ConditionObserving.swift */; };
+		5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01853618C70A206B6F132D /* SessionIsolationTests.swift */; };
+		5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
+		5FDF183125F827921A79CBB8 /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
+		6296B8F1A2CB3332CF81AA53 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
+		6321EC183BF4638535315441 /* SigningRequirementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */; };
+		6D3CD27C18972F228A162EDA /* OnboardingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC93D8F483F729997B0AA625 /* OnboardingService.swift */; };
+		709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
+		75D494F1A529955A7113FF53 /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
+		770C9F3FFCAFBB6B55F001AB /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
+		77A18ABA6A6384086F59C5B4 /* EvidenceLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */; };
+		7BE742B7204BDE6156B3C0B3 /* ContinuationLatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29BBFE918D05E898A2DFCFA /* ContinuationLatch.swift */; };
+		7DDCF27B3537F1F93EEBD2F1 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
+		81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
+		832845DF92892B7EC3D10B34 /* TriggersSettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6053E3730063486EB2B7F47E /* TriggersSettingsTab.swift */; };
+		8EE316A0540244088048694F /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
+		9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		975F27F013825BDCA91E0F56 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
+		98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
+		9B26095FAF7C5F4D344163A4 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
+		9E5C1650D13823129E390713 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
+		A04BEC7E6E7A347B680847D9 /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
+		A20F3B90CEAFCCC0D19985E0 /* PreferencesSuite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44F5DE9CD3A3DC285C4AE799 /* PreferencesSuite.swift */; };
+		A351D4C2C5FB11F6CDCC076F /* PowerControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D51C70013B48AA645E69A849 /* PowerControlTests.swift */; };
 		A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */; };
+		A94B6B3317C441B81B422C13 /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
+		AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
+		AD5D3430BAA216127965342D /* ConditionObserving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662677939368E57BBCCF74F9 /* ConditionObserving.swift */; };
+		AF8893B05DF9B1829320A0CD /* EvidenceLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */; };
+		B0D22EEDF8369E1935DFBBF1 /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
+		B24BB0CBA33407554586D264 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1086C7B6913D7589DE52E386 /* main.swift */; };
+		B5D5F45AFF9C3C1C66D54C22 /* SessionDisplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C9E30C2B3A947B5E288D5A /* SessionDisplayTests.swift */; };
+		BD46C0F1942BA3148B3AE6D1 /* PreferencesSuite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44F5DE9CD3A3DC285C4AE799 /* PreferencesSuite.swift */; };
+		BE2891D20DBC6B2FD239440C /* CLICommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB887944CA21A7FF021348E1 /* CLICommandTests.swift */; };
+		BF46A8320FE63E1D0D3CD140 /* TriggerRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5567693DBB46649F15660F65 /* TriggerRule.swift */; };
+		C567589FB1F7C9D3F7B256C5 /* SafetyConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DAC358360D2EFD84541AD82 /* SafetyConfigStoreTests.swift */; };
+		C610925BC81C0A1ABDD08BB7 /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
+		C97BBEC2BCA672284CBB03B7 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 218D3338E5E977B7C598642C /* main.swift */; };
+		D0FA7447AE9815BE489DA325 /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
+		D205F3E8E168E58C4584C1EB /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = A54DD10487A2C28D32E9A656 /* main.swift */; };
+		D333E95EDBE986A660D87822 /* SafetyObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE06BE4B36F9317997926E86 /* SafetyObservers.swift */; };
+		D5BB3AC7DF491890CE637449 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
+		DA80661CEA738792C167C0BE /* PreferencesSuite.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44F5DE9CD3A3DC285C4AE799 /* PreferencesSuite.swift */; };
+		DB6EFFF38FC903A21A23DD7B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B662B63A4E2014F0AC465B /* SettingsView.swift */; };
+		DBA9A85250702785BA8594E6 /* ContinuationLatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29BBFE918D05E898A2DFCFA /* ContinuationLatch.swift */; };
+		DC7FF02970BD9EBD42FAB1FA /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D4F0DEA568C763BA517580FB /* CoreGraphics.framework */; };
+		DCE1C8F3ED5DEB0E8F1DCAAB /* ContinuationLatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29BBFE918D05E898A2DFCFA /* ContinuationLatch.swift */; };
+		DDD0267675D2F5AE957BDC8D /* TriggerRule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5567693DBB46649F15660F65 /* TriggerRule.swift */; };
+		DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		E33CE1EF5DDFC4135E801A93 /* ConditionObserving.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662677939368E57BBCCF74F9 /* ConditionObserving.swift */; };
+		E8C38C20E116D2684F48183B /* SigningRequirement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */; };
 		EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BBD98DDC9057502F4594A1F /* LoginItemService.swift */; };
-		F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */; };
+		EE6F70C75212E80A7CDDEDAE /* KeepyUppyHelper in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = C9CDC8DF84425782DA71988A /* KeepyUppyHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		EFC5CDA75216518C1547F3CD /* SessionTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1875D33C618D88DEBDDB7CEB /* SessionTable.swift */; };
+		F0F7A9114AD24E3E80964B0D /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
+		F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7050454E03C8EC42BB1FA587 /* HelperService.swift */; };
+		F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D902E0F1599E782E483782C /* PowerControl.swift */; };
+		F4D800917751BE14692CAC81 /* DefaultSessionKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */; };
+		F8F1EDA29C310995A649B60A /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
+		FC178B9E631E011DE37D5CFB /* CLICommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */; };
+		FC59D49EDCCE2E89FB26271E /* SafetyConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */; };
+		FE6E59808EB8F308E3C74DF0 /* keepy-uppy in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = 7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		0A424376985D3EC2EE576EC7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D8F245DB69BDA025D9EBA7F8;
+			remoteInfo = "keepy-uppy";
+		};
+		1A757FD635AE1B152B49DEDE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC59AA54F3B34BC2C0598242;
+			remoteInfo = KeepyUppyAgent;
+		};
 		5CA7447268FD2BF54D56523F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
@@ -25,22 +135,172 @@
 			remoteGlobalIDString = 372BEB17D83EAA4E3114018B;
 			remoteInfo = "Keepy Uppy";
 		};
+		7469637EBFDAFCAAFA9317DA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 56C6C209A0B091569761FC5C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2AD771B60EB2B13AC4F9E1FE;
+			remoteInfo = KeepyUppyHelper;
+		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		6FA1F630841276593EBC478A /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchDaemons;
+			dstSubfolderSpec = 1;
+			files = (
+				130B631B1FB1A62479A86359 /* au.com.workwireless.keepy-uppy.helper.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CCA57C44CCB89A3B1B1FD6CA /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchAgents;
+			dstSubfolderSpec = 1;
+			files = (
+				5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D55898A12A803EC9066CA345 /* Embed Dependencies */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				EE6F70C75212E80A7CDDEDAE /* KeepyUppyHelper in Embed Dependencies */,
+				FE6E59808EB8F308E3C74DF0 /* keepy-uppy in Embed Dependencies */,
+				0E878652C4010EDDB54D423A /* KeepyUppyAgent in Embed Dependencies */,
+			);
+			name = "Embed Dependencies";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
-		029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerServiceTests.swift; sourceTree = "<group>"; };
-		1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerService.swift; sourceTree = "<group>"; };
+		076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XPCProtocol.swift; sourceTree = "<group>"; };
+		0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirement.swift; sourceTree = "<group>"; };
+		0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEngine.swift; sourceTree = "<group>"; };
+		1086C7B6913D7589DE52E386 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		1875D33C618D88DEBDDB7CEB /* SessionTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTable.swift; sourceTree = "<group>"; };
+		1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.agent.plist"; sourceTree = "<group>"; };
+		218D3338E5E977B7C598642C /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		2BBD98DDC9057502F4594A1F /* LoginItemService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemService.swift; sourceTree = "<group>"; };
-		3CB173EBACDD623663B735B7 /* PowerMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerMonitor.swift; sourceTree = "<group>"; };
+		2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceLoop.swift; sourceTree = "<group>"; };
+		3C4BC286805AEA04137EB99C /* SessionTableTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTableTests.swift; sourceTree = "<group>"; };
+		44F5DE9CD3A3DC285C4AE799 /* PreferencesSuite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesSuite.swift; sourceTree = "<group>"; };
+		452D538FFAD2C1D62AC85201 /* DaemonRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonRuntime.swift; sourceTree = "<group>"; };
+		52D17C8B8EC0110BBE4FDAD0 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
+		5567693DBB46649F15660F65 /* TriggerRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriggerRule.swift; sourceTree = "<group>"; };
 		564C97E2907D353762EC75D8 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConnection.swift; sourceTree = "<group>"; };
+		5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngineTests.swift; sourceTree = "<group>"; };
+		5D4B9722F7D6FC46A899FC0C /* EvidenceLoopRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceLoopRunner.swift; sourceTree = "<group>"; };
+		6053E3730063486EB2B7F47E /* TriggersSettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriggersSettingsTab.swift; sourceTree = "<group>"; };
+		63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultSessionKind.swift; sourceTree = "<group>"; };
+		662677939368E57BBCCF74F9 /* ConditionObserving.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObserving.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
+		6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObserverTests.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyConfigStore.swift; sourceTree = "<group>"; };
+		6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngine.swift; sourceTree = "<group>"; };
+		7050454E03C8EC42BB1FA587 /* HelperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperService.swift; sourceTree = "<group>"; };
+		71B662B63A4E2014F0AC465B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */ = {isa = PBXFileReference; includeInIndex = 0; path = "keepy-uppy"; sourceTree = BUILT_PRODUCTS_DIR; };
 		831A5A41A55C3873E0EB9F3A /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
+		88D113717593F761307E5CCC /* SessionDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDisplay.swift; sourceTree = "<group>"; };
+		94E34F9ED9B92EB978F72902 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
+		985633E51E87910741A868B9 /* EvidenceLoopTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceLoopTests.swift; sourceTree = "<group>"; };
+		9D902E0F1599E782E483782C /* PowerControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControl.swift; sourceTree = "<group>"; };
+		9DAC358360D2EFD84541AD82 /* SafetyConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyConfigStoreTests.swift; sourceTree = "<group>"; };
+		9F526CDD4DB4BC396C71F12A /* DaemonConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConnectionTests.swift; sourceTree = "<group>"; };
+		A48A369672CA8D81AF92B336 /* DaemonConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConnection.swift; sourceTree = "<group>"; };
+		A54DD10487A2C28D32E9A656 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningRequirementTests.swift; sourceTree = "<group>"; };
+		B31AF20ED97A301059B1E511 /* SafetySettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetySettingsTab.swift; sourceTree = "<group>"; };
+		BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLICommand.swift; sourceTree = "<group>"; };
+		BB887944CA21A7FF021348E1 /* CLICommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLICommandTests.swift; sourceTree = "<group>"; };
+		C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "au.com.workwireless.keepy-uppy.helper.plist"; sourceTree = "<group>"; };
 		C24FA183A399A32DA5906A43 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Keepy Uppy.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C9CDC8DF84425782DA71988A /* KeepyUppyHelper */ = {isa = PBXFileReference; includeInIndex = 0; path = KeepyUppyHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		D4F0DEA568C763BA517580FB /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		D51C70013B48AA645E69A849 /* PowerControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControlTests.swift; sourceTree = "<group>"; };
+		DEA751693CBB332AD0528569 /* PowerSPI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PowerSPI.h; sourceTree = "<group>"; };
+		E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */ = {isa = PBXFileReference; includeInIndex = 0; path = KeepyUppyAgent; sourceTree = BUILT_PRODUCTS_DIR; };
+		E3790DF112AE392E103DC407 /* ConditionObservers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObservers.swift; sourceTree = "<group>"; };
+		E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperListenerDelegate.swift; sourceTree = "<group>"; };
+		E55CC0BF317492E02091A315 /* TriggerRuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TriggerRuleTests.swift; sourceTree = "<group>"; };
+		E9C9E30C2B3A947B5E288D5A /* SessionDisplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionDisplayTests.swift; sourceTree = "<group>"; };
+		EE01853618C70A206B6F132D /* SessionIsolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionIsolationTests.swift; sourceTree = "<group>"; };
+		EE06BE4B36F9317997926E86 /* SafetyObservers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyObservers.swift; sourceTree = "<group>"; };
+		F29BBFE918D05E898A2DFCFA /* ContinuationLatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuationLatch.swift; sourceTree = "<group>"; };
+		F88FDDC055F1833EEBFF2042 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
+		FBCAD8B2DA4BC93B40EBD9F3 /* SessionEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionEngineTests.swift; sourceTree = "<group>"; };
+		FC93D8F483F729997B0AA625 /* OnboardingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		07F816936C8B191D190B81AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				81F61597A9206DCA5CDDA0E0 /* IOKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		47A7E3705D4DBF2536FF3187 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				709E3AB8611F5CD889581044 /* IOKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B42AAE7087A1DFF408CABB06 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8DDFF4418F25168664AF926 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				56EC2A17EFA3EDBF6542F298 /* AppKit.framework in Frameworks */,
+				DC7FF02970BD9EBD42FAB1FA /* CoreGraphics.framework in Frameworks */,
+				D5BB3AC7DF491890CE637449 /* IOKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
+		01D059F22217BFF26D87DD58 /* Helper */ = {
+			isa = PBXGroup;
+			children = (
+				452D538FFAD2C1D62AC85201 /* DaemonRuntime.swift */,
+				E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */,
+				7050454E03C8EC42BB1FA587 /* HelperService.swift */,
+				A54DD10487A2C28D32E9A656 /* main.swift */,
+				EE06BE4B36F9317997926E86 /* SafetyObservers.swift */,
+			);
+			path = Helper;
+			sourceTree = "<group>";
+		};
+		0EE25908F10DE0C7420AB01D /* CLI */ = {
+			isa = PBXGroup;
+			children = (
+				1086C7B6913D7589DE52E386 /* main.swift */,
+			);
+			path = CLI;
+			sourceTree = "<group>";
+		};
 		1827E92DFD9F8B1EB6BB75FF /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -49,10 +309,34 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		3A0A787A7F3994CCCFC8C726 /* Agent */ = {
+			isa = PBXGroup;
+			children = (
+				E3790DF112AE392E103DC407 /* ConditionObservers.swift */,
+				5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */,
+				2F00EF5F00BC53E97DE76D29 /* EvidenceLoop.swift */,
+				5D4B9722F7D6FC46A899FC0C /* EvidenceLoopRunner.swift */,
+				218D3338E5E977B7C598642C /* main.swift */,
+			);
+			path = Agent;
+			sourceTree = "<group>";
+		};
 		406BB7D86155C2735F97FC65 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
-				029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */,
+				BB887944CA21A7FF021348E1 /* CLICommandTests.swift */,
+				6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */,
+				9F526CDD4DB4BC396C71F12A /* DaemonConnectionTests.swift */,
+				985633E51E87910741A868B9 /* EvidenceLoopTests.swift */,
+				D51C70013B48AA645E69A849 /* PowerControlTests.swift */,
+				9DAC358360D2EFD84541AD82 /* SafetyConfigStoreTests.swift */,
+				5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */,
+				E9C9E30C2B3A947B5E288D5A /* SessionDisplayTests.swift */,
+				FBCAD8B2DA4BC93B40EBD9F3 /* SessionEngineTests.swift */,
+				EE01853618C70A206B6F132D /* SessionIsolationTests.swift */,
+				3C4BC286805AEA04137EB99C /* SessionTableTests.swift */,
+				AA968C811CFA6DD0C77C9668 /* SigningRequirementTests.swift */,
+				E55CC0BF317492E02091A315 /* TriggerRuleTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -60,24 +344,75 @@
 		47E0E32377B4F771578FC9FE = {
 			isa = PBXGroup;
 			children = (
+				3A0A787A7F3994CCCFC8C726 /* Agent */,
+				0EE25908F10DE0C7420AB01D /* CLI */,
+				01D059F22217BFF26D87DD58 /* Helper */,
+				D2E6C3D891CF027C4629BB3F /* Launchd */,
 				1827E92DFD9F8B1EB6BB75FF /* Resources */,
+				5C4440F6DC01E7E379F5DF1E /* Shared */,
 				7ACAC04A41BF4B1F3566ADBB /* Sources */,
 				406BB7D86155C2735F97FC65 /* Tests */,
+				B58CEA155C7532881564012C /* Frameworks */,
 				ED1BCADD3AB3138280732983 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		5C4440F6DC01E7E379F5DF1E /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				BAFDAB5CAE6FB912199BBBA9 /* CLICommand.swift */,
+				662677939368E57BBCCF74F9 /* ConditionObserving.swift */,
+				F29BBFE918D05E898A2DFCFA /* ContinuationLatch.swift */,
+				63E2CF6A6EF33A1532767082 /* DefaultSessionKind.swift */,
+				9D902E0F1599E782E483782C /* PowerControl.swift */,
+				DEA751693CBB332AD0528569 /* PowerSPI.h */,
+				44F5DE9CD3A3DC285C4AE799 /* PreferencesSuite.swift */,
+				6F12222EF2237AF07426D2CA /* SafetyConfigStore.swift */,
+				6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */,
+				94E34F9ED9B92EB978F72902 /* Session.swift */,
+				0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */,
+				1875D33C618D88DEBDDB7CEB /* SessionTable.swift */,
+				0811BD9FF3C788850735BDA6 /* SigningRequirement.swift */,
+				5567693DBB46649F15660F65 /* TriggerRule.swift */,
+				076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		7ACAC04A41BF4B1F3566ADBB /* Sources */ = {
 			isa = PBXGroup;
 			children = (
 				564C97E2907D353762EC75D8 /* AppDelegate.swift */,
+				A48A369672CA8D81AF92B336 /* DaemonConnection.swift */,
 				6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */,
 				2BBD98DDC9057502F4594A1F /* LoginItemService.swift */,
 				831A5A41A55C3873E0EB9F3A /* MenuContent.swift */,
-				3CB173EBACDD623663B735B7 /* PowerMonitor.swift */,
-				1A0E853E9FBD7A2DC86F4B50 /* PowerService.swift */,
+				FC93D8F483F729997B0AA625 /* OnboardingService.swift */,
+				B31AF20ED97A301059B1E511 /* SafetySettingsTab.swift */,
+				88D113717593F761307E5CCC /* SessionDisplay.swift */,
+				71B662B63A4E2014F0AC465B /* SettingsView.swift */,
+				6053E3730063486EB2B7F47E /* TriggersSettingsTab.swift */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		B58CEA155C7532881564012C /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				52D17C8B8EC0110BBE4FDAD0 /* AppKit.framework */,
+				D4F0DEA568C763BA517580FB /* CoreGraphics.framework */,
+				F88FDDC055F1833EEBFF2042 /* IOKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D2E6C3D891CF027C4629BB3F /* Launchd */ = {
+			isa = PBXGroup;
+			children = (
+				1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */,
+				C108B51F7BE41B88EC114277 /* au.com.workwireless.keepy-uppy.helper.plist */,
+			);
+			path = Launchd;
 			sourceTree = "<group>";
 		};
 		ED1BCADD3AB3138280732983 /* Products */ = {
@@ -85,6 +420,9 @@
 			children = (
 				C7C8F53BB2209D50BEACDC9D /* Keepy Uppy.app */,
 				6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */,
+				7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */,
+				E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */,
+				C9CDC8DF84425782DA71988A /* KeepyUppyHelper */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -92,16 +430,41 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2AD771B60EB2B13AC4F9E1FE /* KeepyUppyHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 40F3EF7D75145C69A18BB21A /* Build configuration list for PBXNativeTarget "KeepyUppyHelper" */;
+			buildPhases = (
+				8F25A019AFCE31DB11D12A95 /* Sources */,
+				47A7E3705D4DBF2536FF3187 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KeepyUppyHelper;
+			packageProductDependencies = (
+			);
+			productName = KeepyUppyHelper;
+			productReference = C9CDC8DF84425782DA71988A /* KeepyUppyHelper */;
+			productType = "com.apple.product-type.tool";
+		};
 		372BEB17D83EAA4E3114018B /* Keepy Uppy */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = DD0D93F83FBA2420B978CAA0 /* Build configuration list for PBXNativeTarget "Keepy Uppy" */;
 			buildPhases = (
 				0FC8DCC8AF9E1943D5A6736B /* Sources */,
 				371E1AFD2D6A5AD27CD7D8EB /* Resources */,
+				6FA1F630841276593EBC478A /* CopyFiles */,
+				CCA57C44CCB89A3B1B1FD6CA /* CopyFiles */,
+				07F816936C8B191D190B81AA /* Frameworks */,
+				D55898A12A803EC9066CA345 /* Embed Dependencies */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				11B8273A308455B6D4D1769E /* PBXTargetDependency */,
+				71C7B20C6BBDF10DA9B31815 /* PBXTargetDependency */,
+				5859EDFB29451B98F711B518 /* PBXTargetDependency */,
 			);
 			name = "Keepy Uppy";
 			packageProductDependencies = (
@@ -128,6 +491,42 @@
 			productReference = 6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		D8F245DB69BDA025D9EBA7F8 /* keepy-uppy */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F90D1C8FD637C2686569775E /* Build configuration list for PBXNativeTarget "keepy-uppy" */;
+			buildPhases = (
+				7BAAF317325C3BC6DFE95A68 /* Sources */,
+				B42AAE7087A1DFF408CABB06 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "keepy-uppy";
+			packageProductDependencies = (
+			);
+			productName = "keepy-uppy";
+			productReference = 7FD280E0667F80D7D4C6D9B3 /* keepy-uppy */;
+			productType = "com.apple.product-type.tool";
+		};
+		FC59AA54F3B34BC2C0598242 /* KeepyUppyAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 375B3E5BCBEDF2F9F47AFA8C /* Build configuration list for PBXNativeTarget "KeepyUppyAgent" */;
+			buildPhases = (
+				8DC3322DCD57E064C914080D /* Sources */,
+				D8DDFF4418F25168664AF926 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KeepyUppyAgent;
+			packageProductDependencies = (
+			);
+			productName = KeepyUppyAgent;
+			productReference = E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -137,7 +536,16 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					2AD771B60EB2B13AC4F9E1FE = {
+						ProvisioningStyle = Manual;
+					};
 					372BEB17D83EAA4E3114018B = {
+						ProvisioningStyle = Manual;
+					};
+					D8F245DB69BDA025D9EBA7F8 = {
+						ProvisioningStyle = Manual;
+					};
+					FC59AA54F3B34BC2C0598242 = {
 						ProvisioningStyle = Manual;
 					};
 				};
@@ -158,6 +566,9 @@
 			targets = (
 				372BEB17D83EAA4E3114018B /* Keepy Uppy */,
 				538727C39A3D0131080521AA /* Keepy UppyTests */,
+				2AD771B60EB2B13AC4F9E1FE /* KeepyUppyHelper */,
+				D8F245DB69BDA025D9EBA7F8 /* keepy-uppy */,
+				FC59AA54F3B34BC2C0598242 /* KeepyUppyAgent */,
 			);
 		};
 /* End PBXProject section */
@@ -179,11 +590,105 @@
 			buildActionMask = 2147483647;
 			files = (
 				5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */,
+				FC178B9E631E011DE37D5CFB /* CLICommand.swift in Sources */,
+				0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */,
+				E33CE1EF5DDFC4135E801A93 /* ConditionObserving.swift in Sources */,
+				7BE742B7204BDE6156B3C0B3 /* ContinuationLatch.swift in Sources */,
+				3C0396EB9AC444542A4976B3 /* DaemonConnection.swift in Sources */,
+				7DDCF27B3537F1F93EEBD2F1 /* DefaultSessionKind.swift in Sources */,
+				77A18ABA6A6384086F59C5B4 /* EvidenceLoop.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
 				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
-				28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */,
-				8A0C6D3F9B4B43DA736B507B /* PowerService.swift in Sources */,
+				6D3CD27C18972F228A162EDA /* OnboardingService.swift in Sources */,
+				DEE7803BE989FD76C9DBEB2B /* PowerControl.swift in Sources */,
+				DA80661CEA738792C167C0BE /* PreferencesSuite.swift in Sources */,
+				FC59D49EDCCE2E89FB26271E /* SafetyConfigStore.swift in Sources */,
+				9E5C1650D13823129E390713 /* SafetyEngine.swift in Sources */,
+				0EC8F535E62CBEF5556D23A3 /* SafetySettingsTab.swift in Sources */,
+				98A25D31B1007F4FCC8396F9 /* Session.swift in Sources */,
+				2046A3653A421150E4076778 /* SessionDisplay.swift in Sources */,
+				F0F7A9114AD24E3E80964B0D /* SessionEngine.swift in Sources */,
+				D0FA7447AE9815BE489DA325 /* SessionTable.swift in Sources */,
+				DB6EFFF38FC903A21A23DD7B /* SettingsView.swift in Sources */,
+				1B190889A1E8D20C6AB041A4 /* SigningRequirement.swift in Sources */,
+				DDD0267675D2F5AE957BDC8D /* TriggerRule.swift in Sources */,
+				832845DF92892B7EC3D10B34 /* TriggersSettingsTab.swift in Sources */,
+				11AC504B89A1D59252FE81D8 /* XPCProtocol.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7BAAF317325C3BC6DFE95A68 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3B6A0865CE0A13D715C5979B /* CLICommand.swift in Sources */,
+				AD5D3430BAA216127965342D /* ConditionObserving.swift in Sources */,
+				DBA9A85250702785BA8594E6 /* ContinuationLatch.swift in Sources */,
+				F4D800917751BE14692CAC81 /* DefaultSessionKind.swift in Sources */,
+				9703C10A59EA187F8C44CAE3 /* PowerControl.swift in Sources */,
+				A20F3B90CEAFCCC0D19985E0 /* PreferencesSuite.swift in Sources */,
+				F8F1EDA29C310995A649B60A /* SafetyConfigStore.swift in Sources */,
+				36FEDB5B2CBA73979F19BA0B /* SafetyEngine.swift in Sources */,
+				1D9D459531B25AD044DBEFA3 /* Session.swift in Sources */,
+				6296B8F1A2CB3332CF81AA53 /* SessionEngine.swift in Sources */,
+				8EE316A0540244088048694F /* SessionTable.swift in Sources */,
+				5C1293A4E8C152B8F4BDAC24 /* SigningRequirement.swift in Sources */,
+				54CC3E88C8BD3C35432C6E28 /* TriggerRule.swift in Sources */,
+				FF9C717549A0A54112F154CD /* XPCProtocol.swift in Sources */,
+				B24BB0CBA33407554586D264 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8DC3322DCD57E064C914080D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C610925BC81C0A1ABDD08BB7 /* CLICommand.swift in Sources */,
+				04BC14A7FBEA7B5F13A4B8A6 /* ConditionObservers.swift in Sources */,
+				38873D6FB38ED6F0E275ABBE /* ConditionObserving.swift in Sources */,
+				DCE1C8F3ED5DEB0E8F1DCAAB /* ContinuationLatch.swift in Sources */,
+				4474CB1CFA5268DEA6B28DE0 /* DaemonConnection.swift in Sources */,
+				770C9F3FFCAFBB6B55F001AB /* DefaultSessionKind.swift in Sources */,
+				AF8893B05DF9B1829320A0CD /* EvidenceLoop.swift in Sources */,
+				1121990A3C9DA0255DF8E4FE /* EvidenceLoopRunner.swift in Sources */,
+				2DA8B158C4508F47C5B42354 /* PowerControl.swift in Sources */,
+				01657073F548D34921633BBC /* PreferencesSuite.swift in Sources */,
+				B0D22EEDF8369E1935DFBBF1 /* SafetyConfigStore.swift in Sources */,
+				257CA45431B1F2736E17EBD9 /* SafetyEngine.swift in Sources */,
+				16D842B032F1D3F4E51C6D15 /* Session.swift in Sources */,
+				3E4EC5309AC785D43EC1F761 /* SessionEngine.swift in Sources */,
+				EFC5CDA75216518C1547F3CD /* SessionTable.swift in Sources */,
+				75D494F1A529955A7113FF53 /* SigningRequirement.swift in Sources */,
+				194C25842A48E7780A0C815B /* TriggerRule.swift in Sources */,
+				045FA35366F0289479EF43B0 /* XPCProtocol.swift in Sources */,
+				C97BBEC2BCA672284CBB03B7 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8F25A019AFCE31DB11D12A95 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5FDF183125F827921A79CBB8 /* CLICommand.swift in Sources */,
+				59317C33FAD7B86792FEFF6A /* ConditionObserving.swift in Sources */,
+				4A027F4527C9F85C4215DC2C /* ContinuationLatch.swift in Sources */,
+				1BCE8A4D2A20FF7A0BD0BA90 /* DaemonRuntime.swift in Sources */,
+				975F27F013825BDCA91E0F56 /* DefaultSessionKind.swift in Sources */,
+				107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */,
+				F2406AD10FA86CFB6EB73AA7 /* HelperService.swift in Sources */,
+				F4489E0980CB274B3CBEF995 /* PowerControl.swift in Sources */,
+				BD46C0F1942BA3148B3AE6D1 /* PreferencesSuite.swift in Sources */,
+				A04BEC7E6E7A347B680847D9 /* SafetyConfigStore.swift in Sources */,
+				50DAB243DD67F7F3C568A2B0 /* SafetyEngine.swift in Sources */,
+				D333E95EDBE986A660D87822 /* SafetyObservers.swift in Sources */,
+				23DBA7C2CA5CFE2B085AD2C5 /* Session.swift in Sources */,
+				9B26095FAF7C5F4D344163A4 /* SessionEngine.swift in Sources */,
+				A94B6B3317C441B81B422C13 /* SessionTable.swift in Sources */,
+				E8C38C20E116D2684F48183B /* SigningRequirement.swift in Sources */,
+				BF46A8320FE63E1D0D3CD140 /* TriggerRule.swift in Sources */,
+				AADEA2EB480D52D778091897 /* XPCProtocol.swift in Sources */,
+				D205F3E8E168E58C4584C1EB /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -191,21 +696,117 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */,
+				BE2891D20DBC6B2FD239440C /* CLICommandTests.swift in Sources */,
+				3DFE4877ECEA5CDD9E3E7C0F /* ConditionObserverTests.swift in Sources */,
+				4095E84F4D3EF1D4D5EB0A17 /* DaemonConnectionTests.swift in Sources */,
+				1CE05C76A69AFB6AAC2A15D5 /* EvidenceLoopTests.swift in Sources */,
+				A351D4C2C5FB11F6CDCC076F /* PowerControlTests.swift in Sources */,
+				C567589FB1F7C9D3F7B256C5 /* SafetyConfigStoreTests.swift in Sources */,
+				102517230889DD8B63948126 /* SafetyEngineTests.swift in Sources */,
+				B5D5F45AFF9C3C1C66D54C22 /* SessionDisplayTests.swift in Sources */,
+				2D4077699E1B2B03321DF720 /* SessionEngineTests.swift in Sources */,
+				5B0CEA33F94E5A0D0D60B763 /* SessionIsolationTests.swift in Sources */,
+				3842107D5EEDA94A4284C102 /* SessionTableTests.swift in Sources */,
+				6321EC183BF4638535315441 /* SigningRequirementTests.swift in Sources */,
+				0764012F70E96AD66B17A6ED /* TriggerRuleTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		11B8273A308455B6D4D1769E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2AD771B60EB2B13AC4F9E1FE /* KeepyUppyHelper */;
+			targetProxy = 7469637EBFDAFCAAFA9317DA /* PBXContainerItemProxy */;
+		};
 		3B56B21E5668DEFF72007842 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 372BEB17D83EAA4E3114018B /* Keepy Uppy */;
 			targetProxy = 5CA7447268FD2BF54D56523F /* PBXContainerItemProxy */;
 		};
+		5859EDFB29451B98F711B518 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC59AA54F3B34BC2C0598242 /* KeepyUppyAgent */;
+			targetProxy = 1A757FD635AE1B152B49DEDE /* PBXContainerItemProxy */;
+		};
+		71C7B20C6BBDF10DA9B31815 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D8F245DB69BDA025D9EBA7F8 /* keepy-uppy */;
+			targetProxy = 0A424376985D3EC2EE576EC7 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1C881C784D1BC48C6B544A7D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.agent";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		28EB7D619FC6729DF9DAD46F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.cli";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		43E8C91576460DAE392A3352 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
 		5D7E747DBCF96F6F25BBA4D8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -279,9 +880,79 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy";
 				PRODUCT_MODULE_NAME = KeepyUppy;
 				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		769FDE566265878B71BCDECC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.agent";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		7CE2B0D45028C5CFADD33ED5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.helper";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		8243DD716C691FE7B1FFBB68 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy.cli";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
 		};
 		C78C67C9F2E271C6092C09A5 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -380,6 +1051,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "au.com.workwireless.keepy-uppy";
 				PRODUCT_MODULE_NAME = KeepyUppy;
 				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = Shared/PowerSPI.h;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -404,6 +1076,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		375B3E5BCBEDF2F9F47AFA8C /* Build configuration list for PBXNativeTarget "KeepyUppyAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1C881C784D1BC48C6B544A7D /* Debug */,
+				769FDE566265878B71BCDECC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		40F3EF7D75145C69A18BB21A /* Build configuration list for PBXNativeTarget "KeepyUppyHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				43E8C91576460DAE392A3352 /* Debug */,
+				7CE2B0D45028C5CFADD33ED5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		6661A0FC34AF35EB0C99957D /* Build configuration list for PBXProject "Keepy Uppy" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -427,6 +1117,15 @@
 			buildConfigurations = (
 				CAB1B2A7E05A34E7C867B28C /* Debug */,
 				F77A9A983D4F13423847B53C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F90D1C8FD637C2686569775E /* Build configuration list for PBXNativeTarget "keepy-uppy" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				28EB7D619FC6729DF9DAD46F /* Debug */,
+				8243DD716C691FE7B1FFBB68 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

@@ -2,9 +2,9 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let monitor = PowerMonitor()
+    let daemon = DaemonConnection()
 
-    func applicationWillTerminate(_ notification: Notification) {
-        monitor.restoreSleepOnQuit()
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        daemon.start()
     }
 }
