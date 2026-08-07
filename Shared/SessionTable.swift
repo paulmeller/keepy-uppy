@@ -33,6 +33,15 @@ struct SessionTable {
         storage.values.reduce(0) { $1.owner == owner ? $0 + 1 : $0 }
     }
 
+    /// The live count of sessions with a given persistence — used to
+    /// enforce the detached-session sub-cap (`SessionAdmission`), which
+    /// reserves global-cap headroom for `.clientBound` sessions regardless
+    /// of how much orphaned `.detached` garbage accumulates from
+    /// disconnected owners.
+    func count(persistence: SessionPersistence) -> Int {
+        storage.values.reduce(0) { $1.persistence == persistence ? $0 + 1 : $0 }
+    }
+
     mutating func insert(_ session: Session) {
         storage[session.id] = session
         if let deadline = session.kind.deadline {

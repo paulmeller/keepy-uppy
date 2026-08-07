@@ -50,11 +50,23 @@ enum SessionAdmission: Equatable {
     /// connect.
     static let maxSessionsGlobal = 200
 
+    /// Only `.detached` sessions can ever become orphaned garbage —
+    /// `.clientBound` ones are removed the moment their owner disconnects
+    /// (`SessionTable.removeAll(ownedBy:)`). Capping detached sessions at
+    /// half the global cap guarantees at least `maxSessionsGlobal -
+    /// maxDetachedSessionsGlobal` = 100 slots stay available for
+    /// `.clientBound` sessions no matter how many connections flood
+    /// `detached` starts and disappear (spec §5's documented known
+    /// limitation — this closes it once the CLI, the actual origin of
+    /// legitimate `detached` sessions, exists to design the fix against).
+    static let maxDetachedSessionsGlobal = 100
+
     static func evaluate(kind: SessionKind, origin: SessionOrigin,
-                         ownerCount: Int, globalCount: Int,
+                         ownerCount: Int, globalCount: Int, detachedGlobalCount: Int,
                          liveAgentConnections: Int, onACPower: Bool,
-                         triggersSuppressed: Bool) -> SessionAdmission {
+                         triggersSuppressed: Bool, persistence: SessionPersistence) -> SessionAdmission {
         if globalCount >= maxSessionsGlobal { return .globalLimitReached }
+        if persistence == .detached && detachedGlobalCount >= maxDetachedSessionsGlobal { return .globalLimitReached }
         if ownerCount >= maxSessionsPerOwner { return .ownerLimitReached }
         if origin == .trigger && triggersSuppressed { return .triggerSuppressed }
         if kind == .whileOnACPower && !onACPower { return .conditionNotMet }
@@ -115,9 +127,11 @@ struct SessionEngine {
             origin: session.origin,
             ownerCount: table.count(ownedBy: session.owner),
             globalCount: table.count,
+            detachedGlobalCount: table.count(persistence: .detached),
             liveAgentConnections: liveAgentConnections,
             onACPower: onACPower,
-            triggersSuppressed: triggersSuppressed)
+            triggersSuppressed: triggersSuppressed,
+            persistence: session.persistence)
         guard decision == .admitted else { return decision }
         _ = apply(.start(session), now: now)
         return decision

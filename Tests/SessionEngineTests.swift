@@ -271,6 +271,42 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(Set(engine.sessions.map(\.id)), before, "a rejected start must not disturb existing sessions")
     }
 
+    // Regression: closes spec §5's documented known limitation — a client
+    // that opens many connections, starts `.detached` sessions on each, and
+    // disconnects can otherwise consume the entire global cap with orphaned
+    // garbage (detached sessions deliberately survive `clientDisconnected`),
+    // denying every other client. The detached sub-cap bounds that.
+    func testDetachedSessionCapRejectsBeyondLimitEvenAcrossManyOwners() {
+        var engine = SessionEngine()
+        // Fill the detached sub-cap using many distinct owners, so this
+        // proves the cap is global-to-detached-kind, not per-owner.
+        for i in 0..<SessionAdmission.maxDetachedSessionsGlobal {
+            let session = Session(id: UUID(), kind: .indefinite,
+                                  owner: ClientID(rawValue: "owner-\(i)"),
+                                  persistence: .detached, origin: .manual, startedAt: t0)
+            XCTAssertEqual(engine.startSession(session, now: t0, liveAgentConnections: 0), .admitted)
+        }
+        let oneMore = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "owner-extra"),
+                              persistence: .detached, origin: .manual, startedAt: t0)
+        XCTAssertEqual(engine.startSession(oneMore, now: t0, liveAgentConnections: 0), .globalLimitReached)
+    }
+
+    func testDetachedCapDoesNotRestrictClientBoundSessions() {
+        var engine = SessionEngine()
+        for i in 0..<SessionAdmission.maxDetachedSessionsGlobal {
+            let session = Session(id: UUID(), kind: .indefinite,
+                                  owner: ClientID(rawValue: "owner-\(i)"),
+                                  persistence: .detached, origin: .manual, startedAt: t0)
+            _ = engine.startSession(session, now: t0, liveAgentConnections: 0)
+        }
+        // The detached sub-cap must not touch clientBound admission at all —
+        // this is the actual guarantee: headroom stays reserved for sessions
+        // whose owner is (by construction) still connected.
+        let clientBound = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "owner-cb"),
+                                  persistence: .clientBound, origin: .manual, startedAt: t0)
+        XCTAssertEqual(engine.startSession(clientBound, now: t0, liveAgentConnections: 0), .admitted)
+    }
+
     func testExpirySweepStillRunsAfterAdmissionIsCapped() {
         // Regression guard alongside `testNonTickEventStillSweepsAnExpiredSession`:
         // the cheap `removeExpired` path introduced for Fix 1 must not
