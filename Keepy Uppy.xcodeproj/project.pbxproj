@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3790DF112AE392E103DC407 /* ConditionObservers.swift */; };
 		045FA35366F0289479EF43B0 /* XPCProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 076B6EED689FA0FB4EB61879 /* XPCProtocol.swift */; };
+		04BC14A7FBEA7B5F13A4B8A6 /* ConditionObservers.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3790DF112AE392E103DC407 /* ConditionObservers.swift */; };
 		0E878652C4010EDDB54D423A /* KeepyUppyAgent in Embed Dependencies */ = {isa = PBXBuildFile; fileRef = E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		102517230889DD8B63948126 /* SafetyEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */; };
 		107E973F42C38F392C87DA2D /* HelperListenerDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */; };
@@ -18,6 +20,7 @@
 		1BCE8A4D2A20FF7A0BD0BA90 /* DaemonRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452D538FFAD2C1D62AC85201 /* DaemonRuntime.swift */; };
 		1D9D459531B25AD044DBEFA3 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
 		1E0BE3C1E4729694626E7157 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C24FA183A399A32DA5906A43 /* Assets.xcassets */; };
+		21AE97E55DEE234796BFC5E0 /* DaemonConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */; };
 		23DBA7C2CA5CFE2B085AD2C5 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E34F9ED9B92EB978F72902 /* Session.swift */; };
 		257CA45431B1F2736E17EBD9 /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		28D1F8A875950ABF257E10ED /* PowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB173EBACDD623663B735B7 /* PowerMonitor.swift */; };
@@ -27,6 +30,7 @@
 		36FEDB5B2CBA73979F19BA0B /* SafetyEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */; };
 		3842107D5EEDA94A4284C102 /* SessionTableTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4BC286805AEA04137EB99C /* SessionTableTests.swift */; };
 		39268EA80C047AE67940EBAE /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F88FDDC055F1833EEBFF2042 /* IOKit.framework */; };
+		3DFE4877ECEA5CDD9E3E7C0F /* ConditionObserverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */; };
 		3E4EC5309AC785D43EC1F761 /* SessionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B8860BD1E2C00B458BCD75A /* SessionEngine.swift */; };
 		4474CB1CFA5268DEA6B28DE0 /* DaemonConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */; };
 		5024FB42093FABE1256AC043 /* au.com.workwireless.keepy-uppy.agent.plist in CopyFiles */ = {isa = PBXBuildFile; fileRef = 1A1FA6B138BF03E01D37D821 /* au.com.workwireless.keepy-uppy.agent.plist */; };
@@ -156,6 +160,7 @@
 		5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaemonConnection.swift; sourceTree = "<group>"; };
 		5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngineTests.swift; sourceTree = "<group>"; };
 		6937E379E0C6D03EF8A4D36C /* KeepyUppyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeepyUppyApp.swift; sourceTree = "<group>"; };
+		6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObserverTests.swift; sourceTree = "<group>"; };
 		6BAA3C9EC2A35C7B0BA962B0 /* Keepy UppyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Keepy UppyTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6F1FF8508BB237BC3F4FAB80 /* SafetyEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyEngine.swift; sourceTree = "<group>"; };
 		7050454E03C8EC42BB1FA587 /* HelperService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperService.swift; sourceTree = "<group>"; };
@@ -173,6 +178,7 @@
 		D51C70013B48AA645E69A849 /* PowerControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerControlTests.swift; sourceTree = "<group>"; };
 		DEA751693CBB332AD0528569 /* PowerSPI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PowerSPI.h; sourceTree = "<group>"; };
 		E192A594DAA2B3D2762BE8D5 /* KeepyUppyAgent */ = {isa = PBXFileReference; includeInIndex = 0; path = KeepyUppyAgent; sourceTree = BUILT_PRODUCTS_DIR; };
+		E3790DF112AE392E103DC407 /* ConditionObservers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionObservers.swift; sourceTree = "<group>"; };
 		E4795ABDCBB8389E6A95B10B /* HelperListenerDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelperListenerDelegate.swift; sourceTree = "<group>"; };
 		EE01853618C70A206B6F132D /* SessionIsolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionIsolationTests.swift; sourceTree = "<group>"; };
 		EE06BE4B36F9317997926E86 /* SafetyObservers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyObservers.swift; sourceTree = "<group>"; };
@@ -249,6 +255,7 @@
 		3A0A787A7F3994CCCFC8C726 /* Agent */ = {
 			isa = PBXGroup;
 			children = (
+				E3790DF112AE392E103DC407 /* ConditionObservers.swift */,
 				5A69B88280C25EBFBC24BE79 /* DaemonConnection.swift */,
 				218D3338E5E977B7C598642C /* main.swift */,
 			);
@@ -258,6 +265,7 @@
 		406BB7D86155C2735F97FC65 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				6B167A034D7F2D8269C6D008 /* ConditionObserverTests.swift */,
 				D51C70013B48AA645E69A849 /* PowerControlTests.swift */,
 				029F8C0B9DB9A625956D0F19 /* PowerServiceTests.swift */,
 				5A9CE0BDFC3CE24E811DF0A8 /* SafetyEngineTests.swift */,
@@ -507,6 +515,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				5278D413C2EE7ED6FCDDCE8D /* AppDelegate.swift in Sources */,
+				0071B32507D7B7C90A1E3CEE /* ConditionObservers.swift in Sources */,
+				21AE97E55DEE234796BFC5E0 /* DaemonConnection.swift in Sources */,
 				A4F17D6AB9A76503B15BB66A /* KeepyUppyApp.swift in Sources */,
 				EB0AD41F6D5F41AFA7451D8F /* LoginItemService.swift in Sources */,
 				3476DB7453A85C0EDF13BBCE /* MenuContent.swift in Sources */,
@@ -541,6 +551,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				04BC14A7FBEA7B5F13A4B8A6 /* ConditionObservers.swift in Sources */,
 				4474CB1CFA5268DEA6B28DE0 /* DaemonConnection.swift in Sources */,
 				2DA8B158C4508F47C5B42354 /* PowerControl.swift in Sources */,
 				257CA45431B1F2736E17EBD9 /* SafetyEngine.swift in Sources */,
@@ -576,6 +587,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3DFE4877ECEA5CDD9E3E7C0F /* ConditionObserverTests.swift in Sources */,
 				A351D4C2C5FB11F6CDCC076F /* PowerControlTests.swift in Sources */,
 				F9CE07C202E9D42B3CB889EC /* PowerServiceTests.swift in Sources */,
 				102517230889DD8B63948126 /* SafetyEngineTests.swift in Sources */,
