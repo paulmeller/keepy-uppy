@@ -21,11 +21,11 @@ let agentMachServiceName = "au.com.workwireless.keepy-uppy.helper.agent"
 /// `JSONDecoder` cleanly, associated values included.
 @objc protocol HelperProtocol {
     /// `sessionJSON` is a JSON-encoded `Session` describing the session to
-    /// start. The daemon sets `id`, `owner`, and `startedAt` itself from the
-    /// caller's authenticated identity and its own clock — never trusting
-    /// those fields from the client — so `kind`, `persistence`, and `origin`
-    /// are the only fields the payload actually controls. Replies with the
-    /// started session's id, or an error.
+    /// start. The daemon sets `id`, `owner`, `ownerUID`, and `startedAt`
+    /// itself from the caller's authenticated identity and its own clock —
+    /// never trusting those fields from the client — so `kind`,
+    /// `persistence`, and `origin` are the only fields the payload actually
+    /// controls. Replies with the started session's id, or an error.
     func startSession(_ sessionJSON: Data, reply: @escaping (String?, String?) -> Void)
 
     /// Ends a single session. Rejected unless the caller owns it (Task 10

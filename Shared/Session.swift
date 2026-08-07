@@ -46,7 +46,24 @@ struct Session: Equatable, Codable, Identifiable {
     let id: UUID
     let kind: SessionKind
     let owner: ClientID
+    /// Effective UID of the authenticated XPC peer that created the session.
+    /// The daemon overwrites this server-side, just like `id`, `owner`, and
+    /// `startedAt`; agent-evaluated sessions use it to bind their evidence to
+    /// the matching per-user agent.
+    let ownerUID: UInt32
     let persistence: SessionPersistence
     let origin: SessionOrigin
     let startedAt: Date
+
+    init(id: UUID, kind: SessionKind, owner: ClientID, ownerUID: UInt32 = 0,
+         persistence: SessionPersistence, origin: SessionOrigin,
+         startedAt: Date) {
+        self.id = id
+        self.kind = kind
+        self.owner = owner
+        self.ownerUID = ownerUID
+        self.persistence = persistence
+        self.origin = origin
+        self.startedAt = startedAt
+    }
 }

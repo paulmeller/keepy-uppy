@@ -7,7 +7,9 @@ enum SessionEvent {
     case clientDisconnected(ClientID)
     /// The user-session agent went away, so agent-evaluated conditions can no
     /// longer be verified (spec §5: no session outlives its evidence).
-    case agentDisappeared
+    case agentDisappeared(userID: UInt32)
+    /// The daemon observed that AC power is no longer present.
+    case acPowerDisconnected
     case conditionEnded(id: UUID)
     case renewLease(id: UUID, until: Date)
     case tick
@@ -32,6 +34,8 @@ enum SessionAdmission: Equatable {
     case ownerLimitReached
     case globalLimitReached
     case noAgentConnected
+    case conditionNotMet
+    case triggerSuppressed
 
     /// A single client (XPC connection) legitimately runs very few
     /// concurrent sessions; 20 is generous headroom over that while
@@ -46,10 +50,14 @@ enum SessionAdmission: Equatable {
     /// connect.
     static let maxSessionsGlobal = 200
 
-    static func evaluate(kind: SessionKind, ownerCount: Int, globalCount: Int,
-                          liveAgentConnections: Int) -> SessionAdmission {
+    static func evaluate(kind: SessionKind, origin: SessionOrigin,
+                         ownerCount: Int, globalCount: Int,
+                         liveAgentConnections: Int, onACPower: Bool,
+                         triggersSuppressed: Bool) -> SessionAdmission {
         if globalCount >= maxSessionsGlobal { return .globalLimitReached }
         if ownerCount >= maxSessionsPerOwner { return .ownerLimitReached }
+        if origin == .trigger && triggersSuppressed { return .triggerSuppressed }
+        if kind == .whileOnACPower && !onACPower { return .conditionNotMet }
         if !kind.isDaemonEvaluable && liveAgentConnections <= 0 { return .noAgentConnected }
         return .admitted
     }
@@ -63,6 +71,14 @@ enum ConditionEndOutcome: Equatable {
     case ended(Session)
     case notFound
     case notAgentEvaluated
+    case wrongUser
+}
+
+enum LeaseRenewalOutcome: Equatable {
+    case renewed(Session)
+    case notFound
+    case notLease
+    case invalidDeadline
 }
 
 /// Pure reducer over the session table. Holds no clock, performs no I/O:
@@ -90,12 +106,18 @@ struct SessionEngine {
     /// is made before any mutation, so a rejected start leaves every
     /// existing session exactly as it was.
     @discardableResult
-    mutating func startSession(_ session: Session, now: Date, liveAgentConnections: Int) -> SessionAdmission {
+    mutating func startSession(_ session: Session, now: Date,
+                               liveAgentConnections: Int,
+                               onACPower: Bool = true,
+                               triggersSuppressed: Bool = false) -> SessionAdmission {
         let decision = SessionAdmission.evaluate(
             kind: session.kind,
+            origin: session.origin,
             ownerCount: table.count(ownedBy: session.owner),
             globalCount: table.count,
-            liveAgentConnections: liveAgentConnections)
+            liveAgentConnections: liveAgentConnections,
+            onACPower: onACPower,
+            triggersSuppressed: triggersSuppressed)
         guard decision == .admitted else { return decision }
         _ = apply(.start(session), now: now)
         return decision
@@ -105,11 +127,31 @@ struct SessionEngine {
     /// business judging it — i.e. its kind is not one the daemon itself
     /// evaluates (Fix 6).
     @discardableResult
-    mutating func endCondition(id: UUID, now: Date) -> ConditionEndOutcome {
+    mutating func endCondition(id: UUID, reportedByUserID userID: UInt32,
+                               now: Date) -> ConditionEndOutcome {
         guard let session = table.session(id: id) else { return .notFound }
         guard !session.kind.isDaemonEvaluable else { return .notAgentEvaluated }
+        guard session.ownerUID == userID else { return .wrongUser }
         _ = apply(.conditionEnded(id: id), now: now)
         return .ended(session)
+    }
+
+    @discardableResult
+    mutating func renewLease(id: UUID, until: Date, now: Date) -> LeaseRenewalOutcome {
+        // An expired lease cannot be resurrected in the interval before the
+        // daemon's next timer tick. Sweep first, then decide whether there is
+        // still a live lease to renew.
+        _ = apply(.tick, now: now)
+        guard let existing = table.session(id: id) else { return .notFound }
+        guard case .lease = existing.kind else { return .notLease }
+        guard until.timeIntervalSinceReferenceDate.isFinite,
+              until > now,
+              until <= existing.startedAt.addingTimeInterval(Self.maxSessionDuration)
+        else { return .invalidDeadline }
+
+        _ = apply(.renewLease(id: id, until: until), now: now)
+        guard let renewed = table.session(id: id) else { return .invalidDeadline }
+        return .renewed(renewed)
     }
 
     @discardableResult
@@ -130,8 +172,15 @@ struct SessionEngine {
         case .clientDisconnected(let owner):
             ended.append(contentsOf: table.removeAll(ownedBy: owner))
 
-        case .agentDisappeared:
-            for session in table.sessions where !session.kind.isDaemonEvaluable {
+        case .agentDisappeared(let userID):
+            for session in table.sessions
+                where !session.kind.isDaemonEvaluable && session.ownerUID == userID {
+                table.remove(id: session.id)
+                ended.append(session)
+            }
+
+        case .acPowerDisconnected:
+            for session in table.sessions where session.kind == .whileOnACPower {
                 table.remove(id: session.id)
                 ended.append(session)
             }

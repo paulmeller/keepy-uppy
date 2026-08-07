@@ -6,15 +6,26 @@ final class SessionEngineTests: XCTestCase {
     private let alice = ClientID(rawValue: "alice")
 
     private func make(_ kind: SessionKind,
-                      persistence: SessionPersistence = .clientBound) -> Session {
+                      persistence: SessionPersistence = .clientBound,
+                      origin: SessionOrigin = .manual,
+                      userID: UInt32 = 0) -> Session {
         Session(id: UUID(), kind: kind, owner: alice,
-                persistence: persistence, origin: .manual, startedAt: t0)
+                ownerUID: userID, persistence: persistence,
+                origin: origin, startedAt: t0)
     }
 
     func testStartingASessionKeepsAwake() {
         var engine = SessionEngine()
         _ = engine.apply(.start(make(.indefinite)), now: t0)
         XCTAssertTrue(engine.desiredKeepAwake)
+    }
+
+    func testSessionCodingPreservesAuthenticatedOwnerUID() throws {
+        let original = make(.whileExternalDisplay, userID: 501)
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Session.self, from: encoded)
+        XCTAssertEqual(decoded, original)
+        XCTAssertEqual(decoded.ownerUID, 501)
     }
 
     func testDurationSessionExpiresOnTick() {
@@ -60,7 +71,7 @@ final class SessionEngineTests: XCTestCase {
         var engine = SessionEngine()
         _ = engine.apply(.start(make(.duration(until: t0.addingTimeInterval(3600)))), now: t0)
         _ = engine.apply(.start(make(.whileAppRunning(bundleID: "com.apple.dt.Xcode"))), now: t0)
-        let ended = engine.apply(.agentDisappeared, now: t0)
+        let ended = engine.apply(.agentDisappeared(userID: 0), now: t0)
         XCTAssertEqual(ended.count, 1, "the app-watching session cannot be verified any more")
         XCTAssertEqual(ended.first?.kind, .whileAppRunning(bundleID: "com.apple.dt.Xcode"))
         XCTAssertTrue(engine.desiredKeepAwake, "the daemon-evaluable session is unaffected")
@@ -107,7 +118,9 @@ final class SessionEngineTests: XCTestCase {
         let original = make(.lease(expires: t0.addingTimeInterval(60)))
         _ = engine.apply(.start(original), now: t0)
 
-        _ = engine.apply(.renewLease(id: original.id, until: t0.addingTimeInterval(120)), now: t0.addingTimeInterval(30))
+        let outcome = engine.renewLease(
+            id: original.id, until: t0.addingTimeInterval(120),
+            now: t0.addingTimeInterval(30))
 
         guard let renewed = engine.sessions.first(where: { $0.id == original.id }) else {
             return XCTFail("the renewed session should still be present under its original id")
@@ -119,6 +132,7 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(renewed.origin, original.origin)
         XCTAssertEqual(renewed.startedAt, original.startedAt)
         XCTAssertEqual(renewed.kind, .lease(expires: t0.addingTimeInterval(120)), "only the deadline should have moved")
+        XCTAssertEqual(outcome, .renewed(renewed))
     }
 
     // MARK: - Fix 2: renewLease must not launder a non-lease kind, or accept an unbounded deadline
@@ -128,7 +142,9 @@ final class SessionEngineTests: XCTestCase {
         let session = make(.whileExternalDisplay)
         _ = engine.apply(.start(session), now: t0)
 
-        _ = engine.apply(.renewLease(id: session.id, until: t0.addingTimeInterval(3600)), now: t0)
+        XCTAssertEqual(
+            engine.renewLease(id: session.id, until: t0.addingTimeInterval(3600), now: t0),
+            .notLease)
 
         guard let unchanged = engine.sessions.first(where: { $0.id == session.id }) else {
             return XCTFail("the session must still be present")
@@ -137,7 +153,7 @@ final class SessionEngineTests: XCTestCase {
 
         // Proves the laundering would otherwise have mattered: with the kind
         // unchanged, the agent disappearing still ends it.
-        XCTAssertEqual(engine.apply(.agentDisappeared, now: t0).count, 1)
+        XCTAssertEqual(engine.apply(.agentDisappeared(userID: 0), now: t0).count, 1)
     }
 
     func testRenewLeaseRejectsDeadlineBeyondMaxSessionDuration() {
@@ -146,7 +162,8 @@ final class SessionEngineTests: XCTestCase {
         _ = engine.apply(.start(session), now: t0)
 
         let tooFar = t0.addingTimeInterval(SessionEngine.maxSessionDuration + 1)
-        _ = engine.apply(.renewLease(id: session.id, until: tooFar), now: t0)
+        XCTAssertEqual(engine.renewLease(id: session.id, until: tooFar, now: t0),
+                       .invalidDeadline)
 
         guard let unchanged = engine.sessions.first(where: { $0.id == session.id }) else {
             return XCTFail("the session must still be present")
@@ -160,12 +177,37 @@ final class SessionEngineTests: XCTestCase {
         _ = engine.apply(.start(session), now: t0)
 
         let nonFinite = Date(timeIntervalSinceReferenceDate: .infinity)
-        _ = engine.apply(.renewLease(id: session.id, until: nonFinite), now: t0)
+        XCTAssertEqual(engine.renewLease(id: session.id, until: nonFinite, now: t0),
+                       .invalidDeadline)
 
         guard let unchanged = engine.sessions.first(where: { $0.id == session.id }) else {
             return XCTFail("the session must still be present")
         }
         XCTAssertEqual(unchanged.kind, .lease(expires: t0.addingTimeInterval(60)), "the original deadline must be untouched")
+    }
+
+    func testRenewLeaseRejectsAnAlreadyExpiredDeadline() {
+        var engine = SessionEngine()
+        let session = make(.lease(expires: t0.addingTimeInterval(60)))
+        _ = engine.apply(.start(session), now: t0)
+
+        XCTAssertEqual(
+            engine.renewLease(id: session.id, until: t0.addingTimeInterval(20),
+                              now: t0.addingTimeInterval(30)),
+            .invalidDeadline)
+        XCTAssertEqual(engine.sessions, [session])
+    }
+
+    func testRenewLeaseCannotResurrectAnExpiredLeaseBeforeTheNextTick() {
+        var engine = SessionEngine()
+        let session = make(.lease(expires: t0.addingTimeInterval(60)))
+        _ = engine.apply(.start(session), now: t0)
+
+        XCTAssertEqual(
+            engine.renewLease(id: session.id, until: t0.addingTimeInterval(120),
+                              now: t0.addingTimeInterval(61)),
+            .notFound)
+        XCTAssertTrue(engine.sessions.isEmpty)
     }
 
     // MARK: - Fix 1: admission caps
@@ -256,6 +298,53 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(result, .admitted)
     }
 
+    func testWhileOnACPowerCannotStartWhileAlreadyOnBattery() {
+        var engine = SessionEngine()
+        let result = engine.startSession(
+            make(.whileOnACPower), now: t0,
+            liveAgentConnections: 0, onACPower: false)
+        XCTAssertEqual(result, .conditionNotMet)
+        XCTAssertTrue(engine.sessions.isEmpty)
+    }
+
+    func testACDisconnectEndsOnlyACBoundSessions() {
+        var engine = SessionEngine()
+        let ac = make(.whileOnACPower)
+        let indefinite = make(.indefinite)
+        _ = engine.apply(.start(ac), now: t0)
+        _ = engine.apply(.start(indefinite), now: t0)
+
+        let ended = engine.apply(.acPowerDisconnected, now: t0)
+
+        XCTAssertEqual(ended.map(\.id), [ac.id])
+        XCTAssertEqual(engine.sessions.map(\.id), [indefinite.id])
+    }
+
+    func testSafetySuppressionRejectsTriggersButAllowsManualStarts() {
+        var engine = SessionEngine()
+        XCTAssertEqual(
+            engine.startSession(make(.indefinite, origin: .trigger), now: t0,
+                                liveAgentConnections: 0, triggersSuppressed: true),
+            .triggerSuppressed)
+        XCTAssertEqual(
+            engine.startSession(make(.indefinite), now: t0,
+                                liveAgentConnections: 0, triggersSuppressed: true),
+            .admitted)
+    }
+
+    func testAgentDisappearanceIsScopedToTheMatchingUser() {
+        var engine = SessionEngine()
+        let aliceSession = make(.whileExternalDisplay, userID: 501)
+        let bobSession = make(.whileExternalDisplay, userID: 502)
+        _ = engine.apply(.start(aliceSession), now: t0)
+        _ = engine.apply(.start(bobSession), now: t0)
+
+        let ended = engine.apply(.agentDisappeared(userID: 501), now: t0)
+
+        XCTAssertEqual(ended.map(\.id), [aliceSession.id])
+        XCTAssertEqual(engine.sessions.map(\.id), [bobSession.id])
+    }
+
     // MARK: - Fix 6: an agent may only end sessions whose kind is agent-evaluated
 
     func testEndConditionRejectsADaemonEvaluableSession() {
@@ -263,7 +352,7 @@ final class SessionEngineTests: XCTestCase {
         let session = make(.duration(until: t0.addingTimeInterval(3600)))
         _ = engine.apply(.start(session), now: t0)
 
-        let outcome = engine.endCondition(id: session.id, now: t0)
+        let outcome = engine.endCondition(id: session.id, reportedByUserID: 0, now: t0)
 
         XCTAssertEqual(outcome, .notAgentEvaluated)
         XCTAssertEqual(engine.sessions.count, 1, "the session must survive an out-of-scope condition report")
@@ -274,7 +363,7 @@ final class SessionEngineTests: XCTestCase {
         let session = make(.whileExternalDisplay)
         _ = engine.apply(.start(session), now: t0)
 
-        let outcome = engine.endCondition(id: session.id, now: t0)
+        let outcome = engine.endCondition(id: session.id, reportedByUserID: 0, now: t0)
 
         XCTAssertEqual(outcome, .ended(session))
         XCTAssertTrue(engine.sessions.isEmpty)
@@ -282,7 +371,18 @@ final class SessionEngineTests: XCTestCase {
 
     func testEndConditionOnUnknownSessionIsNotFound() {
         var engine = SessionEngine()
-        XCTAssertEqual(engine.endCondition(id: UUID(), now: t0), .notFound)
+        XCTAssertEqual(engine.endCondition(id: UUID(), reportedByUserID: 0, now: t0), .notFound)
+    }
+
+    func testAgentCannotEndAnotherUsersConditionSession() {
+        var engine = SessionEngine()
+        let session = make(.whileExternalDisplay, userID: 501)
+        _ = engine.apply(.start(session), now: t0)
+
+        XCTAssertEqual(
+            engine.endCondition(id: session.id, reportedByUserID: 502, now: t0),
+            .wrongUser)
+        XCTAssertEqual(engine.sessions, [session])
     }
 
     // MARK: - Security re-review Fix 3a: DaemonRuntime sweeps expiry before
@@ -366,7 +466,7 @@ final class SessionEngineTests: XCTestCase {
         // toward `desiredKeepAwake` — even though the call itself succeeded
         // in the sense of returning a well-formed answer.
         var (withoutSweep, expiredID1) = buildTableWithAnExpiredSession()
-        XCTAssertEqual(withoutSweep.endCondition(id: UUID(), now: later), .notFound)
+        XCTAssertEqual(withoutSweep.endCondition(id: UUID(), reportedByUserID: 0, now: later), .notFound)
         XCTAssertTrue(withoutSweep.sessions.contains(where: { $0.id == expiredID1 }),
                       "documents the bug: an unrelated expired session survives the call")
 
@@ -375,7 +475,7 @@ final class SessionEngineTests: XCTestCase {
         // immediately, regardless of which session's condition was reported.
         var (withSweep, expiredID2) = buildTableWithAnExpiredSession()
         _ = withSweep.apply(.tick, now: later)
-        XCTAssertEqual(withSweep.endCondition(id: UUID(), now: later), .notFound)
+        XCTAssertEqual(withSweep.endCondition(id: UUID(), reportedByUserID: 0, now: later), .notFound)
         XCTAssertFalse(withSweep.sessions.contains(where: { $0.id == expiredID2 }), "the pre-sweep must have already removed it")
         XCTAssertFalse(withSweep.desiredKeepAwake)
     }

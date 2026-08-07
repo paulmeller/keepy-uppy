@@ -58,8 +58,8 @@ enum PowerControl {
     static func parseBattery(from description: [String: Any]) -> BatteryState {
         let source: PowerSource
         switch description[kIOPSPowerSourceStateKey as String] as? String {
-        case kIOPSBatteryPowerValue as String: source = .battery
-        case kIOPSACPowerValue as String: source = .acPower
+        case kIOPSBatteryPowerValue: source = .battery
+        case kIOPSACPowerValue: source = .acPower
         default: source = .unknown
         }
 

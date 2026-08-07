@@ -47,6 +47,9 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // be a value that can collide, which a hash of `ObjectIdentifier`
         // could.
         let id = ClientID(rawValue: UUID().uuidString)
+        // Supplied by XPC from the peer's audit credentials, not by the
+        // client. This binds condition sessions to the matching user agent.
+        let userID = UInt32(newConnection.effectiveUserIdentifier)
 
         // Role is fixed by which listener (and therefore which Mach
         // service) accepted this connection, never by anything the client
@@ -55,7 +58,8 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         let isAgent = self.isAgent
 
         newConnection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
-        newConnection.exportedObject = HelperService(runtime: runtime, clientID: id, isAgent: isAgent)
+        newConnection.exportedObject = HelperService(
+            runtime: runtime, clientID: id, userID: userID, isAgent: isAgent)
 
         // One-shot guard around `agentConnectionClosed()`: both
         // `invalidationHandler` and `interruptionHandler` below can fire for
@@ -79,7 +83,7 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
             closed = true
             closeLock.unlock()
             guard !alreadyClosed else { return }
-            runtime.agentConnectionClosed()
+            runtime.agentConnectionClosed(userID: userID)
         }
 
         newConnection.invalidationHandler = { [runtime] in
@@ -102,7 +106,7 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // after, so the refcount can never be observed out of order
         // relative to the connection becoming live — there is no window
         // where the connection is live but the count hasn't been bumped yet.
-        if isAgent { runtime.agentConnectionOpened() }
+        if isAgent { runtime.agentConnectionOpened(userID: userID) }
         newConnection.resume()
         helperLogger.log("Accepted connection \(id.rawValue) (agent: \(isAgent))")
         return true

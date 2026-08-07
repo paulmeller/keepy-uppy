@@ -12,11 +12,13 @@ final class HelperService: NSObject, HelperProtocol {
 
     private let runtime: DaemonRuntime
     private let clientID: ClientID
+    private let userID: UInt32
     private let isAgent: Bool
 
-    init(runtime: DaemonRuntime, clientID: ClientID, isAgent: Bool) {
+    init(runtime: DaemonRuntime, clientID: ClientID, userID: UInt32, isAgent: Bool) {
         self.runtime = runtime
         self.clientID = clientID
+        self.userID = userID
         self.isAgent = isAgent
     }
 
@@ -27,12 +29,13 @@ final class HelperService: NSObject, HelperProtocol {
         guard let requested = try? JSONDecoder().decode(Session.self, from: sessionJSON) else {
             return reply(nil, "invalid session payload")
         }
-        // `id`, `owner`, and `startedAt` are authoritative server-side facts
+        // `id`, `owner`, `ownerUID`, and `startedAt` are authoritative server-side facts
         // and are never trusted from the client: a client cannot mint a
         // session "owned" by someone else, collide its id with an existing
         // session's, or backdate `startedAt` to dodge the max-duration
         // backstop.
         let session = Session(id: UUID(), kind: requested.kind, owner: clientID,
+                              ownerUID: userID,
                               persistence: requested.persistence, origin: requested.origin,
                               startedAt: Date())
         switch runtime.startSession(session) {
@@ -44,6 +47,10 @@ final class HelperService: NSObject, HelperProtocol {
             reply(nil, "daemon session limit reached; try again later")
         case .noAgentConnected:
             reply(nil, "no agent is connected to evaluate this condition")
+        case .conditionNotMet:
+            reply(nil, "the session condition is not currently met")
+        case .triggerSuppressed:
+            reply(nil, "trigger starts are temporarily suppressed by a safety cooldown")
         case .failed:
             reply(nil, "failed to start session")
         }
@@ -78,13 +85,17 @@ final class HelperService: NSObject, HelperProtocol {
     func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) {
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
         switch runtime.renewLease(id: uuid, until: until, requestedBy: clientID) {
-        case .authorized:
+        case .renewed:
             reply(true, nil)
         case .notFound:
             reply(false, "no such session")
         case .forbidden:
             helperLogger.error("Rejected renewLease(\(sessionID)) from \(self.clientID.rawValue): caller does not own this session")
             reply(false, "not authorised")
+        case .notLease:
+            reply(false, "session is not a lease")
+        case .invalidDeadline:
+            reply(false, "invalid lease deadline")
         }
     }
 
@@ -94,13 +105,16 @@ final class HelperService: NSObject, HelperProtocol {
             return reply(false, "not authorised")
         }
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
-        switch runtime.conditionEnded(id: uuid) {
+        switch runtime.conditionEnded(id: uuid, reportedByUserID: userID) {
         case .ended:
             reply(true, nil)
         case .notFound:
             reply(false, "no such session")
         case .notAgentEvaluated:
             helperLogger.error("Rejected reportConditionEnded(\(sessionID)) from \(self.clientID.rawValue): session kind is not the agent's to end")
+            reply(false, "not authorised")
+        case .wrongUser:
+            helperLogger.error("Rejected reportConditionEnded(\(sessionID)) from uid \(self.userID): session belongs to another user")
             reply(false, "not authorised")
         }
     }
