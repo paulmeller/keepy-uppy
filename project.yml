@@ -45,7 +45,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy
         PRODUCT_MODULE_NAME: KeepyUppy
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
@@ -73,7 +73,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.helper
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
@@ -103,7 +103,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.cli
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
@@ -126,7 +126,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.agent
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "2"
         ENABLE_HARDENED_RUNTIME: YES
         CODE_SIGN_STYLE: Manual
         SWIFT_VERSION: "5.0"
