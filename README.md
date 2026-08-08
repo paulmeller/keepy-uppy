@@ -10,7 +10,7 @@ it over SSH, and the menu-bar app is optional. Sessions have an end condition �
 a duration, a clock time, an app that's running — and every one of them is
 bounded by safety guards that stop the Mac cooking itself unattended.
 
-> **Status: early.** It works, it's signed and notarized, and it has 202 tests
+> **Status: early.** It works, it's signed and notarized, and it has 255 tests
 > — but it has been in real use for hours, not weeks, on one machine. Read
 > [Status and caveats](#status-and-caveats) before trusting it with anything
 > that matters.
