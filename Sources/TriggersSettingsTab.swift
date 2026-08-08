@@ -6,6 +6,10 @@ struct TriggersSettingsTab: View {
     @State private var isAddingRule = false
     @State private var selection: TriggerRule.ID?
     @State private var completionConfig = SessionCompletionStore.load()
+    /// Why the last script pick was rejected, or `nil`. Mirrors
+    /// `AddTriggerSheet.pickerError` — a picker that silently does nothing is
+    /// the same bug in both places.
+    @State private var scriptError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,6 +83,11 @@ struct TriggersSettingsTab: View {
                         Button("Choose…") { chooseScript() }
                     }
                 }
+                if let scriptError {
+                    Text(scriptError)
+                        .settingsFootnote()
+                        .foregroundStyle(.red)
+                }
                 LabeledContent("Webhook URL") {
                     TextField("https://example.com/hook", text: webhookURLBinding)
                         .textFieldStyle(.roundedBorder)
@@ -106,8 +115,24 @@ struct TriggersSettingsTab: View {
     private func setScriptPath(_ path: String?) {
         completionConfig.scriptPath = path
         SessionCompletionStore.save(completionConfig)
+        scriptError = nil
     }
 
+    /// The panel cannot filter on "is executable" — `allowedContentTypes`
+    /// works on UTIs, and a shell script with no extension has none useful —
+    /// so the check happens here, on the way out.
+    ///
+    /// Without it the pick was accepted, saved, and failed much later inside
+    /// `Process.run()`. Foundation's message for a mode-644 file was checked
+    /// rather than assumed, and it is worse than unhelpful — it is wrong:
+    ///
+    ///     Error Domain=NSCocoaErrorDomain Code=4
+    ///     "The file “notify.sh” doesn’t exist."
+    ///
+    /// The file is right there; it just isn't `chmod +x`. And that sentence
+    /// landed in the Agent's log at some later session end, not in the UI at
+    /// the moment of the mistake. Checking here turns it into an accurate
+    /// sentence next to the button that caused it.
     private func chooseScript() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
@@ -115,6 +140,10 @@ struct TriggersSettingsTab: View {
         panel.prompt = "Choose"
         panel.message = "Choose a script to run whenever a session ends."
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+            scriptError = "\(url.lastPathComponent) isn't executable, so it can't be run. Add the execute permission (chmod +x) and choose it again."
+            return
+        }
         setScriptPath(url.path)
     }
 

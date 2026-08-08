@@ -390,7 +390,24 @@ final class DaemonRuntime {
 
         let battery = observer.batteryState()
         let onBattery = battery.source == .battery
-        if battery.source != .acPower {
+        // Only a *confident* negative ends `.whileOnACPower` sessions. This
+        // used to read `battery.source != .acPower`, which folded
+        // `.unknown` — a failed IOKit read, not an observation of anything —
+        // in with "unplugged", so one hiccup in
+        // `IOPSCopyPowerSourcesInfo`/`IOPSCopyPowerSourcesList` ended every
+        // AC-bound session and let the Mac sleep while still plugged in. See
+        // `PowerSource.acPowerReading` and `ConditionReading` for the rule;
+        // this was the last observer in the codebase still collapsing
+        // "I don't know" into "no".
+        //
+        // Note the deliberate asymmetry with `startSession`'s admission
+        // check above, which still passes `onACPower: powerSource ==
+        // .acPower` and so *refuses* to start a `.whileOnACPower` session on
+        // an unknown reading. Refusing to start returns a visible
+        // `.conditionNotMet` the caller can retry in five seconds; ending
+        // silently sleeps a Mac mid-build. Same asymmetry, same argument, as
+        // `SessionEvidence.negativesBeforeEnding`.
+        if battery.source.acPowerReading.isConfidentlyAbsent {
             let ended = sessions.apply(.acPowerDisconnected, now: now)
             if !ended.isEmpty {
                 helperLogger.log("AC power unavailable; ended \(ended.count) AC-bound session(s)")

@@ -42,6 +42,12 @@ predates the detached-session sub-cap that replaced it.
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field
 - [ ] Wiring an actual Claude Code `SessionEnd` hook to call `keepy-uppy finished --tool claude-code` fires the configured action at real task completion, not just when the `claude` process eventually exits
+- [ ] The script's `KEEPY_UPPY_KIND` and the webhook JSON's `"kind"` carry the stable wire strings (`while-app-running:com.apple.dt.Xcode`, `duration`, …), never Swift's `whileAppRunning(bundleID: "…")` debug syntax
+- [ ] Choosing a non-executable file (a `chmod 644` script) in Settings → Triggers → On Session End is refused in the tab with a message naming the real reason, rather than being saved and failing later in the log as "The file … doesn't exist."
+- [ ] Fast-user-switch to a second account, start a session there, switch back and end it: the *first* user's script and webhook do NOT fire, and nothing carrying the second user's app/process name reaches them
+- [ ] Restarting the daemon while several sessions are running does not fire the completion action once per session as they all vanish at once
+- [ ] A webhook endpoint answering `307` to a different host does not deliver the POST to the redirect target (the agent logs "refused a 307 redirect")
+- [ ] A `.whileOnACPower` session survives a transient power-source read failure — it must end only on a real unplug, never on IOKit declining to answer
 
 **Menu-bar app session control:**
 - [ ] Menu "Start… → Indefinitely" keeps the Mac awake with the lid closed; quitting the app ends that session (clientBound) and sleep resumes

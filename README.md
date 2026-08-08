@@ -215,6 +215,24 @@ you're installing:
   injected inputs; actually running `claude`/`codex`/etc. and watching a
   session start and end, and actually seeing a configured script run or
   webhook land, have not been observed end to end yet.
+- **"On session end" is a persistence mechanism, and it hides well.** This
+  is not privilege escalation — the script runs as you, and anything that
+  can write your preferences already runs as you. But be clear about what
+  the feature composes into. A trigger rule and a `scriptPath` live in the
+  same preference domain, so writing two values into one plist buys a
+  recurring, self-restarting way to execute a binary: the trigger starts a
+  session, the session ends, the script runs, and the agent's `RunAtLoad` /
+  `KeepAlive` brings the whole loop back at every login. There is no
+  LaunchAgent of its own, no login item, no cron entry, and nothing new in
+  `launchctl list` — it lives in a third-party app's preference plist, which
+  is not where persistence scanners look. Anything already running as you
+  can set it up with one `defaults write` and no prompt. If you are auditing
+  a Mac with Keepy Uppy on it, read Settings → Triggers, and read the
+  `sessionCompletionConfig` and `triggerRules` keys in the
+  `au.com.workwireless.keepy-uppy` preference domain, the same way you would
+  read a shell profile. The agent caps each script run at 10 seconds;
+  `keepy-uppy finished` deliberately does not, and orphans the child to
+  `launchd` so that a hook outlives the short-lived CLI that launched it.
 - Remaining manual checks are listed in
   [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md).
 
