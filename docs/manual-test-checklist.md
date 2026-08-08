@@ -30,9 +30,16 @@ predates the detached-session sub-cap that replaced it.
 - [ ] Settings → Safety: lowering the battery cutoff and confirming (via `keepy-uppy status`) the daemon picks it up within ~5s without restarting anything
 
 **Settings → Triggers:**
-- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and is tagged "Started automatically" in the menu; quitting that app ends the session within ~5s
+- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and is tagged "Started automatically" in the menu, and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
 - [ ] A trigger does not fire again while its session is still active (leave the triggering app running, confirm no duplicate session appears)
 - [ ] Triggering a real safety stop (or lowering the thermal sensitivity to `cautious` under load) suppresses a trigger from firing again until the configured cooldown elapses, while a manual "Start…" click still works immediately
+- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s tagged "Started automatically" and the duration picker plays no part; quitting `claude` ends the session within ~5s
+- [ ] The Cursor CLI and Pi presets show the generic-name collision warning; the other three presets don't
+- [ ] `keepy-uppy on --while-process <name>` behaves like `--while-app`, ending within ~5s of that process exiting
+- [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
+- [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
+- [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field
+- [ ] Wiring an actual Claude Code `SessionEnd` hook to call `keepy-uppy finished --tool claude-code` fires the configured action at real task completion, not just when the `claude` process eventually exits
 
 **Menu-bar app session control:**
 - [ ] Menu "Start… → Indefinitely" keeps the Mac awake with the lid closed; quitting the app ends that session (clientBound) and sleep resumes

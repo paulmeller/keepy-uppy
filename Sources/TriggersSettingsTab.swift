@@ -5,6 +5,7 @@ struct TriggersSettingsTab: View {
     @State private var rules = TriggerStore.load()
     @State private var isAddingRule = false
     @State private var selection: TriggerRule.ID?
+    @State private var completionConfig = SessionCompletionStore.load()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +43,10 @@ struct TriggersSettingsTab: View {
             }
             .buttonStyle(.borderless)
             .padding(6)
+
+            Divider()
+
+            completionSection
         }
         .sheet(isPresented: $isAddingRule) {
             AddTriggerSheet { rule in
@@ -51,6 +56,68 @@ struct TriggersSettingsTab: View {
         }
     }
 
+    /// "On session end": a script and/or a webhook, fired by the Agent
+    /// (`Agent/EvidenceLoopRunner.swift`) whenever ANY session ends — not
+    /// scoped to trigger-started sessions, matching the plain "on session
+    /// end" mental model rather than something narrower. A CLI coding
+    /// assistant's own completion hook can also fire this immediately via
+    /// `keepy-uppy finished`, independent of the Agent's poll — see the
+    /// README's "AI coding-assistant integration" section.
+    private var completionSection: some View {
+        Form {
+            Section {
+                LabeledContent("Script") {
+                    HStack {
+                        Text(completionConfig.scriptPath?.isEmpty == false ? completionConfig.scriptPath! : "None chosen")
+                            .foregroundStyle(completionConfig.scriptPath?.isEmpty == false ? .primary : .secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        if completionConfig.scriptPath?.isEmpty == false {
+                            Button("Clear") { setScriptPath(nil) }
+                        }
+                        Button("Choose…") { chooseScript() }
+                    }
+                }
+                LabeledContent("Webhook URL") {
+                    TextField("https://example.com/hook", text: webhookURLBinding)
+                        .textFieldStyle(.roundedBorder)
+                }
+            } header: {
+                Text("On Session End")
+            } footer: {
+                Text("Runs the script and/or POSTs to the webhook whenever any keep-awake session ends — manual, timed, trigger-started, or stopped by a safety guard.")
+                    .settingsFootnote()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var webhookURLBinding: Binding<String> {
+        Binding(
+            get: { completionConfig.webhookURL ?? "" },
+            set: { newValue in
+                completionConfig.webhookURL = newValue.isEmpty ? nil : newValue
+                SessionCompletionStore.save(completionConfig)
+            }
+        )
+    }
+
+    private func setScriptPath(_ path: String?) {
+        completionConfig.scriptPath = path
+        SessionCompletionStore.save(completionConfig)
+    }
+
+    private func chooseScript() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose a script to run whenever a session ends."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setScriptPath(url.path)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "bolt.slash")
@@ -58,7 +125,7 @@ struct TriggersSettingsTab: View {
                 .foregroundStyle(.tertiary)
             Text("No Triggers")
                 .font(.title3.weight(.semibold))
-            Text("Triggers start a session for you — when an app launches, a display is plugged in, or power is connected.")
+            Text("Triggers start a session for you — when an app launches, a display is plugged in, power is connected, or a process (like a coding-assistant CLI) is running.")
                 .settingsFootnote()
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
@@ -137,8 +204,23 @@ private struct AddTriggerSheet: View {
         case appLaunched = "An app launches"
         case externalDisplayConnected = "An external display connects"
         case acPowerConnected = "Power is connected"
+        case processRunning = "A process is running"
         var id: String { rawValue }
     }
+
+    /// Quick-add shortcuts for the CLI coding-assistant tools this condition
+    /// exists for — none of them have a bundle ID, so the app-picker flow
+    /// the `.appLaunched` case uses doesn't apply; typing an exact binary
+    /// name from memory is the developer's chore this saves. `agent` and
+    /// `pi` are generic enough to collide with an unrelated process of the
+    /// same name — `warning` is shown when one of those two is selected.
+    private static let codingAssistantPresets: [(label: String, processName: String, warning: String?)] = [
+        ("Claude Code", "claude", nil),
+        ("Codex CLI", "codex", nil),
+        ("Pi", "pi", "\"pi\" is a generic process name — this could also match an unrelated tool with the same name."),
+        ("Cursor CLI", "agent", "Cursor's CLI installs its binary literally as \"agent\" — a generic name that could also match an unrelated process."),
+        ("Antigravity CLI", "agy", nil),
+    ]
 
     let onAdd: (TriggerRule) -> Void
 
@@ -146,6 +228,7 @@ private struct AddTriggerSheet: View {
     @State private var conditionKind: ConditionKind = .appLaunched
     @State private var bundleID = ""
     @State private var appName = ""
+    @State private var processName = ""
     @State private var sessionKind: DefaultSessionKind = .indefinite
     @State private var pickerError: String?
 
@@ -190,8 +273,42 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
-                Picker("Keep awake", selection: $sessionKind) {
-                    ForEach(DefaultSessionKind.allCases) { Text($0.label).tag($0) }
+                if conditionKind == .processRunning {
+                    LabeledContent("Process name") {
+                        TextField("claude", text: $processName)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Quick add")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 6) {
+                            ForEach(Self.codingAssistantPresets, id: \.processName) { preset in
+                                Button(preset.label) { processName = preset.processName }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+
+                    if let warning = Self.codingAssistantPresets.first(where: { $0.processName == processName })?.warning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
+
+                    // Unlike every other condition, this one's session ends
+                    // on its own — see triggerConditionTitle/EffectSubtitle
+                    // in SessionDisplay.swift for why the duration picker
+                    // below is hidden rather than shown-but-ignored.
+                    Text("Ends automatically when \(processName.isEmpty ? "the process" : processName) exits — no duration to pick.")
+                        .settingsFootnote()
+                } else {
+                    Picker("Keep awake", selection: $sessionKind) {
+                        ForEach(DefaultSessionKind.allCases) { Text($0.label).tag($0) }
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -216,7 +333,11 @@ private struct AddTriggerSheet: View {
     }
 
     private var isValid: Bool {
-        conditionKind != .appLaunched || !bundleID.isEmpty
+        switch conditionKind {
+        case .appLaunched: return !bundleID.isEmpty
+        case .processRunning: return !processName.isEmpty
+        case .externalDisplayConnected, .acPowerConnected: return true
+        }
     }
 
     private var condition: TriggerCondition {
@@ -224,6 +345,7 @@ private struct AddTriggerSheet: View {
         case .appLaunched: return .appLaunched(bundleID: bundleID)
         case .externalDisplayConnected: return .externalDisplayConnected
         case .acPowerConnected: return .acPowerConnected
+        case .processRunning: return .processRunning(processName: processName)
         }
     }
 

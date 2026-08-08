@@ -14,13 +14,18 @@ enum SessionKind: Equatable, Codable {
     case whileExternalDisplay
     case whileOnACPower
     case whileCPUBusy(threshold: Double)
+    /// The one `SessionKind` a trigger condition is deliberately bound to —
+    /// see `TriggerRule.sessionKind(firing:now:)` for why this is an
+    /// intentional exception to "a trigger starts a session, it doesn't
+    /// bind that session's lifetime to the condition."
+    case whileProcessRunning(processName: String)
 
     /// Kinds the daemon can evaluate alone. Everything else needs the agent,
     /// and so cannot outlive it (spec §5).
     var isDaemonEvaluable: Bool {
         switch self {
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower: return true
-        case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy: return false
+        case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning: return false
         }
     }
 
@@ -33,7 +38,7 @@ enum SessionKind: Equatable, Codable {
         case .duration(let until), .untilTime(let until), .lease(let until):
             return until
         case .indefinite, .whileAppRunning, .whileExternalDisplay,
-             .whileOnACPower, .whileCPUBusy:
+             .whileOnACPower, .whileCPUBusy, .whileProcessRunning:
             return nil
         }
     }

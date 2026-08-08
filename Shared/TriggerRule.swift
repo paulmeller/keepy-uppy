@@ -4,6 +4,11 @@ enum TriggerCondition: Codable, Equatable {
     case appLaunched(bundleID: String)
     case externalDisplayConnected
     case acPowerConnected
+    /// Matches a plain executable name (see `ProcessRunningObserving`), for
+    /// CLI tools with no bundle ID — coding-assistant CLIs like `claude` or
+    /// `codex` are the motivating case. The one condition
+    /// `sessionKind(firing:now:)` below treats specially.
+    case processRunning(processName: String)
 }
 
 struct TriggerRule: Codable, Equatable, Identifiable {
@@ -67,6 +72,7 @@ func triggersToFire(
     activeSessions: [Session],
     appRunning: AppRunningObserving,
     display: DisplayObserving,
+    processRunning: ProcessRunningObserving,
     onACPower: Bool
 ) -> [TriggerRule] {
     let activeTriggerIDs = Set(activeSessions.compactMap(\.triggerID))
@@ -79,6 +85,26 @@ func triggersToFire(
             return display.hasExternalDisplay()
         case .acPowerConnected:
             return onACPower
+        case .processRunning(let processName):
+            return processRunning.isRunning(processName: processName)
         }
     }
+}
+
+/// The `SessionKind` a firing rule actually starts. For every condition
+/// except `.processRunning` this is exactly `rule.defaultKind.sessionKind(now:)`
+/// — unchanged from before this function existed. `.processRunning` is the
+/// one deliberate exception: `defaultKind` is stored on the rule (so the
+/// Settings UI has somewhere to persist it, and so the schema didn't need to
+/// change) but ignored here, because ending the session when the process
+/// exits — not after some picked duration — is the entire reason to use a
+/// process trigger over a plain `--for`. See `Sources/SessionDisplay.swift`'s
+/// `triggerConditionTitle`/`triggerEffectSubtitle` for the matching UI-copy
+/// exception, and `Tests/TriggerRuleTests.swift` for the regression coverage
+/// pinning that the other three conditions are unaffected by this carve-out.
+func sessionKind(firing rule: TriggerRule, now: Date) -> SessionKind {
+    if case .processRunning(let processName) = rule.condition {
+        return .whileProcessRunning(processName: processName)
+    }
+    return rule.defaultKind.sessionKind(now: now)
 }

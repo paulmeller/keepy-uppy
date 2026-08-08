@@ -28,6 +28,8 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While on AC power"
     case .whileCPUBusy:
         return "While the CPU is busy"
+    case .whileProcessRunning(let processName):
+        return "While \(processName) is running"
     }
 }
 
@@ -55,18 +57,32 @@ func appDisplayName(bundleID: String) -> String {
 /// being true. Wording that implies otherwise ("while it's running") promises
 /// a stop that will never come: plug a display in, unplug it, and an
 /// indefinite session keeps the Mac awake forever. Every string here is
-/// phrased as the *starting event* for that reason.
+/// phrased as the *starting event* for that reason —
+/// **except `.processRunning`, deliberately.** That condition is the one
+/// exception to the rule above: `TriggerRule.sessionKind(firing:now:)`
+/// ignores `defaultKind` for it and always starts `.whileProcessRunning`,
+/// which `sessionsToEnd` *does* end when the process exits. So this is the
+/// only condition allowed to say "while" — because it's the only one that's
+/// actually true.
 func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     switch condition {
     case .appLaunched(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) launches"
     case .externalDisplayConnected: return "When an external display connects"
     case .acPowerConnected: return "When power is connected"
+    case .processRunning(let processName): return "While \(processName) is running"
     }
 }
 
 /// The second line of a trigger row: what starting it actually does.
+/// `.processRunning` is again the deliberate exception documented on
+/// `triggerConditionTitle` above — `defaultKind` is stored on the rule but
+/// ignored when it fires, so describing it here would be describing a
+/// duration that will never take effect.
 func triggerEffectSubtitle(_ rule: TriggerRule) -> String {
-    "Starts a session that keeps this Mac awake \(rule.defaultKind.durationPhrase)"
+    if case .processRunning(let processName) = rule.condition {
+        return "Keeps this Mac awake until \(processName) exits"
+    }
+    return "Starts a session that keeps this Mac awake \(rule.defaultKind.durationPhrase)"
 }
 
 extension DefaultSessionKind {

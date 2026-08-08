@@ -35,8 +35,21 @@ final class CLICommandParsingTests: XCTestCase {
         XCTAssertEqual(kind, .whileAppRunning(bundleID: "com.apple.dt.Xcode"))
     }
 
+    func testOnWhileProcess() {
+        guard case .success(.on(let kind, _)) = parseCLIArguments(["on", "--while-process", "claude"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertEqual(kind, .whileProcessRunning(processName: "claude"))
+    }
+
     func testOnRejectsMultipleEndConditions() {
         guard case .failure = parseCLIArguments(["on", "--for", "2h", "--while-app", "x"]) else {
+            return XCTFail("expected failure — only one end condition allowed")
+        }
+    }
+
+    func testOnRejectsWhileAppCombinedWithWhileProcess() {
+        guard case .failure = parseCLIArguments(["on", "--while-app", "x", "--while-process", "claude"]) else {
             return XCTFail("expected failure — only one end condition allowed")
         }
     }
@@ -77,6 +90,20 @@ final class CLICommandParsingTests: XCTestCase {
         guard case .success(.sessions) = parseCLIArguments(["sessions"]) else {
             return XCTFail("expected .sessions")
         }
+    }
+
+    func testFinishedWithNoTool() {
+        guard case .success(.finished(let tool)) = parseCLIArguments(["finished"]) else {
+            return XCTFail("expected .finished")
+        }
+        XCTAssertNil(tool)
+    }
+
+    func testFinishedWithTool() {
+        guard case .success(.finished(let tool)) = parseCLIArguments(["finished", "--tool", "claude-code"]) else {
+            return XCTFail("expected .finished")
+        }
+        XCTAssertEqual(tool, "claude-code")
     }
 
     func testSetup() {

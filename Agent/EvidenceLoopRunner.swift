@@ -14,17 +14,22 @@ final class EvidenceLoopRunner {
     private let connection: DaemonConnection
     private let appRunning: AppRunningObserving
     private let display: DisplayObserving
+    private let processRunning: ProcessRunningObserving
     private let cpuObserver: CPUBusyObserving
     private var cpuWindows: [UUID: CPUBusyWindow] = [:]
     private var timer: Timer?
+    private var previousSessions: [Session]?
+    private let completionNotifier = SessionCompletionNotifier()
 
     init(connection: DaemonConnection,
          appRunning: AppRunningObserving = SystemAppRunningObserver(),
          display: DisplayObserving = SystemDisplayObserver(),
+         processRunning: ProcessRunningObserving = SystemProcessRunningObserver(),
          cpuObserver: CPUBusyObserving = SystemCPUBusyObserver()) {
         self.connection = connection
         self.appRunning = appRunning
         self.display = display
+        self.processRunning = processRunning
         self.cpuObserver = cpuObserver
     }
 
@@ -37,6 +42,7 @@ final class EvidenceLoopRunner {
     private func tick() async {
         guard let sessions = await connection.listSessions() else { return }
         let ended = sessionsToEnd(sessions, appRunning: appRunning, display: display,
+                                  processRunning: processRunning,
                                   cpu: &cpuWindows, busyNow: cpuObserver.currentBusyFraction(), now: Date())
         for id in ended {
             _ = await connection.reportConditionEnded(id.uuidString)
@@ -45,7 +51,7 @@ final class EvidenceLoopRunner {
         let rules = TriggerStore.load()
         let onACPower = PowerControl.batteryState().source == .acPower
         let fired = triggersToFire(rules, activeSessions: sessions, appRunning: appRunning,
-                                   display: display, onACPower: onACPower)
+                                   display: display, processRunning: processRunning, onACPower: onACPower)
         for rule in fired {
             // The rule stores relative intent; the absolute deadline is
             // computed HERE, at the instant the rule actually fires. A rule
@@ -53,7 +59,7 @@ final class EvidenceLoopRunner {
             // now — see `TriggerRule.defaultKind` for what going the other
             // way costs (a permanent 5s refire loop against the daemon).
             let now = Date()
-            let session = Session(id: UUID(), kind: rule.defaultKind.sessionKind(now: now),
+            let session = Session(id: UUID(), kind: sessionKind(firing: rule, now: now),
                                   owner: ClientID(rawValue: "agent"),
                                   persistence: .detached, origin: .trigger, startedAt: now,
                                   triggerID: rule.id)
@@ -68,5 +74,22 @@ final class EvidenceLoopRunner {
                 agentLogger.log("Trigger \(rule.id) did not start a session: \(error ?? "unknown")")
             }
         }
+
+        // Skipped on the very first tick (previousSessions == nil) so an
+        // agent restart doesn't retroactively fire completion actions for
+        // sessions that ended while it was down — there's no "previous" to
+        // diff against yet, only a possibly-stale snapshot from before the
+        // restart.
+        if let previousSessions {
+            let config = SessionCompletionStore.load()
+            if config.scriptPath != nil || config.webhookURL != nil {
+                for endedSession in sessionsEndedSince(previous: previousSessions, current: sessions) {
+                    completionNotifier.notify(config: config, event: SessionCompletionEvent(
+                        tool: nil, sessionID: endedSession.id.uuidString,
+                        kind: String(describing: endedSession.kind), endedAt: Date()))
+                }
+            }
+        }
+        previousSessions = sessions
     }
 }

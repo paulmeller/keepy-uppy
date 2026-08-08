@@ -53,6 +53,42 @@ struct SystemAppRunningObserver: AppRunningObserving {
     }
 }
 
+/// The first process-enumeration code in this repo — `SystemAppRunningObserver`
+/// above only ever sees GUI apps registered with Launch Services, which the
+/// CLI coding-assistant tools this exists for (`claude`, `codex`, `pi`, the
+/// Cursor CLI's `agent`, Google Antigravity's `agy`) never are: no bundle ID,
+/// no `NSRunningApplication` entry.
+///
+/// Matches `kinfo_proc.kp_proc.p_comm` — a fixed, `MAXCOMLEN`-length C array
+/// holding the unqualified executable name, no path, no arguments — against
+/// `processName` exactly. On a `sysctl` failure this returns `false` rather
+/// than logging, matching `SystemDisplayObserver`/`SystemAppRunningObserver`
+/// above: the evidence loop polls every 5s, and a transient failure here
+/// should read as "not currently observed running," not spam the log.
+struct SystemProcessRunningObserver: ProcessRunningObserving {
+    func isRunning(processName: String) -> Bool {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return false }
+
+        let count = size / MemoryLayout<kinfo_proc>.stride
+        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
+        var actualSize = size
+        guard sysctl(&mib, UInt32(mib.count), &procs, &actualSize, nil, 0) == 0 else { return false }
+
+        let actualCount = actualSize / MemoryLayout<kinfo_proc>.stride
+        return procs[0..<actualCount].contains { proc in
+            var comm = proc.kp_proc.p_comm
+            let name = withUnsafePointer(to: &comm) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) + 1) {
+                    String(cString: $0)
+                }
+            }
+            return name == processName
+        }
+    }
+}
+
 struct SystemDisplayObserver: DisplayObserving {
     func hasExternalDisplay() -> Bool {
         // Built-in display, if present, is always id 0 on a MacBook; any

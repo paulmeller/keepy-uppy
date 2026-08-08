@@ -32,6 +32,11 @@ final class SessionDisplayTests: XCTestCase {
         XCTAssertEqual(remainingTimeText(for: session(.whileExternalDisplay), now: t0), "While an external display is connected")
     }
 
+    func testWhileProcessRunningShowsTheProcessCondition() {
+        let s = session(.whileProcessRunning(processName: "claude"))
+        XCTAssertEqual(remainingTimeText(for: s, now: t0), "While claude is running")
+    }
+
     func testOriginTextDistinguishesManualAndTrigger() {
         XCTAssertEqual(originText(for: session(.indefinite, origin: .manual)), "Started manually")
         XCTAssertEqual(originText(for: session(.indefinite, origin: .trigger)), "Started automatically")
@@ -78,6 +83,20 @@ final class TriggerCopyTests: XCTestCase {
     func testEffectSubtitleReportsTheKindThatWillActuallyBeStarted() {
         XCTAssertTrue(triggerEffectSubtitle(rule(.acPowerConnected, .fourHours)).contains("for 4 hours"))
         XCTAssertTrue(triggerEffectSubtitle(rule(.acPowerConnected, .indefinite)).contains("indefinitely"))
+    }
+
+    /// The deliberate exception to both invariants above: `.processRunning`
+    /// is the one condition whose fired session genuinely does end when the
+    /// condition goes away (`TriggerRule.sessionKind(firing:now:)` ignores
+    /// `defaultKind` for it and always ends on process exit), so it's the
+    /// one condition allowed — expected — to say "while".
+    func testProcessRunningIsTheDeliberateExceptionAndDoesSayWhile() {
+        let title = triggerConditionTitle(.processRunning(processName: "claude")).lowercased()
+        XCTAssertTrue(title.contains("while "), "\(title) should say \"while\" — this condition actually does bind the session's lifetime")
+
+        let subtitle = triggerEffectSubtitle(rule(.processRunning(processName: "claude"), .fourHours)).lowercased()
+        XCTAssertTrue(subtitle.contains("claude"))
+        XCTAssertFalse(subtitle.contains("4 hours"), "defaultKind must be ignored for a process-running rule")
     }
 }
 
