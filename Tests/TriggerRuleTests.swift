@@ -25,6 +25,10 @@ final class TriggerRuleTests: XCTestCase {
         let external: Bool
         func hasExternalDisplay() -> Bool { external }
     }
+    struct FakeProcessRunning: ProcessRunningObserving {
+        let running: Set<String>
+        func isRunning(processName: String) -> Bool { running.contains(processName) }
+    }
 
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
@@ -34,7 +38,8 @@ final class TriggerRuleTests: XCTestCase {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"), enabled: false)
         let fired = triggersToFire([r], activeSessions: [],
                                    appRunning: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
-                                   display: FakeDisplay(external: false), onACPower: false)
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
         XCTAssertTrue(fired.isEmpty)
     }
 
@@ -42,22 +47,41 @@ final class TriggerRuleTests: XCTestCase {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
         let fired = triggersToFire([r], activeSessions: [],
                                    appRunning: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
-                                   display: FakeDisplay(external: false), onACPower: false)
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
         XCTAssertEqual(fired.map(\.id), [r.id])
     }
 
     func testExternalDisplayConnectedFires() {
         let r = rule(.externalDisplayConnected)
         let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: true), onACPower: false)
+                                   display: FakeDisplay(external: true),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
         XCTAssertEqual(fired.map(\.id), [r.id])
     }
 
     func testACPowerConnectedFires() {
         let r = rule(.acPowerConnected)
         let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: false), onACPower: true)
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: true)
         XCTAssertEqual(fired.map(\.id), [r.id])
+    }
+
+    func testProcessRunningFiresWhenRunning() {
+        let r = rule(.processRunning(processName: "claude"))
+        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: ["claude"]), onACPower: false)
+        XCTAssertEqual(fired.map(\.id), [r.id])
+    }
+
+    func testProcessRunningDoesNotFireWhenNotRunning() {
+        let r = rule(.processRunning(processName: "claude"))
+        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
+        XCTAssertTrue(fired.isEmpty)
     }
 
     /// The most important test in this file: a trigger already represented
@@ -70,14 +94,16 @@ final class TriggerRuleTests: XCTestCase {
                               triggerID: r.id)
         let fired = triggersToFire([r], activeSessions: [already],
                                    appRunning: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
-                                   display: FakeDisplay(external: false), onACPower: false)
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
         XCTAssertTrue(fired.isEmpty)
     }
 
     func testConditionFalseDoesNotFire() {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
         let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: false), onACPower: false)
+                                   display: FakeDisplay(external: false),
+                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
         XCTAssertTrue(fired.isEmpty)
     }
 
@@ -140,5 +166,29 @@ final class TriggerRuleTests: XCTestCase {
         let fire = Date(timeIntervalSince1970: 2_000_000)
         XCTAssertEqual(loaded.defaultKind.sessionKind(now: fire),
                        .duration(until: fire.addingTimeInterval(4 * 3600)))
+    }
+
+    // MARK: - sessionKind(firing:now:)
+
+    /// The one deliberate exception: a `.processRunning` rule always starts
+    /// `.whileProcessRunning`, ignoring whatever `defaultKind` happens to be
+    /// stored — because ending on process exit, not after a picked
+    /// duration, is the entire point of this condition.
+    func testProcessRunningRuleAlwaysMaterializesWhileProcessRunning() {
+        let r = rule(.processRunning(processName: "claude"), kind: .fourHours)
+        XCTAssertEqual(sessionKind(firing: r, now: Date()), .whileProcessRunning(processName: "claude"))
+    }
+
+    /// Regression guard: this refactor must not change what the other three
+    /// conditions materialize. Each still defers to `defaultKind`, exactly
+    /// as `rule.defaultKind.sessionKind(now:)` did before this function
+    /// existed.
+    func testEveryOtherConditionStillDefersToDefaultKind() {
+        let now = Date(timeIntervalSince1970: 3_000_000)
+        for condition: TriggerCondition in [.appLaunched(bundleID: "com.apple.dt.Xcode"),
+                                            .externalDisplayConnected, .acPowerConnected] {
+            let r = rule(condition, kind: .oneHour)
+            XCTAssertEqual(sessionKind(firing: r, now: now), r.defaultKind.sessionKind(now: now))
+        }
     }
 }

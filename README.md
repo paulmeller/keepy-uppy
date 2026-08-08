@@ -10,7 +10,7 @@ it over SSH, and the menu-bar app is optional. Sessions have an end condition �
 a duration, a clock time, an app that's running — and every one of them is
 bounded by safety guards that stop the Mac cooking itself unattended.
 
-> **Status: early.** It works, it's signed and notarized, and it has 173 tests
+> **Status: early.** It works, it's signed and notarized, and it has 202 tests
 > — but it has been in real use for hours, not weeks, on one machine. Read
 > [Status and caveats](#status-and-caveats) before trusting it with anything
 > that matters.
@@ -41,10 +41,12 @@ keepy-uppy on                                  # until you say otherwise
 keepy-uppy on --for 2h
 keepy-uppy on --until 17:00
 keepy-uppy on --while-app com.apple.dt.Xcode   # ends when Xcode quits
+keepy-uppy on --while-process claude           # ends when the `claude` process exits
 keepy-uppy off                                 # stop the sessions you started
 keepy-uppy off --all                           # stop everyone's
 keepy-uppy status --json                       # {"keepingAwake": true}
 keepy-uppy sessions
+keepy-uppy finished --tool claude-code         # fires the configured "on session end" script/webhook now
 keepy-uppy reset                               # unregister both services
 ```
 
@@ -54,6 +56,62 @@ symlink it onto your `PATH` if you want the short form above.
 A session started from the CLI outlives the shell that started it. One started
 from the menu bar ends when you quit the app — that's the difference between
 "detached" and "client-bound", and it is deliberate.
+
+## AI coding-assistant integration
+
+Settings → Triggers has quick-add presets for five CLI coding-assistant
+tools — each is a process-running trigger (`--while-process` under the
+hood): the Mac stays awake while the tool is running and the session ends
+the moment it exits, unlike every other trigger kind, which starts a
+session for a picked duration and doesn't track the condition afterward.
+
+| Tool | Preset matches process | Native completion hook |
+|---|---|---|
+| Claude Code | `claude` | `SessionEnd` |
+| Codex CLI | `codex` | `hooks.json` → `SessionEnd` |
+| Pi | `pi` | `session_shutdown` / `pi-yaml-hooks`' `SessionEnd` |
+| Cursor CLI | `agent` | none yet — see caveat below |
+| Antigravity CLI (`agy`) | `agy` | `hooks.json` → `Stop`/`PostInvocation` |
+
+`agent` and `pi` are generic executable names — the presets for Cursor and
+Pi carry an explicit warning in Settings, since either could match an
+unrelated process that happens to share the name.
+
+**"On session end"**, in the same Triggers tab, runs a script and/or POSTs a
+webhook whenever *any* session ends — not just these. Four of the five tools
+above ship their own completion-hook system, which can call
+`keepy-uppy finished --tool <name>` directly for much tighter precision than
+waiting on a process to exit (a long-running terminal session finishes many
+tasks; "the process exited" only tells you the terminal closed). Point the
+tool's hook config at it, e.g. for Claude Code's `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "keepy-uppy finished --tool claude-code" }] }
+    ]
+  }
+}
+```
+
+`keepy-uppy finished` never talks to the daemon — it reads the same shared
+preferences the Settings UI writes and runs the script/POSTs the webhook
+itself, so it works even on a machine where the daemon isn't running.
+
+Two things worth knowing:
+
+- **Cursor CLI has no session-end hook today.** Its hook forwarding
+  currently only sends `beforeShellExecution`/`afterShellExecution` — a
+  documented, open limitation on Cursor's side, not something to work around
+  here. Cursor gets the process-trigger and generic "on session end"
+  coverage above; it just can't reach `keepy-uppy finished` on its own yet.
+- **Using both mechanisms for the same tool double-fires.** If you have a
+  process-trigger running for, say, `claude`, *and* Claude Code's own
+  `SessionEnd` hook calling `keepy-uppy finished`, you'll see the configured
+  action run twice — once immediately via the hook, once ~5s later when the
+  Agent notices the trigger-session ended. Harmless, just noisy; pick one if
+  it bothers you.
 
 ## Safety
 
@@ -116,7 +174,7 @@ Design rationale, including the alternatives rejected and why, is in
 
 ```sh
 brew install xcodegen just
-just test     # 173 unit tests
+just test     # 202 unit tests
 just run      # build Debug and launch
 ```
 
@@ -152,6 +210,11 @@ you're installing:
 - **Multi-user Macs are lightly considered.** Sessions and agent evidence are
   scoped per uid, but fast user switching is untested, and safety config is
   read from whichever user's agent is connected.
+- **Process-running triggers and "on session end" are new and unverified on
+  real hardware.** The matching/diffing logic is unit-tested against
+  injected inputs; actually running `claude`/`codex`/etc. and watching a
+  session start and end, and actually seeing a configured script run or
+  webhook land, have not been observed end to end yet.
 - Remaining manual checks are listed in
   [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md).
 

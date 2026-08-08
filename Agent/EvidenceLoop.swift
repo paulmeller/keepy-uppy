@@ -8,6 +8,7 @@ func sessionsToEnd(
     _ sessions: [Session],
     appRunning: AppRunningObserving,
     display: DisplayObserving,
+    processRunning: ProcessRunningObserving,
     cpu: inout [UUID: CPUBusyWindow],
     busyNow: Double?,
     now: Date
@@ -19,6 +20,8 @@ func sessionsToEnd(
             if !appRunning.isRunning(bundleID: bundleID) { ended.append(session.id) }
         case .whileExternalDisplay:
             if !display.hasExternalDisplay() { ended.append(session.id) }
+        case .whileProcessRunning(let processName):
+            if !processRunning.isRunning(processName: processName) { ended.append(session.id) }
         case .whileCPUBusy(let threshold):
             guard let busyNow else { continue }
             var window = cpu[session.id] ?? CPUBusyWindow(threshold: threshold, sustainedFor: 120)

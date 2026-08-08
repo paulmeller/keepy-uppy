@@ -20,6 +20,15 @@ enum CLICommand: Equatable {
     case off(StopTarget)
     case status(json: Bool)
     case sessions
+    /// Fires the configured "on session end" script/webhook immediately —
+    /// meant to be wired into a CLI coding-assistant tool's own completion
+    /// hook (Claude Code's `SessionEnd`, Codex's `hooks.json`, etc.), so it
+    /// fires at real task-completion precision instead of waiting for the
+    /// Agent's next 5s poll to notice a process exited. Deliberately does
+    /// NOT talk to the daemon — see `CLI/main.swift`'s handling of this case
+    /// for why it's a pure local action, run before the XPC connection is
+    /// even attempted.
+    case finished(tool: String?)
     case setup
     /// Tears down both background-service registrations. The recovery path
     /// for a daemon launchd has wedged: a stale or unresolvable job
@@ -33,7 +42,7 @@ enum CLICommand: Equatable {
 
 /// Named once: the command list appears in both failure messages below, and
 /// adding a verb should not mean remembering to update two strings.
-private let cliUsage = "usage: keepy-uppy on|off|status|sessions|setup|reset"
+private let cliUsage = "usage: keepy-uppy on|off|status|sessions|finished|setup|reset"
 
 /// Pure: no I/O, no XPC, no process exit — fully testable. `now` is
 /// injected so duration parsing can be tested without depending on the
@@ -51,6 +60,8 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
         return .success(.status(json: rest.contains("--json")))
     case "sessions":
         return .success(.sessions)
+    case "finished":
+        return .success(.finished(tool: parseTool(rest)))
     case "setup":
         return .success(.setup)
     case "reset":
@@ -78,11 +89,22 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
     if let appIndex = args.firstIndex(of: "--while-app"), args.indices.contains(appIndex + 1) {
         endConditions.append(.whileAppRunning(bundleID: args[appIndex + 1]))
     }
+    if let processIndex = args.firstIndex(of: "--while-process"), args.indices.contains(processIndex + 1) {
+        endConditions.append(.whileProcessRunning(processName: args[processIndex + 1]))
+    }
 
     guard endConditions.count <= 1 else {
-        return .failure(CLIParseError(message: "only one of --for, --until, --while-app may be given"))
+        return .failure(CLIParseError(message: "only one of --for, --until, --while-app, --while-process may be given"))
     }
     return .success(.on(kind: endConditions.first ?? .indefinite, persistence: .detached))
+}
+
+/// `--tool` is optional context, not a selector — `finished` fires the same
+/// configured action regardless of which tool (if any) is named; the name
+/// just rides along into the script's env vars / webhook JSON.
+private func parseTool(_ args: [String]) -> String? {
+    guard let idx = args.firstIndex(of: "--tool"), args.indices.contains(idx + 1) else { return nil }
+    return args[idx + 1]
 }
 
 private func parseOff(_ args: [String]) -> Result<CLICommand, CLIParseError> {

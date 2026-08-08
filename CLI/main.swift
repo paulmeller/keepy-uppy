@@ -53,6 +53,22 @@ case .success(let parsed): command = parsed
 case .failure(let error): fail(error.message)
 }
 
+// `finished` is handled here, before the daemon connection below is even
+// attempted, because it deliberately never talks to the daemon at all — see
+// CLICommand.swift's doc comment on this case. It reads the same shared
+// UserDefaults suite `SessionCompletionStore`/`TriggerStore` already use and
+// fires the configured script/webhook itself, so a coding-assistant tool's
+// own completion hook (Claude Code's `SessionEnd`, etc.) works even on a
+// machine where the daemon isn't running or hasn't been set up yet.
+if case .finished(let tool) = command {
+    let config = SessionCompletionStore.load()
+    if config.scriptPath != nil || config.webhookURL != nil {
+        SessionCompletionNotifier().notifyAndWait(config: config, event: SessionCompletionEvent(
+            tool: tool, sessionID: nil, kind: nil, endedAt: Date()))
+    }
+    exit(0)
+}
+
 guard let proxy = connect() else { fail("could not connect to the Keepy Uppy daemon") }
 
 switch command {
@@ -119,6 +135,9 @@ case .sessions:
         }
         semaphore.signal()
     }
+
+case .finished:
+    fatalError("handled above, before the daemon connection is attempted")
 
 case .setup:
     // Unlike the branches above, this doesn't talk to the daemon over XPC
