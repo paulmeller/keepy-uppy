@@ -19,69 +19,68 @@ final class TriggerRuleTests: XCTestCase {
 
     struct FakeAppRunning: AppRunningObserving {
         let running: Set<String>
-        func isRunning(bundleID: String) -> Bool { running.contains(bundleID) }
+        var reading: ConditionReading? = nil
+        func isRunning(bundleID: String) -> ConditionReading {
+            reading ?? ConditionReading(running.contains(bundleID))
+        }
     }
     struct FakeDisplay: DisplayObserving {
         let external: Bool
-        func hasExternalDisplay() -> Bool { external }
+        var reading: ConditionReading? = nil
+        func hasExternalDisplay() -> ConditionReading { reading ?? ConditionReading(external) }
     }
     struct FakeProcessRunning: ProcessRunningObserving {
         let running: Set<String>
-        func isRunning(processName: String) -> Bool { running.contains(processName) }
+        var reading: ConditionReading? = nil
+        func isRunning(processName: String) -> ConditionReading {
+            reading ?? ConditionReading(running.contains(processName))
+        }
     }
 
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
     }
 
+    /// One `triggersToFire` evaluation with every observer defaulted to
+    /// "condition false", so each test names only what it is about.
+    private func fire(_ rules: [TriggerRule],
+                      activeSessions: [Session] = [],
+                      app: FakeAppRunning = FakeAppRunning(running: []),
+                      display: FakeDisplay = FakeDisplay(external: false),
+                      process: FakeProcessRunning = FakeProcessRunning(running: []),
+                      acPower: ConditionReading = .absent) -> [TriggerRule] {
+        triggersToFire(rules, activeSessions: activeSessions, appRunning: app,
+                       display: display, processRunning: process, acPower: acPower)
+    }
+
     func testDisabledRuleNeverFires() {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"), enabled: false)
-        let fired = triggersToFire([r], activeSessions: [],
-                                   appRunning: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
-        XCTAssertTrue(fired.isEmpty)
+        XCTAssertTrue(fire([r], app: FakeAppRunning(running: ["com.apple.dt.Xcode"])).isEmpty)
     }
 
     func testAppLaunchedFiresWhenRunning() {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
-        let fired = triggersToFire([r], activeSessions: [],
-                                   appRunning: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
-        XCTAssertEqual(fired.map(\.id), [r.id])
+        XCTAssertEqual(fire([r], app: FakeAppRunning(running: ["com.apple.dt.Xcode"])).map(\.id), [r.id])
     }
 
     func testExternalDisplayConnectedFires() {
         let r = rule(.externalDisplayConnected)
-        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: true),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
-        XCTAssertEqual(fired.map(\.id), [r.id])
+        XCTAssertEqual(fire([r], display: FakeDisplay(external: true)).map(\.id), [r.id])
     }
 
     func testACPowerConnectedFires() {
         let r = rule(.acPowerConnected)
-        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: true)
-        XCTAssertEqual(fired.map(\.id), [r.id])
+        XCTAssertEqual(fire([r], acPower: .present).map(\.id), [r.id])
     }
 
     func testProcessRunningFiresWhenRunning() {
         let r = rule(.processRunning(processName: "claude"))
-        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: ["claude"]), onACPower: false)
-        XCTAssertEqual(fired.map(\.id), [r.id])
+        XCTAssertEqual(fire([r], process: FakeProcessRunning(running: ["claude"])).map(\.id), [r.id])
     }
 
     func testProcessRunningDoesNotFireWhenNotRunning() {
         let r = rule(.processRunning(processName: "claude"))
-        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
-        XCTAssertTrue(fired.isEmpty)
+        XCTAssertTrue(fire([r]).isEmpty)
     }
 
     /// The most important test in this file: a trigger already represented
@@ -92,19 +91,106 @@ final class TriggerRuleTests: XCTestCase {
                               owner: ClientID(rawValue: "agent"),
                               persistence: .detached, origin: .trigger, startedAt: Date(),
                               triggerID: r.id)
-        let fired = triggersToFire([r], activeSessions: [already],
-                                   appRunning: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
-        XCTAssertTrue(fired.isEmpty)
+        XCTAssertTrue(fire([r], activeSessions: [already],
+                           app: FakeAppRunning(running: ["com.apple.dt.Xcode"])).isEmpty)
+    }
+
+    /// The same de-dup guarantee for `.processRunning`, which had no coverage
+    /// of it at all — and which needs it most, because it is the one
+    /// condition whose session lasts exactly as long as the condition holds.
+    /// Without this, a running `claude` would originate a fresh session every
+    /// 5s tick for as long as it ran: a real XPC round-trip and a privileged
+    /// power-assertion write each time.
+    func testAlreadyActiveProcessTriggerDoesNotFireAgain() {
+        let r = rule(.processRunning(processName: "claude"))
+        let already = Session(id: UUID(), kind: sessionKind(firing: r, now: Date()),
+                              owner: ClientID(rawValue: "agent"),
+                              persistence: .detached, origin: .trigger, startedAt: Date(),
+                              triggerID: r.id)
+        XCTAssertEqual(already.kind, .whileProcessRunning(processName: "claude"))
+        XCTAssertTrue(fire([r], activeSessions: [already],
+                           process: FakeProcessRunning(running: ["claude"])).isEmpty,
+                      "the process is still running, but its session already exists")
+    }
+
+    /// De-dup is by trigger id, not by condition: an unrelated live session
+    /// for a *different* rule must not suppress this one.
+    func testAProcessTriggerStillFiresWhileAnotherRulesSessionIsLive() {
+        let mine = rule(.processRunning(processName: "claude"))
+        let other = rule(.processRunning(processName: "codex"))
+        let othersSession = Session(id: UUID(), kind: sessionKind(firing: other, now: Date()),
+                                    owner: ClientID(rawValue: "agent"),
+                                    persistence: .detached, origin: .trigger, startedAt: Date(),
+                                    triggerID: other.id)
+        let fired = fire([mine], activeSessions: [othersSession],
+                         process: FakeProcessRunning(running: ["claude", "codex"]))
+        XCTAssertEqual(fired.map(\.id), [mine.id])
     }
 
     func testConditionFalseDoesNotFire() {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
-        let fired = triggersToFire([r], activeSessions: [], appRunning: FakeAppRunning(running: []),
-                                   display: FakeDisplay(external: false),
-                                   processRunning: FakeProcessRunning(running: []), onACPower: false)
-        XCTAssertTrue(fired.isEmpty)
+        XCTAssertTrue(fire([r]).isEmpty)
+    }
+
+    // MARK: - The tri-state contract
+    //
+    // The mirror of the `sessionsToEnd` tests in EvidenceLoopTests: a session
+    // may only be STARTED on a confident positive. An observer that could not
+    // look has not seen the condition become true.
+
+    func testUndeterminedNeverFiresAnyCondition() {
+        let appRule = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertTrue(fire([appRule], app: FakeAppRunning(running: [], reading: .undetermined)).isEmpty)
+
+        let displayRule = rule(.externalDisplayConnected)
+        XCTAssertTrue(fire([displayRule], display: FakeDisplay(external: false, reading: .undetermined)).isEmpty)
+
+        let processRule = rule(.processRunning(processName: "claude"))
+        XCTAssertTrue(fire([processRule], process: FakeProcessRunning(running: [], reading: .undetermined)).isEmpty)
+
+        let powerRule = rule(.acPowerConnected)
+        XCTAssertTrue(fire([powerRule], acPower: .undetermined).isEmpty,
+                      "IOKit declining to name the power source is not 'AC connected'")
+    }
+
+    /// The reading, not the fake's backing set, is what decides — proving the
+    /// call sites really do test for `.present` rather than for "not absent".
+    func testUndeterminedDoesNotFireEvenWhenTheProcessIsActuallyRunning() {
+        let r = rule(.processRunning(processName: "claude"))
+        XCTAssertTrue(fire([r], process: FakeProcessRunning(running: ["claude"], reading: .undetermined)).isEmpty)
+    }
+
+    // MARK: - Process-name validation
+
+    func testAPlainNameIsAcceptedWhateverItsLength() {
+        XCTAssertNil(TriggerCondition.processNameProblem("claude"))
+        // Longer than MAXCOMLEN (16). Matching argv[0] and the executable
+        // path rather than the truncated `p_comm` is what makes this legal;
+        // verified empirically against a 31-character binary name.
+        XCTAssertNil(TriggerCondition.processNameProblem("keepy-uppy-observer-probe-sleep"))
+    }
+
+    func testAPathIsRejectedRatherThanSilentlyNeverMatching() {
+        XCTAssertNotNil(TriggerCondition.processNameProblem("/opt/homebrew/bin/claude"))
+        XCTAssertNotNil(TriggerCondition.processNameProblem("bin/claude"))
+    }
+
+    func testSurroundingWhitespaceIsRejected() {
+        XCTAssertNotNil(TriggerCondition.processNameProblem("claude "))
+        XCTAssertNotNil(TriggerCondition.processNameProblem(" claude"))
+    }
+
+    func testTheEmptyFieldIsNotYetAnError() {
+        XCTAssertNil(TriggerCondition.processNameProblem(""),
+                     "an empty field is incomplete, not wrong — the Add button is disabled for it")
+    }
+
+    /// Every shipped quick-add preset must itself be a name the matcher can
+    /// match, or the button would write a rule that can never fire.
+    func testEveryShippedPresetNameIsValid() {
+        for name in ["claude", "codex", "pi", "agent", "agy"] {
+            XCTAssertNil(TriggerCondition.processNameProblem(name), "preset \"\(name)\"")
+        }
     }
 
     /// Final whole-branch review, Finding 2. A rule created today and fired

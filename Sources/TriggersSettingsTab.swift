@@ -293,7 +293,14 @@ private struct AddTriggerSheet: View {
                         }
                     }
 
-                    if let warning = Self.codingAssistantPresets.first(where: { $0.processName == processName })?.warning {
+                    // A name the matcher could never match is worth saying so
+                    // now, rather than letting the rule sit in the list
+                    // looking correct and never firing.
+                    if let problem = TriggerCondition.processNameProblem(processName) {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    } else if let warning = Self.codingAssistantPresets.first(where: { $0.processName == processName })?.warning {
                         Label(warning, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.callout)
@@ -335,7 +342,8 @@ private struct AddTriggerSheet: View {
     private var isValid: Bool {
         switch conditionKind {
         case .appLaunched: return !bundleID.isEmpty
-        case .processRunning: return !processName.isEmpty
+        case .processRunning:
+            return !processName.isEmpty && TriggerCondition.processNameProblem(processName) == nil
         case .externalDisplayConnected, .acPowerConnected: return true
         }
     }
