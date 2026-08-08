@@ -49,6 +49,29 @@ run: build
 # needs the substitution to still be present once `archive`'s own
 # `xcodebuild` call has finished.
 # Substitutes the real Team ID into the signing requirement, archives, and restores the placeholder on every exit path.
+# Bumps the build number stamped into all four targets.
+#
+# CFBundleVersion is what macOS uses to order builds *within* one marketing
+# version, so two notarized builds sharing a number are indistinguishable to
+# the system — and to anyone reporting a bug against "0.1.0". `notarize`
+# depends on this, so every build that actually leaves this machine gets its
+# own number; `archive` deliberately does not, since it is also the local
+# signing smoke test and shouldn't churn a tracked file every run.
+#
+# It edits project.yml, which is tracked. That is the point: unlike the Team
+# ID substitution below, this change is meant to be committed, so the number
+# keeps climbing across releases instead of resetting.
+bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current=$(grep -oE 'CURRENT_PROJECT_VERSION: "[0-9]+"' project.yml \
+        | grep -oE '[0-9]+' | sort -n | tail -1)
+    next=$((current + 1))
+    # Rewrites every target's value to the same number, so the four cannot
+    # drift apart even if one is edited by hand.
+    sed -i '' -E "s/CURRENT_PROJECT_VERSION: \"[0-9]+\"/CURRENT_PROJECT_VERSION: \"$next\"/g" project.yml
+    echo "build number $current -> $next  (commit project.yml with the release)"
+
 archive: generate
     #!/usr/bin/env bash
     set -euo pipefail
@@ -80,9 +103,10 @@ dmg: export
         -ov -format UDZO \
         "{{dmg_path}}"
 
-notarize: dmg
+notarize: bump dmg
     @test -n "{{notary_profile}}" || { echo "Set KEEPY_UPPY_NOTARY_PROFILE (see README)"; exit 1; }
     xcrun notarytool submit "{{dmg_path}}" \
         --keychain-profile "{{notary_profile}}" \
         --wait
     xcrun stapler staple "{{dmg_path}}"
+    @echo "shipped $(plutil -extract CFBundleShortVersionString raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist") ($(plutil -extract CFBundleVersion raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist"))"
