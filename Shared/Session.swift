@@ -29,6 +29,41 @@ enum SessionKind: Equatable, Codable {
         }
     }
 
+    /// The kind's **stable external name**, for anything that leaves this
+    /// process: the `kind` field of the session-completion webhook JSON and
+    /// the `KEEPY_UPPY_KIND` environment variable handed to a user's script
+    /// (`Agent/SessionCompletionNotifier.swift`).
+    ///
+    /// This exists because those two call sites used `String(describing:)`,
+    /// i.e. Swift's *synthesized debug description*, which is not a wire
+    /// format and was never promised to be one. It rendered as
+    /// `whileAppRunning(bundleID: "com.example.App")`, and renaming a case or
+    /// even an associated-value *label* — a pure refactor, invisible to
+    /// every test — would silently change what a user's script parses and
+    /// what leaves the machine. `Tests/SessionCompletionTests.swift` pins
+    /// every string below for exactly that reason: a rename now fails a test
+    /// instead of breaking somebody's webhook consumer in production.
+    ///
+    /// The shape is `name` or `name:value`, lowercase kebab-case, where the
+    /// value is everything after the *first* colon. Only the two kinds whose
+    /// associated value identifies *what was being watched* carry one; a
+    /// deadline is deliberately omitted (the event already carries `endedAt`)
+    /// and so is `.whileCPUBusy`'s threshold, so that no `Double` formatting
+    /// — and therefore no locale — can ever reach the wire.
+    var wireDescription: String {
+        switch self {
+        case .indefinite: return "indefinite"
+        case .duration: return "duration"
+        case .untilTime: return "until-time"
+        case .lease: return "lease"
+        case .whileAppRunning(let bundleID): return "while-app-running:\(bundleID)"
+        case .whileExternalDisplay: return "while-external-display"
+        case .whileOnACPower: return "while-on-ac-power"
+        case .whileCPUBusy: return "while-cpu-busy"
+        case .whileProcessRunning(let processName): return "while-process-running:\(processName)"
+        }
+    }
+
     /// The kind's absolute deadline, for kinds that have one. `nil` for
     /// kinds with no fixed clock-time end (an indefinite session, or a
     /// condition the agent must observe), which `SessionTable`'s expiry

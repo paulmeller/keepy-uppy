@@ -22,8 +22,13 @@ final class EvidenceLoopRunner {
     private let cpuObserver: CPUBusyObserving
     private var evidence = SessionEvidence()
     private var timer: Timer?
-    private var previousSessions: [Session]?
+    /// Snapshot bookkeeping for the session-completion action, including the
+    /// filter to this agent's own uid. See `SessionCompletionTracker` for
+    /// both defects it exists to close.
+    private var completionTracker = SessionCompletionTracker(ownerUID: getuid())
     private let completionNotifier = SessionCompletionNotifier()
+    /// Non-reentrancy guard for `tick()`. See `start()`.
+    private var isTicking = false
 
     init(connection: DaemonConnection,
          appRunning: AppRunningObserving = SystemAppRunningObserver(),
@@ -37,14 +42,48 @@ final class EvidenceLoopRunner {
         self.cpuObserver = cpuObserver
     }
 
+    /// The timer fires every 5s and spawns a `Task` per fire, but `tick()` is
+    /// `async` and has no bound on how long it takes: every XPC call inside
+    /// it is capped at `DaemonConnection.callTimeout`, which is *also* 5s, so
+    /// a single hung call is enough to make one tick outlive its own period
+    /// and overlap the next. Overlapping ticks are not merely wasteful, they
+    /// were incorrect — the reviewer reproduced a stalled tick writing its
+    /// stale session snapshot over a newer one, after which the next tick
+    /// re-diffed an already-reported session as newly ended and ran the
+    /// user's completion script a second time for the same session.
+    ///
+    /// The guard makes a slow tick degrade to "this tick was skipped" rather
+    /// than "this action fired twice", which is the right direction: a
+    /// skipped tick costs at most five seconds of latency on ending a
+    /// session, and the next tick sees the same world. Re-reading the
+    /// snapshot after the awaits would fix the write-back specifically, but
+    /// would still leave two ticks concurrently reporting conditions ended
+    /// and firing triggers against the same daemon state; refusing to
+    /// overlap at all is both simpler and strictly stronger.
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.tick() }
+            Task { @MainActor in
+                guard let self, !self.isTicking else { return }
+                self.isTicking = true
+                defer { self.isTicking = false }
+                await self.tick()
+            }
         }
     }
 
     private func tick() async {
-        guard let sessions = await connection.listSessions() else { return }
+        guard let sessions = await connection.listSessions() else {
+            // The connection is unusable (`listSessions` returning nil is
+            // also what tears it down, in `DaemonConnection.call`). Drop the
+            // completion baseline: when the daemon comes back its table is
+            // empty, and diffing the pre-restart snapshot against it would
+            // report every session as having ended in the same tick — N
+            // script spawns and N webhook POSTs at once, bounded only by how
+            // many sessions happened to be running. Same reasoning, and same
+            // deliberate trade, as skipping the very first tick.
+            completionTracker.forgetSnapshot()
+            return
+        }
         // One process-table read serves both `sessionsToEnd` and
         // `triggersToFire` below, however many sessions and rules each has to
         // answer for. Before this, the ~530-entry table was enumerated once
@@ -59,12 +98,11 @@ final class EvidenceLoopRunner {
         }
 
         let rules = TriggerStore.load()
-        let acPower: ConditionReading
-        switch PowerControl.batteryState().source {
-        case .acPower: acPower = .present
-        case .battery: acPower = .absent
-        case .unknown: acPower = .undetermined // IOKit declined to say; not "on battery"
-        }
+        // IOKit declining to say is not "on battery" — see
+        // `PowerSource.acPowerReading`, where this mapping now lives so the
+        // daemon's `.whileOnACPower` handling shares it rather than
+        // re-deriving it (it re-derived it wrongly).
+        let acPower = PowerControl.batteryState().source.acPowerReading
         let fired = triggersToFire(rules, activeSessions: sessions, appRunning: appRunning,
                                    display: display, processRunning: processRunning, acPower: acPower)
         for rule in fired {
@@ -90,21 +128,25 @@ final class EvidenceLoopRunner {
             }
         }
 
-        // Skipped on the very first tick (previousSessions == nil) so an
-        // agent restart doesn't retroactively fire completion actions for
-        // sessions that ended while it was down — there's no "previous" to
-        // diff against yet, only a possibly-stale snapshot from before the
-        // restart.
-        if let previousSessions {
-            let config = SessionCompletionStore.load()
-            if config.scriptPath != nil || config.webhookURL != nil {
-                for endedSession in sessionsEndedSince(previous: previousSessions, current: sessions) {
-                    completionNotifier.notify(config: config, event: SessionCompletionEvent(
-                        tool: nil, sessionID: endedSession.id.uuidString,
-                        kind: String(describing: endedSession.kind), endedAt: Date()))
-                }
+        // One call does the uid filtering, the diff, and the write-back —
+        // see `SessionCompletionTracker`. It reports nothing on the very
+        // first tick (no baseline yet) so an agent restart doesn't
+        // retroactively fire completion actions for sessions that ended
+        // while it was down, and nothing for another logged-in user's
+        // sessions, which this agent must never run scripts or POST payloads
+        // for.
+        //
+        // The tracker is updated whether or not anything is configured, so
+        // that turning a script on mid-session doesn't hand it a baseline
+        // from whenever the agent last happened to look.
+        let endedSessions = completionTracker.recordAndReportEnded(current: sessions)
+        let config = SessionCompletionStore.load()
+        if config.scriptPath != nil || config.webhookURL != nil {
+            for endedSession in endedSessions {
+                completionNotifier.notify(config: config, event: SessionCompletionEvent(
+                    tool: nil, sessionID: endedSession.id.uuidString,
+                    kind: endedSession.kind.wireDescription, endedAt: Date()))
             }
         }
-        previousSessions = sessions
     }
 }

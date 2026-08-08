@@ -14,6 +14,35 @@ enum PowerSource: Equatable {
     case unknown
 }
 
+extension PowerSource {
+    /// "Is AC power present?" as a tri-state, so that `.unknown` — IOKit
+    /// declining to answer, which `PowerControl.batteryState()` returns
+    /// whenever `IOPSCopyPowerSourcesInfo` or `IOPSCopyPowerSourcesList`
+    /// fails — cannot collapse into "on battery."
+    ///
+    /// The agent already had this mapping written out inline for evaluating
+    /// `.acPowerConnected` triggers. The daemon did not, and that was a real
+    /// defect with real consequences: `DaemonRuntime.tickLocked` tested
+    /// `battery.source != .acPower` and, on a match, applied
+    /// `.acPowerDisconnected`, which **ends every `.whileOnACPower`
+    /// session**. So a single failed power read ended sessions and let the
+    /// Mac sleep, with the machine still plugged in — precisely the bug the
+    /// tri-state observer contract exists to prevent, in the one component
+    /// that had never been converted. Both now go through this one property,
+    /// so they cannot drift apart again.
+    ///
+    /// See `ConditionReading` for the rule this feeds: only `.absent` may
+    /// end a session, only `.present` may start one, `.undetermined` does
+    /// neither.
+    var acPowerReading: ConditionReading {
+        switch self {
+        case .acPower: return .present
+        case .battery: return .absent
+        case .unknown: return .undetermined
+        }
+    }
+}
+
 struct BatteryState: Equatable {
     let percentage: Int?
     let source: PowerSource
