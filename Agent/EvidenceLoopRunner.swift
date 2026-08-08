@@ -14,9 +14,13 @@ final class EvidenceLoopRunner {
     private let connection: DaemonConnection
     private let appRunning: AppRunningObserving
     private let display: DisplayObserving
-    private let processRunning: ProcessRunningObserving
+    /// A *factory*, not an observer: enumerating the process table is the
+    /// expensive read in this loop, and one observer per tick is what lets it
+    /// be memoized safely. See `SystemProcessRunningObserver` — its cache has
+    /// no invalidation logic because its lifetime is the tick.
+    private let makeProcessRunning: () -> ProcessRunningObserving
     private let cpuObserver: CPUBusyObserving
-    private var cpuWindows: [UUID: CPUBusyWindow] = [:]
+    private var evidence = SessionEvidence()
     private var timer: Timer?
     private var previousSessions: [Session]?
     private let completionNotifier = SessionCompletionNotifier()
@@ -24,12 +28,12 @@ final class EvidenceLoopRunner {
     init(connection: DaemonConnection,
          appRunning: AppRunningObserving = SystemAppRunningObserver(),
          display: DisplayObserving = SystemDisplayObserver(),
-         processRunning: ProcessRunningObserving = SystemProcessRunningObserver(),
+         processRunning: @escaping () -> ProcessRunningObserving = { SystemProcessRunningObserver() },
          cpuObserver: CPUBusyObserving = SystemCPUBusyObserver()) {
         self.connection = connection
         self.appRunning = appRunning
         self.display = display
-        self.processRunning = processRunning
+        self.makeProcessRunning = processRunning
         self.cpuObserver = cpuObserver
     }
 
@@ -41,17 +45,28 @@ final class EvidenceLoopRunner {
 
     private func tick() async {
         guard let sessions = await connection.listSessions() else { return }
+        // One process-table read serves both `sessionsToEnd` and
+        // `triggersToFire` below, however many sessions and rules each has to
+        // answer for. Before this, the ~530-entry table was enumerated once
+        // per session AND once per rule, every 5 seconds.
+        let processRunning = makeProcessRunning()
+
         let ended = sessionsToEnd(sessions, appRunning: appRunning, display: display,
                                   processRunning: processRunning,
-                                  cpu: &cpuWindows, busyNow: cpuObserver.currentBusyFraction(), now: Date())
+                                  evidence: &evidence, busyNow: cpuObserver.currentBusy(), now: Date())
         for id in ended {
             _ = await connection.reportConditionEnded(id.uuidString)
         }
 
         let rules = TriggerStore.load()
-        let onACPower = PowerControl.batteryState().source == .acPower
+        let acPower: ConditionReading
+        switch PowerControl.batteryState().source {
+        case .acPower: acPower = .present
+        case .battery: acPower = .absent
+        case .unknown: acPower = .undetermined // IOKit declined to say; not "on battery"
+        }
         let fired = triggersToFire(rules, activeSessions: sessions, appRunning: appRunning,
-                                   display: display, processRunning: processRunning, onACPower: onACPower)
+                                   display: display, processRunning: processRunning, acPower: acPower)
         for rule in fired {
             // The rule stores relative intent; the absolute deadline is
             // computed HERE, at the instant the rule actually fires. A rule

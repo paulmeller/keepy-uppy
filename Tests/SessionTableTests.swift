@@ -158,5 +158,36 @@ final class SessionKindEvaluationTests: XCTestCase {
         XCTAssertFalse(SessionKind.whileAppRunning(bundleID: "com.apple.dt.Xcode").isDaemonEvaluable)
         XCTAssertFalse(SessionKind.whileExternalDisplay.isDaemonEvaluable)
         XCTAssertFalse(SessionKind.whileCPUBusy(threshold: 0.5).isDaemonEvaluable)
+        // Added with the kind itself, but not with this test: only the agent
+        // can see the process table, so a `.whileProcessRunning` session that
+        // outlived the agent would be a session nothing could ever end.
+        XCTAssertFalse(SessionKind.whileProcessRunning(processName: "claude").isDaemonEvaluable)
+    }
+
+    /// `.whileProcessRunning` was added to `SessionKind` and to
+    /// `isDaemonEvaluable` without being added to the two tests above, and
+    /// nothing complained — which is precisely the hole the comment on this
+    /// class describes. The `switch` below closes it: it is exhaustive, so
+    /// the next `SessionKind` case stops this file compiling until somebody
+    /// writes down, here, which half of the world it belongs to.
+    func testEveryKindHasAPinnedAnswer() {
+        let allKinds: [SessionKind] = [
+            .indefinite, .duration(until: t0), .untilTime(t0), .lease(expires: t0), .whileOnACPower,
+            .whileAppRunning(bundleID: "com.apple.dt.Xcode"), .whileExternalDisplay,
+            .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "claude"),
+        ]
+        for kind in allKinds {
+            let daemonCanEvaluateItAlone: Bool
+            switch kind {
+            case .indefinite, .duration, .untilTime, .lease:
+                daemonCanEvaluateItAlone = true   // pure clock arithmetic
+            case .whileOnACPower:
+                daemonCanEvaluateItAlone = true   // the daemon reads IOKit power itself
+            case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning:
+                daemonCanEvaluateItAlone = false  // needs the agent's observers
+            }
+            XCTAssertEqual(kind.isDaemonEvaluable, daemonCanEvaluateItAlone, "\(kind)")
+        }
+        XCTAssertEqual(allKinds.count, 9, "a case was added to SessionKind but not to allKinds")
     }
 }

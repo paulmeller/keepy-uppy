@@ -9,6 +9,28 @@ enum TriggerCondition: Codable, Equatable {
     /// `codex` are the motivating case. The one condition
     /// `sessionKind(firing:now:)` below treats specially.
     case processRunning(processName: String)
+
+    /// Why a `.processRunning` name can never match anything, or `nil` if it
+    /// can. Lives here rather than inside the Add-trigger sheet so it is
+    /// testable and so the rule has one statement.
+    ///
+    /// Note what is deliberately *not* here: a length limit. `p_comm` is a
+    /// `MAXCOMLEN` array and truncates at 16 characters, so while the
+    /// observer matched only `p_comm` a longer name silently could not match.
+    /// It now also matches the executable path and `argv[0]`, neither of
+    /// which is truncated — verified empirically against a 31-character
+    /// binary name, which matches in full. Adding a limit that no longer
+    /// exists would be worse than having none.
+    static func processNameProblem(_ name: String) -> String? {
+        guard !name.isEmpty else { return nil }
+        if name != name.trimmingCharacters(in: .whitespacesAndNewlines) {
+            return "Spaces around the name are part of it, and will stop it matching."
+        }
+        if name.contains("/") {
+            return "Enter just the name the tool runs as (\"claude\"), not a path — a path can never match."
+        }
+        return nil
+    }
 }
 
 struct TriggerRule: Codable, Equatable, Identifiable {
@@ -62,31 +84,43 @@ enum TriggerStore {
     }
 }
 
-/// Pure: which enabled rules have a true condition right now, excluding
-/// any rule already represented by a live session (so a still-true
+/// Pure: which enabled rules have a **confidently** true condition right now,
+/// excluding any rule already represented by a live session (so a still-true
 /// condition doesn't refire every tick — the daemon's admission path
 /// would reject duplicates anyway via suppression/caps, but there is no
 /// reason to hammer it).
+///
+/// The mirror image of `sessionsToEnd`'s rule: that one ends a session only
+/// on `ConditionReading.absent`, this one starts a session only on
+/// `.present`. `.undetermined` does neither. Starting a session on a reading
+/// that failed is the milder of the two mistakes — it wastes power rather
+/// than sleeping a Mac mid-build — but it is still a mistake, and a trigger
+/// that fires because an observer broke is a trigger nobody can reason about.
+///
+/// `acPower` is a reading rather than a `Bool` for the same reason:
+/// `PowerControl.batteryState()` has a `.unknown` source for when IOKit
+/// declines to answer, and collapsing that into "not on AC power" is exactly
+/// the bug this contract exists to remove.
 func triggersToFire(
     _ rules: [TriggerRule],
     activeSessions: [Session],
     appRunning: AppRunningObserving,
     display: DisplayObserving,
     processRunning: ProcessRunningObserving,
-    onACPower: Bool
+    acPower: ConditionReading
 ) -> [TriggerRule] {
     let activeTriggerIDs = Set(activeSessions.compactMap(\.triggerID))
     return rules.filter { rule in
         guard rule.enabled, !activeTriggerIDs.contains(rule.id) else { return false }
         switch rule.condition {
         case .appLaunched(let bundleID):
-            return appRunning.isRunning(bundleID: bundleID)
+            return appRunning.isRunning(bundleID: bundleID).isConfidentlyPresent
         case .externalDisplayConnected:
-            return display.hasExternalDisplay()
+            return display.hasExternalDisplay().isConfidentlyPresent
         case .acPowerConnected:
-            return onACPower
+            return acPower.isConfidentlyPresent
         case .processRunning(let processName):
-            return processRunning.isRunning(processName: processName)
+            return processRunning.isRunning(processName: processName).isConfidentlyPresent
         }
     }
 }
