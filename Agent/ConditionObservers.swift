@@ -511,8 +511,21 @@ protocol NetworkAddressReader {
 
 /// `getifaddrs(3)`: POSIX, present since forever, no entitlement, no
 /// permission prompt, no framework to link. That is the whole reason
-/// `.onSubnet` exists as the permission-free alternative to a Wi-Fi SSID
-/// trigger, which needs Location Services on modern macOS.
+/// `.onSubnet` exists, and — since the Wi-Fi SSID condition was cut — the whole
+/// reason this Mac can be asked what network it is on at all.
+///
+/// The contrast is worth one paragraph, because "just read the SSID" is the
+/// obvious thing to reach for. `CWInterface.ssid()` is gated on Location
+/// Services, and the gate does not fail loudly: measured on this Mac, with a
+/// live association (`rssiValue == -51`, an 802.11ax link on channel 36), an
+/// ad-hoc-signed binary read `ssid() == nil`, `bssid() == nil`,
+/// `countryCode() == nil` and no dialog appeared — `airportd` filters an
+/// unauthorized read rather than prompting for it. `SCDynamicStore`'s
+/// `State:/Network/Interface/en0/AirPort` is filtered the same way, its
+/// `SSID_STR` emptied and its `BSSID` zeroed, so there is no back door either.
+/// A `nil` SSID and a Mac with Wi-Fi switched off are therefore the same
+/// answer, whereas `getifaddrs` distinguishes them without being asked
+/// permission. `.superpowers/sdd/plan5-wifi-research.md` has the rest.
 ///
 /// What is skipped, and why:
 ///

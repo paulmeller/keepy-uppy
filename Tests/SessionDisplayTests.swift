@@ -333,6 +333,36 @@ final class TriggerCopyTests: XCTestCase {
                        "Ends automatically when this Mac leaves that network — no duration to pick.")
     }
 
+    /// The question this condition has to answer for a user who came looking
+    /// for a Wi-Fi trigger, because there is no Wi-Fi trigger to find.
+    ///
+    /// The SSID condition was specified alongside `.onSubnet` and was cut on
+    /// the research: an unauthorized `CWInterface.ssid()` read is
+    /// indistinguishable from "not on Wi-Fi" (measured — a Mac with a live
+    /// association answered `nil`), and the agent that would do the reading can
+    /// never obtain the Location Services grant, because
+    /// `CLLocationManager`'s own header says a request from something that is
+    /// not in use "will do nothing". See `NetworkAddressObserving` and
+    /// `.superpowers/sdd/plan5-wifi-research.md`.
+    ///
+    /// So the person who opens this sheet wanting "while I'm on the office
+    /// Wi-Fi" finds a picker row about *networks* and a field wanting an
+    /// address block, and nothing tells them the two are the same thing. That
+    /// is the `vpnDetectionLimitationNote` situation exactly — a rule that
+    /// looks correct with a limitation nobody stated — so it gets the same
+    /// treatment, and this pins the three halves that carry the meaning rather
+    /// than the wording: that Wi-Fi **is** covered, why it is matched by block
+    /// and not by name, and the compensation (Ethernet on the same network
+    /// matches too, which an SSID rule could never have done).
+    func testTheSubnetConditionSaysItIsHowAWiFiNetworkIsNamed() {
+        let note = subnetCoversWiFiNote
+        XCTAssertTrue(note.contains("Wi-Fi"), "a user looking for Wi-Fi must find it here: \(note)")
+        XCTAssertTrue(note.contains("Location Services"),
+                      "why it is not matched by name is the part that stops the question: \(note)")
+        XCTAssertTrue(note.contains("Ethernet"),
+                      "the block is better than an SSID here, not merely a substitute: \(note)")
+    }
+
     /// The VPN condition binds too, and unlike the other three it has no
     /// associated value — so its copy is the same sentence everywhere and the
     /// Add-sheet footnote has no empty-field variant to get wrong.

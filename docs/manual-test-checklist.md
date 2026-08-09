@@ -99,6 +99,23 @@ usage description, and the observer would run in a background LaunchAgent whose
 worst case is termination — taking every other trigger with it. There is
 nothing to test; the argument and the one experiment that would settle it are in
 `.superpowers/sdd/plan5-device-research.md`.
+
+**A Wi-Fi SSID condition is deliberately absent too**, and for a related reason
+with a different mechanism. `CWInterface.ssid()` is gated on Location Services,
+and the gate is silent: measured on a Mac with a live association
+(`rssiValue == -51`, an 802.11ax link on channel 36), an ad-hoc-signed binary
+read `ssid() == nil` with no dialog — the same answer a Mac with Wi-Fi switched
+off would give. And the grant is unobtainable where it is needed:
+`CLLocationManager`'s header says an authorization request from something not
+currently in use "will do nothing", which is exactly the UI-less LaunchAgent
+that would have to read it. So there is no `--while-wifi` and no SSID row in the
+Add sheet; `.onSubnet` is the supported way to say "while I am on that network",
+and it covers Ethernet on the same network as well.
+`.superpowers/sdd/plan5-wifi-research.md` has the measurements.
+
+- [ ] Add-trigger sheet → "This Mac is on a network": the footnote says plainly that this is how a Wi-Fi network is named here, and why it is matched by address block rather than by name — a user looking for a Wi-Fi trigger must not be left hunting for one
+- [ ] While on Wi-Fi, "This Mac…" offers the block that Mac's Wi-Fi address sits in, and a rule built from it fires — i.e. the Wi-Fi case really is served by this condition
+- [ ] **Nothing, anywhere in the app, ever raises a Location Services prompt** — including opening the Add sheet on this row, saving a network rule, and letting the agent run with one live
 - [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field

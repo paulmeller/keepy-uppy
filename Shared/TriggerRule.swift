@@ -26,8 +26,9 @@ enum TriggerCondition: Codable, Equatable {
     /// lifetime.
     case volumeMounted(name: String)
     /// This Mac holds an IPv4 address inside the block. "While I am on my
-    /// home network", and the permission-free alternative to a Wi-Fi SSID
-    /// trigger — see `NetworkAddressObserving`. Binds its session's lifetime.
+    /// home network", and — since the Wi-Fi SSID condition was cut — the one
+    /// way to name a network at all. Needs no permission, and covers Ethernet
+    /// as well; see `NetworkAddressObserving`. Binds its session's lifetime.
     case onSubnet(cidr: String)
     /// Some VPN is up. Deliberately unparameterised — see `VPNObserving` for
     /// what counts as a VPN, why "a `utun` exists" is not it, and the one
@@ -139,8 +140,8 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     ///
     /// It is an exhaustive `switch` and not `self == .processRunning` for the
     /// reason `ObserverSet` gives no member a default: a new condition must
-    /// *state* its answer, and the six Plan 5 is about to add are exactly the
-    /// ones where "while I'm on this Wi-Fi network" is a plausible reading. A
+    /// *state* its answer, and the ones Plan 5 added are exactly where "while
+    /// this holds" is a plausible reading rather than an obvious one. A
     /// one-line expression would hand each of them `false` without their author
     /// ever meeting the question, which is the silent-default trap this project
     /// has been bitten by four times. One line per condition, and the choice is

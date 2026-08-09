@@ -39,8 +39,20 @@ import Foundation
 /// fail: a frontmost-app query answers nothing while the screen is locked, a
 /// volume enumeration comes back empty, `getifaddrs` returns non-zero. A
 /// failed network read reads as "I don't know", not as "you left the
-/// network." The triggers still to come (Wi-Fi SSID, VPN, USB/Bluetooth
-/// device) get the same guarantee for free.
+/// network." The triggers added since inherited the same guarantee for free:
+/// the VPN and USB observers below both carry a `.undetermined` branch they
+/// never had to argue for.
+///
+/// Two conditions specified alongside them were **cut** rather than shipped,
+/// and both were cut on this contract meeting a permission. A Bluetooth
+/// connection is gated by `bluetoothd`'s TCC check (see `USBDeviceObserving`);
+/// a Wi-Fi SSID is gated by Location Services (see `NetworkAddressObserving`).
+/// In each case the reading a refused permission produces is `.undetermined` by
+/// this file's rule, and in each case the observer would have run somewhere it
+/// could never obtain the grant — so the honest implementation is one that
+/// returns `.undetermined` forever, which is a rule that looks fine and never
+/// fires. That is worth stating here because it is the one shape this contract
+/// cannot rescue: it makes a broken read safe, not useful.
 enum ConditionReading: Equatable {
     /// The condition definitely holds right now.
     case present
@@ -139,9 +151,29 @@ protocol MountedVolumeObserving {
 /// (`triggersToFire` cannot fire on one; `sessionsToEnd` must not end a
 /// session on one).
 ///
-/// The permission-free alternative to a Wi-Fi SSID trigger: `getifaddrs`
-/// needs no entitlement and no Location Services grant, and it additionally
-/// covers Ethernet and Thunderbolt bridging, which an SSID cannot.
+/// **This is how "while I am on the office network" is expressed, and there is
+/// no SSID condition beside it.** A Wi-Fi SSID trigger was specified alongside
+/// this one and was cut on the research rather than built, for reasons this
+/// observer is the beneficiary of:
+///
+/// * `getifaddrs` needs no entitlement, no framework, no daemon in the path and
+///   no Location Services grant, and it additionally covers Ethernet and
+///   Thunderbolt bridging, which an SSID cannot.
+/// * `CWInterface.ssid()` needs a Location Services grant, and an unauthorized
+///   read is not an error — measured on the machine this was written on, a Mac
+///   with a live association (`rssiValue == -51`) answered `nil`, which is
+///   byte-identical to "this Mac is on no Wi-Fi network at all". A naive
+///   observer would have ended a live session on a Mac that had not moved.
+/// * The grant is unobtainable where it would be needed. `CLLocationManager`'s
+///   header says of both authorization requests: "If your app is not currently
+///   in use, this method will do nothing." The observers run in
+///   `KeepyUppyAgent`, a UI-less LaunchAgent that is never "in use".
+///
+/// The whole argument, the measurements, and the one experiment that would
+/// settle it are in `.superpowers/sdd/plan5-wifi-research.md`. `Sources/SessionDisplay.swift`
+/// carries the sentence a user reads (`subnetCoversWiFiNote`), because a person
+/// looking for a Wi-Fi trigger lands on this condition and deserves to be told
+/// so at the keyboard rather than left wondering.
 protocol NetworkAddressObserving {
     func isOnSubnet(_ subnet: IPv4Subnet) -> ConditionReading
 }

@@ -143,6 +143,42 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
 /// A stated limitation is fine; a silent one is not, and this is the silent
 /// version's exact cost: a rule that looks correct, is correct, and never
 /// fires, with nothing anywhere to say why.
+/// What the network condition says to somebody who came here looking for a
+/// Wi-Fi trigger — which is most of the people who will ever pick this row.
+///
+/// A Wi-Fi SSID condition was specified alongside this one and was **cut**. Two
+/// measurements did it, both recorded in
+/// `.superpowers/sdd/plan5-wifi-research.md`: an unauthorized
+/// `CWInterface.ssid()` returns `nil` on a Mac that is demonstrably associated,
+/// which is the same answer as "not on Wi-Fi at all"; and
+/// `CLLocationManager`'s header states that an authorization request from
+/// something that is not in use "will do nothing", which is precisely the
+/// UI-less agent that would have to read it. See `NetworkAddressObserving`.
+///
+/// So this row *is* the Wi-Fi trigger, and nothing in the sheet says so. The
+/// field wants `192.168.1.0/24`; the user is thinking "the office Wi-Fi". This
+/// is the same failure `vpnDetectionLimitationNote` exists to prevent — a rule
+/// that looks correct with an unstated limitation — and it gets the same
+/// treatment, in the same place, at the moment the rule is being written.
+///
+/// It names Location Services, which nothing else in this app does. That is
+/// deliberate and is not a nag: this sentence is the reason the app never has
+/// to ask, and without it "why can't it just use the network's name?" has no
+/// answer anywhere in the product.
+///
+/// The claim is scoped to Location Services rather than to permissions in
+/// general, and that is not hedging. The app *does* ask for one thing — the
+/// Login Items approval both background services need
+/// (`backgroundServicesFootnote`) — so a flat "Keepy Uppy asks for no
+/// permissions" would be contradicted by a sentence in the same Settings
+/// window.
+///
+/// The last clause is not consolation. A `/24` matches the Mac's address on
+/// that network however it got there, so a laptop that arrives on Wi-Fi and is
+/// later docked to Ethernet keeps its session — which an SSID rule would have
+/// dropped at the moment of docking, silently.
+let subnetCoversWiFiNote = "This is how you name a Wi-Fi network here. Networks are matched by address block rather than by name, because macOS only reveals a Wi-Fi network's name to apps you've granted Location Services access, and Keepy Uppy never asks for that. Use “This Mac…” while you're on the network you want. A block also matches Ethernet on that same network, which a network name never could."
+
 let vpnDetectionLimitationNote = "Detects VPNs macOS knows about — anything you set up in System Settings, and apps like Tailscale, Cloudflare WARP or your work VPN client. A tunnel started from the command line (wg-quick, openvpn, Tunnelblick) isn't visible to macOS as a VPN and won't be detected."
 
 /// **A trigger starts a session; it does not bind that session's lifetime to

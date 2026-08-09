@@ -25,8 +25,13 @@ enum SessionKind: Equatable, Codable {
     /// and a mounted volume is a stable fact rather than one that flickers.
     case whileVolumeMounted(name: String)
     /// Ends when this Mac no longer holds an address inside the block. "While
-    /// I am on my home network" — durable, and unlike the Wi-Fi trigger it
-    /// needs no Location Services grant and works over Ethernet too.
+    /// I am on my home network" — durable, needs no Location Services grant,
+    /// and works over Ethernet too.
+    ///
+    /// It is also the *only* network-identity kind there is: the Wi-Fi SSID
+    /// trigger specified beside it was cut, because an unauthorized `ssid()`
+    /// read is indistinguishable from "not on Wi-Fi" and the agent can never
+    /// obtain the grant. See `NetworkAddressObserving`.
     case whileOnSubnet(cidr: String)
     /// Ends when no VPN is up any more. "Keep this Mac awake while the tunnel
     /// is up" is durable in the way `.whileOnSubnet` is — a VPN does not

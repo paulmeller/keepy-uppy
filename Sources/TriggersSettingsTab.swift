@@ -447,6 +447,14 @@ private struct AddTriggerSheet: View {
                         }
                     }
 
+                    // Under the field, not above it: the field is what the user
+                    // came to fill in, and this explains the shape it wants.
+                    // It is here at all because there is no Wi-Fi SSID row in
+                    // the picker for somebody to find — see
+                    // `subnetCoversWiFiNote`, which carries the whole reason.
+                    Text(subnetCoversWiFiNote)
+                        .settingsFootnote()
+
                     // A block that can never match is worth saying now rather
                     // than letting the rule sit in the list looking correct —
                     // the `.processRunning` argument, and here it also carries
