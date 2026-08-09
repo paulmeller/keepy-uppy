@@ -30,6 +30,11 @@ final class EvidenceLoopTests: XCTestCase {
 
     /// One `sessionsToEnd` tick, with every observer defaulted to something
     /// irrelevant so each test names only the observer it is about.
+    ///
+    /// The per-observer parameters stay parameters even though `sessionsToEnd`
+    /// now takes one `ObserverSet`: the set is assembled here, so a new
+    /// condition costs this file one defaulted argument rather than an edit to
+    /// every one of the call sites below.
     @discardableResult
     private func tick(_ sessions: [Session],
                       evidence: inout SessionEvidence,
@@ -38,9 +43,17 @@ final class EvidenceLoopTests: XCTestCase {
                       process: ConditionReading = .present,
                       busy: CPUBusyReading = .undetermined,
                       at now: Date? = nil) -> [UUID] {
-        sessionsToEnd(sessions, appRunning: FakeAppRunning(app), display: FakeDisplay(display),
-                      processRunning: FakeProcessRunning(process), evidence: &evidence,
-                      busyNow: busy, now: now ?? t0)
+        sessionsToEnd(sessions,
+                      // `.whileOnACPower` is the daemon's to evaluate, never
+                      // this loop's, so the reading is filler here — and
+                      // `.undetermined` is the filler that cannot end a
+                      // session if that ever stops being true.
+                      observers: ObserverSet(appRunning: FakeAppRunning(app),
+                                             display: FakeDisplay(display),
+                                             processRunning: FakeProcessRunning(process),
+                                             acPower: .undetermined,
+                                             cpuBusy: busy),
+                      evidence: &evidence, now: now ?? t0)
     }
 
     // MARK: - The tri-state contract

@@ -102,11 +102,8 @@ struct SessionEvidence {
 /// sustained-quiet window, have to survive across calls.
 func sessionsToEnd(
     _ sessions: [Session],
-    appRunning: AppRunningObserving,
-    display: DisplayObserving,
-    processRunning: ProcessRunningObserving,
+    observers: ObserverSet,
     evidence: inout SessionEvidence,
-    busyNow: CPUBusyReading,
     now: Date
 ) -> [UUID] {
     evidence.prune(toLive: Set(sessions.map(\.id)))
@@ -115,19 +112,20 @@ func sessionsToEnd(
     for session in sessions {
         switch session.kind {
         case .whileAppRunning(let bundleID):
-            if evidence.recordAndCheckEnd(session.id, appRunning.isRunning(bundleID: bundleID)) {
+            if evidence.recordAndCheckEnd(session.id, observers.appRunning.isRunning(bundleID: bundleID)) {
                 ended.append(session.id)
             }
         case .whileExternalDisplay:
-            if evidence.recordAndCheckEnd(session.id, display.hasExternalDisplay()) {
+            if evidence.recordAndCheckEnd(session.id, observers.display.hasExternalDisplay()) {
                 ended.append(session.id)
             }
         case .whileProcessRunning(let processName):
-            if evidence.recordAndCheckEnd(session.id, processRunning.isRunning(processName: processName)) {
+            if evidence.recordAndCheckEnd(session.id, observers.processRunning.isRunning(processName: processName)) {
                 ended.append(session.id)
             }
         case .whileCPUBusy(let threshold):
-            if evidence.recordAndCheckCPUEnd(session.id, threshold: threshold, busy: busyNow, now: now) {
+            if evidence.recordAndCheckCPUEnd(session.id, threshold: threshold,
+                                             busy: observers.cpuBusy, now: now) {
                 ended.append(session.id)
             }
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower:

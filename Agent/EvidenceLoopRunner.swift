@@ -89,22 +89,29 @@ final class EvidenceLoopRunner {
         // answer for. Before this, the ~530-entry table was enumerated once
         // per session AND once per rule, every 5 seconds.
         let processRunning = makeProcessRunning()
+        // One bundle, built once, passed to both — which is what keeps that
+        // guarantee true: a second `ObserverSet` here would be a second
+        // process-table enumeration, and a second CPU sample, whose delta
+        // would be measured from the wrong instant.
+        //
+        // `acPower`: IOKit declining to say is not "on battery" — see
+        // `PowerSource.acPowerReading`, where this mapping now lives so the
+        // daemon's `.whileOnACPower` handling shares it rather than
+        // re-deriving it (it re-derived it wrongly).
+        let observers = ObserverSet(appRunning: appRunning,
+                                    display: display,
+                                    processRunning: processRunning,
+                                    acPower: PowerControl.batteryState().source.acPowerReading,
+                                    cpuBusy: cpuObserver.currentBusy())
 
-        let ended = sessionsToEnd(sessions, appRunning: appRunning, display: display,
-                                  processRunning: processRunning,
-                                  evidence: &evidence, busyNow: cpuObserver.currentBusy(), now: Date())
+        let ended = sessionsToEnd(sessions, observers: observers,
+                                  evidence: &evidence, now: Date())
         for id in ended {
             _ = await connection.reportConditionEnded(id.uuidString)
         }
 
         let rules = TriggerStore.load()
-        // IOKit declining to say is not "on battery" — see
-        // `PowerSource.acPowerReading`, where this mapping now lives so the
-        // daemon's `.whileOnACPower` handling shares it rather than
-        // re-deriving it (it re-derived it wrongly).
-        let acPower = PowerControl.batteryState().source.acPowerReading
-        let fired = triggersToFire(rules, activeSessions: sessions, appRunning: appRunning,
-                                   display: display, processRunning: processRunning, acPower: acPower)
+        let fired = triggersToFire(rules, activeSessions: sessions, observers: observers)
         for rule in fired {
             // The rule stores relative intent; the absolute deadline is
             // computed HERE, at the instant the rule actually fires. A rule

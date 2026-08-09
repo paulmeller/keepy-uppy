@@ -97,30 +97,27 @@ enum TriggerStore {
 /// than sleeping a Mac mid-build — but it is still a mistake, and a trigger
 /// that fires because an observer broke is a trigger nobody can reason about.
 ///
-/// `acPower` is a reading rather than a `Bool` for the same reason:
+/// `ObserverSet.acPower` is a reading rather than a `Bool` for the same reason:
 /// `PowerControl.batteryState()` has a `.unknown` source for when IOKit
 /// declines to answer, and collapsing that into "not on AC power" is exactly
 /// the bug this contract exists to remove.
 func triggersToFire(
     _ rules: [TriggerRule],
     activeSessions: [Session],
-    appRunning: AppRunningObserving,
-    display: DisplayObserving,
-    processRunning: ProcessRunningObserving,
-    acPower: ConditionReading
+    observers: ObserverSet
 ) -> [TriggerRule] {
     let activeTriggerIDs = Set(activeSessions.compactMap(\.triggerID))
     return rules.filter { rule in
         guard rule.enabled, !activeTriggerIDs.contains(rule.id) else { return false }
         switch rule.condition {
         case .appLaunched(let bundleID):
-            return appRunning.isRunning(bundleID: bundleID).isConfidentlyPresent
+            return observers.appRunning.isRunning(bundleID: bundleID).isConfidentlyPresent
         case .externalDisplayConnected:
-            return display.hasExternalDisplay().isConfidentlyPresent
+            return observers.display.hasExternalDisplay().isConfidentlyPresent
         case .acPowerConnected:
-            return acPower.isConfidentlyPresent
+            return observers.acPower.isConfidentlyPresent
         case .processRunning(let processName):
-            return processRunning.isRunning(processName: processName).isConfidentlyPresent
+            return observers.processRunning.isRunning(processName: processName).isConfidentlyPresent
         }
     }
 }

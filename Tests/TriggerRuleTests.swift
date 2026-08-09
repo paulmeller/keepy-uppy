@@ -43,14 +43,24 @@ final class TriggerRuleTests: XCTestCase {
 
     /// One `triggersToFire` evaluation with every observer defaulted to
     /// "condition false", so each test names only what it is about.
+    ///
+    /// The per-observer parameters stay parameters even though `triggersToFire`
+    /// now takes one `ObserverSet`: the set is assembled here, so a new
+    /// condition costs this file one defaulted argument rather than an edit to
+    /// every one of the call sites below.
     private func fire(_ rules: [TriggerRule],
                       activeSessions: [Session] = [],
                       app: FakeAppRunning = FakeAppRunning(running: []),
                       display: FakeDisplay = FakeDisplay(external: false),
                       process: FakeProcessRunning = FakeProcessRunning(running: []),
                       acPower: ConditionReading = .absent) -> [TriggerRule] {
-        triggersToFire(rules, activeSessions: activeSessions, appRunning: app,
-                       display: display, processRunning: process, acPower: acPower)
+        triggersToFire(rules, activeSessions: activeSessions,
+                       // No trigger condition consults the CPU sample, so this
+                       // is filler — and `.undetermined` is the filler that
+                       // cannot fire anything if one ever starts to.
+                       observers: ObserverSet(appRunning: app, display: display,
+                                              processRunning: process, acPower: acPower,
+                                              cpuBusy: .undetermined))
     }
 
     func testDisabledRuleNeverFires() {

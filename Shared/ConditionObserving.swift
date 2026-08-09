@@ -105,3 +105,47 @@ protocol ProcessRunningObserving {
 protocol CPUBusyObserving {
     func currentBusy() -> CPUBusyReading
 }
+
+/// Every fact one evidence-loop tick needs, in one value.
+///
+/// `triggersToFire` and `sessionsToEnd` each took one parameter per observer.
+/// Four was tolerable. Plan 5 adds six conditions, which would make both
+/// signatures ten parameters long and would make all six per-trigger tasks edit
+/// the same two lines — six conflicts over nothing, in diffs that are supposed
+/// to be readable.
+///
+/// A plain struct, not a protocol: the call sites want values, the tests want to
+/// substitute one member and leave the rest harmless, and nothing needs to swap
+/// the whole bundle for another implementation.
+///
+/// Note the deliberate asymmetry. Most members are *observers*, asked a question
+/// per rule or per session. Two are pre-taken *readings*: `acPower`, because
+/// `PowerControl.batteryState()` lives in `Shared/` and the runner already reads
+/// it once a tick, and `cpuBusy`, because a CPU sample is a delta between two
+/// points in time (see `SystemCPUBusyObserver`) and so must be taken exactly
+/// once per tick by something that outlives the tick. Folding those two into
+/// observers would either re-read them per session or hide state where its
+/// lifetime is not obvious. They stay readings, and this comment is why.
+///
+/// Two rules this type exists under, both of which protect the tri-state
+/// contract documented on `ConditionReading` above:
+///
+/// 1. **No member may have a default value.** Every member is stated at every
+///    construction site, so adding the seventh, eighth or ninth observer is a
+///    compile error everywhere it needs to be answered for rather than a silent
+///    substitution of somebody else's idea of harmless. `Session` has exactly
+///    three defaulted fields and they have caused four separate defects by
+///    being omittable without a compile error; this bundle will not repeat it.
+/// 2. **Members are readings and observers, never `Bool`.** Bundling the
+///    arguments together must not become the place a tri-state collapses into
+///    two states. `.undetermined` survives the trip through this struct
+///    untouched, and the only things that ever narrow it are
+///    `isConfidentlyPresent` (may start a session) and `isConfidentlyAbsent`
+///    (may end one).
+struct ObserverSet {
+    var appRunning: AppRunningObserving
+    var display: DisplayObserving
+    var processRunning: ProcessRunningObserving
+    var acPower: ConditionReading
+    var cpuBusy: CPUBusyReading
+}
