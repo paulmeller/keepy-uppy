@@ -60,17 +60,121 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
     case "off":
         return parseOff(rest)
     case "status":
-        return .success(.status(json: rest.contains("--json")))
+        return parseStatus(rest)
     case "sessions":
-        return .success(.sessions)
+        return parseVerbWithNoOptions(rest, verb: "sessions", command: .sessions)
     case "finished":
-        return .success(.finished(tool: parseTool(rest)))
+        return parseFinished(rest)
     case "setup":
-        return .success(.setup)
+        return parseVerbWithNoOptions(rest, verb: "setup", command: .setup)
     case "reset":
-        return .success(.reset)
+        return parseVerbWithNoOptions(rest, verb: "reset", command: .reset)
     default:
         return .failure(CLIParseError(message: "unknown command '\(command)'; \(cliUsage)"))
+    }
+}
+
+// MARK: - One tokenising pass, shared by every verb
+
+/// The left-to-right pass, factored out of `parseOn` so that every verb gets
+/// it rather than only the one that was rewritten first.
+///
+/// Strictness that stops at `on` is worse than no strictness, because it makes
+/// the *shape* of a mistake unpredictable: `on --sesion` was refused while
+/// `off --sesion abc-123` was accepted — as `off` with no target at all, which
+/// stops **every** session this user owns rather than the one named. That is a
+/// single mistyped character turning "stop this session" into "stop all of
+/// mine", i.e. the argument for refusing a typo on `on`, with more at stake.
+///
+/// The three rules are the same wherever they are applied, so they live here
+/// once:
+///
+/// 1. a token is read at most once, so a value can never double as a flag;
+/// 2. a value that is missing, or that looks like a flag, is refused rather
+///    than taken literally or silently dropped;
+/// 3. an unrecognised token is an error, not something to ignore.
+private struct ArgumentScanner {
+    /// The verb being parsed, so a rejection can say which command's option
+    /// list the token was not found in.
+    let verb: String
+    /// The verb's usage line, appended to a rejection so the message carries
+    /// its own fix.
+    let usage: String
+    private let args: [String]
+    private var index = 0
+
+    init(_ args: [String], verb: String, usage: String) {
+        self.args = args
+        self.verb = verb
+        self.usage = usage
+    }
+
+    /// The next unconsumed token, or `nil` at the end of the arguments.
+    mutating func next() -> String? {
+        guard index < args.count else { return nil }
+        defer { index += 1 }
+        return args[index]
+    }
+
+    /// The next token, consumed as `option`'s value. A value that looks like
+    /// a flag is refused rather than taken literally: no duration, time,
+    /// bundle id, process name, session id or tool name starts with a hyphen,
+    /// so this is only ever reached by an invocation that meant to pass a flag
+    /// and forgot a value.
+    mutating func value(for option: String) -> Result<String, CLIParseError> {
+        guard index < args.count else {
+            return .failure(CLIParseError(message: "\(option) needs a value"))
+        }
+        let candidate = args[index]
+        // Saying only "needs a value" here is unactionable when one *was*
+        // given: `on --while-process -bash` reads as a flat contradiction of
+        // what the user can see on their own command line. Name the token and
+        // say why it was not taken.
+        guard !candidate.hasPrefix("-") else {
+            return .failure(CLIParseError(
+                message: "\(option) needs a value, but '\(candidate)' looks like a flag"))
+        }
+        index += 1
+        return .success(candidate)
+    }
+
+    func unknownOption(_ token: String) -> CLIParseError {
+        CLIParseError(message: "unknown option '\(token)' for '\(verb)'; \(usage)")
+    }
+}
+
+/// At most one of a group of mutually exclusive options — and it remembers
+/// *which* one was given, which is the whole point.
+///
+/// Naming the entire group unconditionally produced messages listing flags the
+/// user never typed: `on --for 2h --for 3h` was rejected with "only one of
+/// --for, --until, --while-app, --while-process may be given", sending them to
+/// look for a conflict between options that appear nowhere in their command.
+/// The same flag twice and two different flags are different mistakes and get
+/// different sentences.
+///
+/// For a single-option "group" (`--json`, `--tool`) only the duplicate branch
+/// is reachable, which is correct: repeating an option is the one way to give
+/// two of a group of one.
+private struct ExclusiveChoice<Value> {
+    /// Every flag in the group, for the message that has to name them all.
+    let group: [String]
+    private var chosen: (flag: String, value: Value)?
+
+    init(group: [String]) { self.group = group }
+
+    var value: Value? { chosen?.value }
+
+    /// Records `value` as chosen by `flag`, or returns why it cannot be.
+    mutating func choose(_ value: Value, by flag: String) -> CLIParseError? {
+        guard let existing = chosen else {
+            chosen = (flag, value)
+            return nil
+        }
+        if existing.flag == flag {
+            return CLIParseError(message: "\(flag) may only be given once")
+        }
+        return CLIParseError(message: "only one of \(group.joined(separator: ", ")) may be given")
     }
 }
 
@@ -94,81 +198,67 @@ private let onUsage = "usage: keepy-uppy on [--for 2h | --until 17:00 | --while-
 /// tracked which tokens had already been consumed. So a missing value silently
 /// ate the next flag and that flag still counted: `on --while-app
 /// --display-may-sleep` produced a session watching a bundle id of
-/// "--display-may-sleep" **and** selected `.system`, from the same token. This
-/// loop consumes a value at the point it reads the option it belongs to, so a
-/// token can only ever play one role.
+/// "--display-may-sleep" **and** selected `.system`, from the same token. The
+/// scanner consumes a value at the point it reads the option it belongs to, so
+/// a token can only ever play one role.
 ///
-/// It also means an unrecognised token is now an error. Silently ignoring one
-/// is worse here than in most CLIs: `on --keep-dispaly-awake` is a typo whose
-/// old behaviour — accept, start a clamshell session — differs from what was
-/// asked for in the direction the user cannot see.
+/// It also means an unrecognised token is an error. Silently ignoring one is
+/// worse here than in most CLIs: `on --keep-dispaly-awake` is a typo whose old
+/// behaviour — accept, start a clamshell session — differs from what was asked
+/// for in the direction the user cannot see.
+///
+/// `on` is the only verb with two independent option groups, which is why it
+/// holds two `ExclusiveChoice`s: a wake-mode flag must not consume the end
+/// condition slot, and neither may be given twice.
 private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParseError> {
-    var endConditions: [SessionKind] = []
-    var modes: [WakeMode] = []
-    var index = 0
+    var scanner = ArgumentScanner(args, verb: "on", usage: onUsage)
+    var endCondition = ExclusiveChoice<SessionKind>(group: OnOption.allCases.map(\.rawValue))
+    var wakeMode = ExclusiveChoice<WakeMode>(group: WakeMode.selectingFlags)
 
-    /// The next token, consumed as `option`'s value. A value that looks like
-    /// a flag is refused rather than taken literally: no duration, time,
-    /// bundle id or process name starts with a hyphen, so this is only ever
-    /// reached by an invocation that meant to pass a flag and forgot a value.
-    func value(for option: String) -> Result<String, CLIParseError> {
-        guard index < args.count, !args[index].hasPrefix("-") else {
-            return .failure(CLIParseError(message: "\(option) needs a value"))
-        }
-        defer { index += 1 }
-        return .success(args[index])
-    }
-
-    while index < args.count {
-        let token = args[index]
-        index += 1
-
+    while let token = scanner.next() {
         if let mode = WakeMode.selectedBy(flag: token) {
-            modes.append(mode)
+            if let error = wakeMode.choose(mode, by: token) { return .failure(error) }
             continue
         }
 
+        // The value is parsed before the choice is recorded, so a malformed
+        // value is still reported as malformed rather than being masked by a
+        // duplicate-option rejection: `on --for 2h --for banana` names the
+        // banana.
+        let kind: SessionKind
         switch OnOption(rawValue: token) {
         case .duration:
-            switch value(for: token).flatMap(parseDuration) {
-            case .success(let interval): endConditions.append(.duration(until: now.addingTimeInterval(interval)))
+            switch scanner.value(for: token).flatMap(parseDuration) {
+            case .success(let interval): kind = .duration(until: now.addingTimeInterval(interval))
             case .failure(let error): return .failure(error)
             }
         case .untilTime:
-            switch value(for: token) {
+            switch scanner.value(for: token) {
             case .success(let raw):
                 guard let date = parseTimeOfDay(raw, relativeTo: now) else {
                     return .failure(CLIParseError(message: "could not parse --until time '\(raw)'"))
                 }
-                endConditions.append(.untilTime(date))
+                kind = .untilTime(date)
             case .failure(let error): return .failure(error)
             }
         case .whileApp:
-            switch value(for: token) {
-            case .success(let raw): endConditions.append(.whileAppRunning(bundleID: raw))
+            switch scanner.value(for: token) {
+            case .success(let raw): kind = .whileAppRunning(bundleID: raw)
             case .failure(let error): return .failure(error)
             }
         case .whileProcess:
-            switch value(for: token) {
-            case .success(let raw): endConditions.append(.whileProcessRunning(processName: raw))
+            switch scanner.value(for: token) {
+            case .success(let raw): kind = .whileProcessRunning(processName: raw)
             case .failure(let error): return .failure(error)
             }
         case nil:
-            return .failure(CLIParseError(message: "unknown option '\(token)' for 'on'; \(onUsage)"))
+            return .failure(scanner.unknownOption(token))
         }
+        if let error = endCondition.choose(kind, by: token) { return .failure(error) }
     }
 
-    guard endConditions.count <= 1 else {
-        return .failure(CLIParseError(
-            message: "only one of \(OnOption.allCases.map(\.rawValue).joined(separator: ", ")) may be given"))
-    }
-    guard modes.count <= 1 else {
-        return .failure(CLIParseError(
-            message: "only one of \(WakeMode.selectingFlags.joined(separator: ", ")) may be given"))
-    }
-
-    return .success(.on(kind: endConditions.first ?? .indefinite,
-                        persistence: .detached, wakeMode: modes.first ?? .clamshell))
+    return .success(.on(kind: endCondition.value ?? .indefinite,
+                        persistence: .detached, wakeMode: wakeMode.value ?? .clamshell))
 }
 
 // MARK: - The wake-mode surface
@@ -229,9 +319,20 @@ extension WakeMode {
     ///
     /// `nil` for `.clamshell`, which takes nothing away and is what an
     /// unflagged invocation already got.
+    ///
+    /// It is a statement about **this session**, not about the Mac, and the
+    /// difference is not pedantry: the daemon unions the modes of every live
+    /// session (`PowerPlan.reduce`), so a concurrent `.clamshell` session from
+    /// another client keeps the machine awake lid-shut regardless of what this
+    /// one asked for. "`--keep-display-awake` does not keep this Mac awake
+    /// with the lid closed" was therefore false exactly when a user was most
+    /// likely to be running two sessions at once — and a note that is
+    /// sometimes wrong is worse than none, because it teaches people to skip
+    /// the notes. Scoped to the session being started, it is unconditional.
     var lidCloseCaveat: String? {
         guard let flag = selectingFlag else { return nil }
-        return "\(flag) does not keep this Mac awake with the lid closed; only the default does."
+        return "\(flag): this session does not keep this Mac awake with the lid closed; "
+            + "only the default mode does."
     }
 
     /// How this mode reads in a `keepy-uppy sessions` row.
@@ -252,20 +353,109 @@ extension WakeMode {
     }
 }
 
-/// `--tool` is optional context, not a selector — `finished` fires the same
-/// configured action regardless of which tool (if any) is named; the name
-/// just rides along into the script's env vars / webhook JSON.
-private func parseTool(_ args: [String]) -> String? {
-    guard let idx = args.firstIndex(of: "--tool"), args.indices.contains(idx + 1) else { return nil }
-    return args[idx + 1]
+// MARK: - The other verbs
+
+/// `off`'s options. Both name a *target*, and a stop has exactly one, so they
+/// share a single `ExclusiveChoice` — asking to stop both everything and one
+/// named session is a contradiction, not a precedence rule to invent.
+private enum OffOption: String, CaseIterable {
+    case all = "--all"
+    case session = "--session"
 }
 
+private let offUsage = "usage: keepy-uppy off [--all | --session <id>]"
+
+/// The verb with the most to lose from a silently-ignored typo, and the reason
+/// the strictness `on` got was worth generalising.
+///
+/// Absence of a target is not "nothing to do" here — it is `.own`, which stops
+/// every session this user owns. So an option that fails to be recognised does
+/// not degrade to a smaller action, it *widens* to a larger one:
+/// `off --sesion abc-123` used to stop all of the caller's sessions instead of
+/// the one it named, silently, with a zero exit status. Every rejection below
+/// costs a retype; the behaviour it replaces costs however much work the other
+/// sessions were protecting.
 private func parseOff(_ args: [String]) -> Result<CLICommand, CLIParseError> {
-    if args.contains("--all") { return .success(.off(.all)) }
-    if let idx = args.firstIndex(of: "--session"), args.indices.contains(idx + 1) {
-        return .success(.off(.session(args[idx + 1])))
+    var scanner = ArgumentScanner(args, verb: "off", usage: offUsage)
+    var target = ExclusiveChoice<StopTarget>(group: OffOption.allCases.map(\.rawValue))
+
+    while let token = scanner.next() {
+        let chosen: StopTarget
+        switch OffOption(rawValue: token) {
+        case .all:
+            chosen = .all
+        case .session:
+            switch scanner.value(for: token) {
+            case .success(let id): chosen = .session(id)
+            case .failure(let error): return .failure(error)
+            }
+        case nil:
+            return .failure(scanner.unknownOption(token))
+        }
+        if let error = target.choose(chosen, by: token) { return .failure(error) }
     }
-    return .success(.off(.own))
+
+    return .success(.off(target.value ?? .own))
+}
+
+private let statusUsage = "usage: keepy-uppy status [--json]"
+
+/// `--json` takes no value, so `status` needs no `OnOption`-style enum — one
+/// literal, compared once. It still goes through the scanner, because the
+/// failure that matters here is `status --jsno`: a script that asked for
+/// machine-readable output and silently got prose, then parsed it.
+private func parseStatus(_ args: [String]) -> Result<CLICommand, CLIParseError> {
+    var scanner = ArgumentScanner(args, verb: "status", usage: statusUsage)
+    var json = ExclusiveChoice<Bool>(group: ["--json"])
+
+    while let token = scanner.next() {
+        guard token == "--json" else { return .failure(scanner.unknownOption(token)) }
+        if let error = json.choose(true, by: token) { return .failure(error) }
+    }
+
+    return .success(.status(json: json.value ?? false))
+}
+
+private let finishedUsage = "usage: keepy-uppy finished [--tool <name>]"
+
+/// `--tool` is optional context, not a selector — `finished` fires the same
+/// configured action regardless of which tool (if any) is named; the name just
+/// rides along into the script's env vars / webhook JSON.
+///
+/// Optional is not the same as ignorable, though, which is what the old
+/// `firstIndex(of:)` lookup made it: `finished --tol claude-code` fired the
+/// action with no tool attached, and `finished --tool` (value forgotten) did
+/// the same. The webhook then reported a completion from nowhere in
+/// particular, and nothing said why.
+private func parseFinished(_ args: [String]) -> Result<CLICommand, CLIParseError> {
+    var scanner = ArgumentScanner(args, verb: "finished", usage: finishedUsage)
+    var tool = ExclusiveChoice<String>(group: ["--tool"])
+
+    while let token = scanner.next() {
+        guard token == "--tool" else { return .failure(scanner.unknownOption(token)) }
+        switch scanner.value(for: token) {
+        case .success(let name):
+            if let error = tool.choose(name, by: token) { return .failure(error) }
+        case .failure(let error): return .failure(error)
+        }
+    }
+
+    return .success(.finished(tool: tool.value))
+}
+
+/// `sessions`, `setup` and `reset` take no options at all, so every argument
+/// is an unknown one.
+///
+/// Included for the same reason as the three verbs above even though none of
+/// them can lose work: "does this verb notice a typo?" should not be a
+/// question a user has to hold per-verb knowledge to answer. `sessions --jsno`
+/// and `sessions --json` now say the same thing — that this verb has no
+/// options — instead of one being ignored and the other being ignored.
+private func parseVerbWithNoOptions(_ args: [String], verb: String,
+                                    command: CLICommand) -> Result<CLICommand, CLIParseError> {
+    var scanner = ArgumentScanner(args, verb: verb, usage: "usage: keepy-uppy \(verb)")
+    if let token = scanner.next() { return .failure(scanner.unknownOption(token)) }
+    return .success(command)
 }
 
 /// Accepts "30s", "10m", "2h" — the smallest set that covers every

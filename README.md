@@ -160,7 +160,7 @@ another user's.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **255 unit tests**.
+by **340 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -186,7 +186,7 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed, notarized, 255 tests, and a privilege
+**v0.1 — new, and moving fast.** Signed, notarized, 340 tests, and a privilege
 boundary that's been through three adversarial review passes. What it hasn't
 had yet is months on other people's hardware. If something misbehaves, an issue
 with the daemon log is genuinely useful:

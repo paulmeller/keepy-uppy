@@ -282,6 +282,165 @@ final class CLIOnTokenisingTests: XCTestCase {
     }
 }
 
+/// The same three rules, on the verbs that did not get them when `on` did:
+/// a token is read once, a value that is missing or flag-shaped is refused,
+/// and an unrecognised token is an error.
+///
+/// Strictness on `on` alone was the worse of the two inconsistent states,
+/// because the verb left permissive is the one where a typo *widens* what
+/// happens rather than narrowing it.
+final class CLIStrictnessAcrossVerbsTests: XCTestCase {
+    private func assertRefused(_ args: [String], _ why: String,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        guard case .failure = parseCLIArguments(args) else {
+            return XCTFail("'keepy-uppy \(args.joined(separator: " "))' must be refused — \(why)",
+                           file: file, line: line)
+        }
+    }
+
+    /// The finding in its worst shape. One mistyped character used to turn
+    /// "stop the session I named" into "stop every session I own", silently
+    /// and with a zero exit status, because an unrecognised `--sesion` left no
+    /// target and no target means `.own`.
+    func testAMistypedSessionFlagDoesNotSilentlyWidenOffToEverySessionYouOwn() {
+        guard case .failure = parseCLIArguments(["off", "--sesion", "abc-123"]) else {
+            return XCTFail("'off --sesion abc-123' must be refused, not read as 'stop all of mine'")
+        }
+        // What it used to become, still reachable when it is what was meant.
+        guard case .success(.off(.own)) = parseCLIArguments(["off"]) else {
+            return XCTFail("bare 'off' must still target the caller's own sessions")
+        }
+    }
+
+    func testOffRejectsUnrecognisedArguments() {
+        assertRefused(["off", "--alll"], "a misspelled --all is not --all")
+        assertRefused(["off", "--json"], "--json is another verb's option")
+        assertRefused(["off", "abc-123"], "a bare session id is not a target; --session names one")
+    }
+
+    func testOffRefusesASessionIdThatIsMissingOrLooksLikeAFlag() {
+        assertRefused(["off", "--session"], "no id follows")
+        assertRefused(["off", "--session", "--all"], "--all is a flag, not the id of a session to stop")
+    }
+
+    /// A stop has exactly one target, so two of them is a contradiction —
+    /// `--all` used to win silently over an explicitly named session.
+    func testOffRejectsTwoTargets() {
+        assertRefused(["off", "--all", "--session", "abc-123"], "stop everything, or stop that one?")
+        assertRefused(["off", "--session", "abc-123", "--all"], "order must not decide which target wins")
+        assertRefused(["off", "--all", "--all"], "an option given twice is a mistake, not emphasis")
+        assertRefused(["off", "--session", "abc-123", "--session", "def-456"], "two named sessions")
+    }
+
+    /// `status --jsno` printed prose to a script that asked for JSON, which
+    /// then parsed it.
+    func testStatusRejectsUnrecognisedAndRepeatedOptions() {
+        assertRefused(["status", "--jsno"], "a misspelled --json must not silently print prose")
+        assertRefused(["status", "--json", "--json"], "an option given twice is a mistake")
+        assertRefused(["status", "--all"], "--all is another verb's option")
+    }
+
+    /// The tool name rides along into the user's script env / webhook JSON, so
+    /// dropping it silently produces a completion event from nowhere in
+    /// particular.
+    func testFinishedRejectsUnrecognisedMissingAndRepeatedTools() {
+        assertRefused(["finished", "--tol", "claude-code"], "a misspelled --tool must not drop the name")
+        assertRefused(["finished", "--tool"], "no name follows")
+        assertRefused(["finished", "--tool", "--json"], "a flag is not a tool name")
+        assertRefused(["finished", "--tool", "a", "--tool", "b"], "which tool finished?")
+    }
+
+    /// These three take no options at all, so every argument is an unknown
+    /// one. They cannot lose work the way `off` can; they are here so that
+    /// "does this verb notice a typo?" has one answer across the whole CLI
+    /// rather than a per-verb one.
+    func testTheVerbsWithNoOptionsRejectArguments() {
+        for verb in ["sessions", "setup", "reset"] {
+            assertRefused([verb, "--json"], "\(verb) has no options")
+        }
+    }
+
+    /// The other half of the change: strictness must only cost typos. Every
+    /// well-formed invocation of these verbs still parses to exactly what it
+    /// did before. (`on`'s well-formed invocations are covered above.)
+    func testEveryWellFormedInvocationStillParsesUnchanged() {
+        let expected: [([String], CLICommand)] = [
+            (["off"], .off(.own)),
+            (["off", "--all"], .off(.all)),
+            (["off", "--session", "abc-123"], .off(.session("abc-123"))),
+            (["status"], .status(json: false)),
+            (["status", "--json"], .status(json: true)),
+            (["sessions"], .sessions),
+            (["finished"], .finished(tool: nil)),
+            (["finished", "--tool", "claude-code"], .finished(tool: "claude-code")),
+            (["setup"], .setup),
+            (["reset"], .reset),
+        ]
+        for (args, command) in expected {
+            guard case .success(let parsed) = parseCLIArguments(args) else {
+                return XCTFail("'keepy-uppy \(args.joined(separator: " "))' must still parse")
+            }
+            XCTAssertEqual(parsed, command)
+        }
+    }
+}
+
+/// A rejection is only useful if it says what to type instead. These pin the
+/// two messages that described something other than what the user did.
+final class CLIRejectionMessageTests: XCTestCase {
+    private func rejection(_ args: [String],
+                           file: StaticString = #filePath, line: UInt = #line) -> String {
+        guard case .failure(let error) = parseCLIArguments(args) else {
+            XCTFail("expected '\(args.joined(separator: " "))' to be refused", file: file, line: line)
+            return ""
+        }
+        return error.message
+    }
+
+    /// "--while-process needs a value" flatly contradicts a command line with
+    /// a value on it. The value is there; it is the *shape* that was refused.
+    func testAFlagShapedValueIsReportedAsWhatItIs() {
+        let message = rejection(["on", "--while-process", "-bash"])
+        XCTAssertTrue(message.contains("-bash"), "the message must name the token refused: \(message)")
+        XCTAssertTrue(message.contains("looks like a flag"),
+                      "the message must say why it was refused, not just 'needs a value': \(message)")
+    }
+
+    /// Naming the whole group for a repeat sends the user hunting for a
+    /// conflict with options they never typed.
+    func testTheSameOptionTwiceIsReportedAsARepeat() {
+        let message = rejection(["on", "--for", "2h", "--for", "3h"])
+        XCTAssertTrue(message.contains("--for"), "the message must name the option repeated: \(message)")
+        for untyped in ["--until", "--while-app", "--while-process"] {
+            XCTAssertFalse(message.contains(untyped),
+                           "the message names \(untyped), which does not appear in the command: \(message)")
+        }
+
+        let modeMessage = rejection(["on", "--display-may-sleep", "--display-may-sleep"])
+        XCTAssertTrue(modeMessage.contains("--display-may-sleep"))
+        XCTAssertFalse(modeMessage.contains("--keep-display-awake"),
+                       "the message names a flag the user never typed: \(modeMessage)")
+    }
+
+    /// The complement: two *different* options from one group is exactly when
+    /// naming the group is the right thing to do.
+    func testTwoDifferentOptionsFromOneGroupStillNameTheGroup() {
+        let message = rejection(["on", "--for", "2h", "--until", "17:00"])
+        XCTAssertTrue(message.contains("--for") && message.contains("--until"),
+                      "a genuine conflict should name the conflicting options: \(message)")
+    }
+
+    /// An unknown option is only actionable if the user can see which
+    /// command's option list it was looked up in.
+    func testAnUnknownOptionNamesTheVerbAndItsUsage() {
+        let message = rejection(["off", "--alll"])
+        XCTAssertTrue(message.contains("--alll"), "the message must quote the token: \(message)")
+        XCTAssertTrue(message.contains("'off'"), "the message must name the verb: \(message)")
+        XCTAssertTrue(message.contains("usage: keepy-uppy off"),
+                      "the message must carry the verb's usage line: \(message)")
+    }
+}
+
 /// The wake-mode flag names, and the two strings the CLI prints about a mode.
 /// Both strings are about the one fact the flag names leave out — that
 /// choosing a display behaviour *gives up* the lid-closed guarantee — so both
@@ -324,6 +483,23 @@ final class WakeModeCLISurfaceTests: XCTestCase {
             XCTAssertTrue(caveat.contains(mode.selectingFlag ?? ""),
                           "the note must name the flag the user actually typed: \(caveat)")
             XCTAssertTrue(caveat.contains("lid closed"), "the note must say what is being given up: \(caveat)")
+        }
+    }
+
+    /// The note is about the session being started, not about the Mac.
+    ///
+    /// The daemon unions the wake modes of every live session, so a concurrent
+    /// `.clamshell` session — another client's, or this user's own earlier one
+    /// — does keep the machine awake with the lid shut. "This flag does not
+    /// keep this Mac awake with the lid closed" was therefore false exactly
+    /// when someone was running two sessions at once. Scoped to the session,
+    /// the same sentence is true unconditionally.
+    func testTheCaveatIsScopedToTheSessionAndNotToTheWholeMac() {
+        for mode in WakeMode.allCases {
+            guard let caveat = mode.lidCloseCaveat else { continue }
+            XCTAssertTrue(caveat.contains("this session"),
+                          "a concurrent clamshell session does keep this Mac awake lid-shut, so the note "
+                          + "has to be about the session being started: \(caveat)")
         }
     }
 

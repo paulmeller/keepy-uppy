@@ -73,15 +73,6 @@ guard let proxy = connect() else { fail("could not connect to the Keepy Uppy dae
 
 switch command {
 case .on(let kind, let persistence, let wakeMode):
-    // Said here, on stderr, because here is where the mistake is made: a
-    // wake-mode flag *removes* the lid-closed guarantee, and neither flag's
-    // name mentions it. stderr and not stdout — `status --json` and
-    // `sessions` output must stay machine-clean, and this is a note about
-    // the invocation, not part of the answer. `nil` for the default, which
-    // takes nothing away.
-    if let caveat = wakeMode.lidCloseCaveat {
-        FileHandle.standardError.write("keepy-uppy: note: \(caveat)\n".data(using: .utf8)!)
-    }
     // `wakeMode` needs no new XPC method and no new parameter: `Session` is
     // what crosses the boundary, as JSON, and it carries the field. See
     // `HelperProtocol.startSession` for which fields of this payload the
@@ -92,6 +83,22 @@ case .on(let kind, let persistence, let wakeMode):
     proxy.startSession(data) { sessionID, error in
         if let sessionID {
             print("Started session \(sessionID)")
+            // Said on stderr, because a wake-mode flag *removes* the
+            // lid-closed guarantee and neither flag's name mentions it.
+            // stderr and not stdout — `status --json` and `sessions` output
+            // must stay machine-clean, and this is a note about the
+            // invocation, not part of the answer. `nil` for the default,
+            // which takes nothing away.
+            //
+            // Inside the accepted branch, not before the call: a start the
+            // daemon refuses (`ownerLimitReached`, `globalLimitReached`)
+            // creates no session, so warning about what that session gave up
+            // describes something that does not exist — two lines on stderr,
+            // one saying the request failed and one qualifying a guarantee
+            // the user never received.
+            if let caveat = wakeMode.lidCloseCaveat {
+                FileHandle.standardError.write("keepy-uppy: note: \(caveat)\n".data(using: .utf8)!)
+            }
         } else {
             FileHandle.standardError.write("keepy-uppy: \(error ?? "failed")\n".data(using: .utf8)!)
             exitCode = 1
