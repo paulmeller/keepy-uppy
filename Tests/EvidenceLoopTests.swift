@@ -46,6 +46,11 @@ final class EvidenceLoopTests: XCTestCase {
         init(_ reading: ConditionReading) { self.reading = reading }
         func isVPNActive() -> ConditionReading { reading }
     }
+    struct FakeUSBDevice: USBDeviceObserving {
+        let reading: ConditionReading
+        init(_ reading: ConditionReading) { self.reading = reading }
+        func isPresent(vendorID: UInt16, productID: UInt16) -> ConditionReading { reading }
+    }
 
     private func session(_ kind: SessionKind) -> Session {
         Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"),
@@ -68,6 +73,7 @@ final class EvidenceLoopTests: XCTestCase {
                       volume: ConditionReading = .present,
                       network: ConditionReading = .present,
                       vpn: ConditionReading = .present,
+                      usbDevice: ConditionReading = .present,
                       busy: CPUBusyReading = .undetermined,
                       at now: Date? = nil) -> [UUID] {
         sessionsToEnd(sessions,
@@ -82,6 +88,7 @@ final class EvidenceLoopTests: XCTestCase {
                                              mountedVolume: FakeMountedVolume(volume),
                                              networkAddress: FakeNetworkAddress(network),
                                              vpn: FakeVPN(vpn),
+                                             usbDevice: FakeUSBDevice(usbDevice),
                                              acPower: .undetermined,
                                              cpuBusy: busy),
                       evidence: &evidence, now: now ?? t0)
@@ -221,6 +228,19 @@ final class EvidenceLoopTests: XCTestCase {
                       "the run of negatives restarted when the tunnel came back")
     }
 
+    /// A registry that could not be enumerated is not an unplugged device. The
+    /// motivating case is a backup running over the very dongle being watched.
+    func testAUSBReadThatFailedNeverEndsASession() {
+        let s = session(.whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+        var evidence = SessionEvidence()
+        for tickNumber in 1...50 {
+            XCTAssertTrue(tick([s], evidence: &evidence, usbDevice: .undetermined).isEmpty,
+                          "tick \(tickNumber): a failed registry read is not an unplugged device")
+        }
+        XCTAssertTrue(tick([s], evidence: &evidence, usbDevice: .absent).isEmpty, "first negative debounces")
+        XCTAssertEqual(tick([s], evidence: &evidence, usbDevice: .absent), [s.id])
+    }
+
     // MARK: - Debounce
 
     func testASingleConfidentNegativeDoesNotEndASession() {
@@ -311,7 +331,7 @@ final class EvidenceLoopTests: XCTestCase {
         for _ in 1...5 {
             XCTAssertTrue(tick([s], evidence: &evidence, app: .absent, display: .absent,
                                process: .absent, volume: .absent, network: .absent,
-                               vpn: .absent, busy: .busy(fraction: 0)).isEmpty,
+                               vpn: .absent, usbDevice: .absent, busy: .busy(fraction: 0)).isEmpty,
                           "the agent must never report on sessions it doesn't own evaluation of")
         }
     }

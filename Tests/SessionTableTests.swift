@@ -253,6 +253,8 @@ final class SessionKindEvaluationTests: XCTestCase {
         // a `.whileVPNActive` session outliving the agent would be one nothing
         // could ever end.
         XCTAssertFalse(SessionKind.whileVPNActive.isDaemonEvaluable)
+        // And again: only the agent enumerates the USB tree.
+        XCTAssertFalse(SessionKind.whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f).isDaemonEvaluable)
     }
 
     /// `.whileProcessRunning` was added to `SessionKind` and to
@@ -267,7 +269,7 @@ final class SessionKindEvaluationTests: XCTestCase {
             .whileAppRunning(bundleID: "com.apple.dt.Xcode"), .whileExternalDisplay,
             .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "claude"),
             .whileVolumeMounted(name: "Backup"), .whileOnSubnet(cidr: "192.168.1.0/24"),
-            .whileVPNActive,
+            .whileVPNActive, .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f),
         ]
         for kind in allKinds {
             let daemonCanEvaluateItAlone: Bool
@@ -277,11 +279,11 @@ final class SessionKindEvaluationTests: XCTestCase {
             case .whileOnACPower:
                 daemonCanEvaluateItAlone = true   // the daemon reads IOKit power itself
             case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
-                 .whileVolumeMounted, .whileOnSubnet, .whileVPNActive:
+                 .whileVolumeMounted, .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent:
                 daemonCanEvaluateItAlone = false  // needs the agent's observers
             }
             XCTAssertEqual(kind.isDaemonEvaluable, daemonCanEvaluateItAlone, "\(kind)")
         }
-        XCTAssertEqual(allKinds.count, 12, "a case was added to SessionKind but not to allKinds")
+        XCTAssertEqual(allKinds.count, 13, "a case was added to SessionKind but not to allKinds")
     }
 }

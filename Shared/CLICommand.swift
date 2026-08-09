@@ -207,6 +207,7 @@ private enum OnOption: String, CaseIterable {
     case whileVolume = "--while-volume"
     case whileSubnet = "--while-subnet"
     case whileVPN = "--while-vpn"
+    case whileUSB = "--while-usb"
 
     /// How this option reads in `onUsage`, value placeholder and all.
     ///
@@ -225,6 +226,10 @@ private enum OnOption: String, CaseIterable {
         // `MountedVolumeObserving` for why a path cannot be matched on.
         case .whileVolume: return "\(rawValue) <volume-name>"
         case .whileSubnet: return "\(rawValue) 192.168.1.0/24"
+        // A real pair (Apple's Magic Keyboard) rather than `<vid>:<pid>`,
+        // because the placeholder's whole job here is to say "hexadecimal" —
+        // which the angle brackets do not.
+        case .whileUSB: return "\(rawValue) 05ac:024f"
         // `--while-vpn` takes no value because the condition is "any VPN":
         // naming one would mean typing a network-service identifier, which is
         // not a thing anybody has seen. See `VPNObserving`.
@@ -315,6 +320,12 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
             kind = .whileOnACPower
         case .whileVPN:
             kind = .whileVPNActive
+        case .whileUSB:
+            switch scanner.value(for: token).flatMap(parseUSBDeviceID) {
+            case .success(let device):
+                kind = .whileUSBDevicePresent(vendorID: device.vendorID, productID: device.productID)
+            case .failure(let error): return .failure(error)
+            }
         case .whileCPUBusy:
             switch scanner.value(for: token).flatMap(parseCPUBusyPercentage) {
             case .success(let threshold): kind = .whileCPUBusy(threshold: threshold)
@@ -597,6 +608,29 @@ func parseSubnet(_ string: String) -> Result<String, CLIParseError> {
                 + "e.g. 192.168.1.0/24 or 192.168.1.50 (IPv6 is not supported yet)"))
     }
     return .success(string)
+}
+
+/// Accepts a USB vendor/product pair in the form every USB tool prints it —
+/// `05ac:024f`, or `0x05ac:0x024F` if that is how it was copied.
+///
+/// The colon is what makes this readable and is also the one thing to watch:
+/// `--while-usb` is the only option whose *value* contains a colon, so a
+/// consumer of `SessionKind.wireDescription` splitting on the first one still
+/// gets the whole pair back (see `USBDeviceID.text`).
+///
+/// Refusing an unparseable value here is the call `parseSubnet` and
+/// `parseCPUBusyPercentage` both make: a session whose device can never match
+/// is one that will end two ticks after it starts, and saying so at the
+/// keyboard costs one retype. The message names the value **and** points at
+/// `system_profiler`, because "what is my dongle's vendor ID" is a real
+/// question and a rejection that does not answer it just moves the problem.
+func parseUSBDeviceID(_ string: String) -> Result<USBDeviceID, CLIParseError> {
+    guard let device = USBDeviceID(text: string) else {
+        return .failure(CLIParseError(
+            message: "invalid --while-usb device '\(string)' — use a hexadecimal vendor:product pair, "
+                + "e.g. 05ac:024f. `system_profiler SPUSBDataType` lists what is plugged in."))
+    }
+    return .success(device)
 }
 
 /// Accepts "HH:MM" in the local timezone, rolling to tomorrow if that

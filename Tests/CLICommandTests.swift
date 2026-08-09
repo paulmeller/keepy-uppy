@@ -291,7 +291,7 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             ["--while-app", "com.apple.dt.Xcode"], ["--while-process", "claude"],
             ["--while-display"], ["--while-ac-power"], ["--while-cpu-busy", "30"],
             ["--while-volume", "Backup"], ["--while-subnet", "192.168.1.0/24"],
-            ["--while-vpn"],
+            ["--while-vpn"], ["--while-usb", "05ac:024f"],
         ]
         let reachable = Set(invocations.compactMap { flags -> SessionKind.Family? in
             guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on"] + flags) else { return nil }
@@ -324,6 +324,51 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             }
             XCTAssertEqual(kind, .whileOnSubnet(cidr: typed))
         }
+    }
+
+    /// Every way a person actually writes a USB pair parses to the same thing,
+    /// and the stored form is a canonical `UInt16` pair rather than the text —
+    /// so `05ac:024f`, `0x05AC:0x024F` and `5ac:24f` are one rule, not three.
+    func testAUSBDeviceIsParsedHoweverItWasWritten() {
+        for typed in ["05ac:024f", "0x05ac:0x024f", "0X05AC:0X024F", "5ac:24f", "05AC:024F"] {
+            guard case .success(.on(let kind, _, _)) =
+                    parseCLIArguments(["on", "--while-usb", typed]) else {
+                return XCTFail("'--while-usb \(typed)' must be accepted")
+            }
+            XCTAssertEqual(kind, .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f), typed)
+        }
+    }
+
+    /// A pair that can never match is refused at the keyboard, for the reason
+    /// an unparseable subnet is — and the message has to answer the question a
+    /// user is actually stuck on, which is not "what shape" but "where do I
+    /// find my device's IDs".
+    func testUSBRejectsAValueThatCanNeverMatch() {
+        for bad in ["05ac", "05ac:", ":024f", "zzzz:024f", "05ac024f", "12345:024f", "05ac:024f:0"] {
+            guard case .failure(let error) = parseCLIArguments(["on", "--while-usb", bad]) else {
+                return XCTFail("'--while-usb \(bad)' must be refused")
+            }
+            XCTAssertTrue(error.message.contains(bad), "the message must quote what was typed: \(error.message)")
+            XCTAssertTrue(error.message.contains("05ac:024f"),
+                          "the message must give a form that would work: \(error.message)")
+            XCTAssertTrue(error.message.contains("system_profiler"),
+                          "the message must say where to find the IDs: \(error.message)")
+        }
+    }
+
+    /// `--while-usb`'s value contains a colon, which is the one thing about it
+    /// that could confuse a wire-format consumer. `wireDescription`'s documented
+    /// rule is "everything after the *first* colon", so splitting once gives the
+    /// pair back whole.
+    func testTheUSBWireDescriptionSurvivesASingleSplit() {
+        let wire = SessionKind.whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f).wireDescription
+        XCTAssertEqual(wire, "while-usb-device-present:0x05ac:0x024f")
+        let halves = wire.split(separator: ":", maxSplits: 1)
+        XCTAssertEqual(String(halves[0]), "while-usb-device-present")
+        XCTAssertEqual(String(halves[1]), "0x05ac:0x024f")
+        XCTAssertEqual(USBDeviceID(text: String(halves[1])),
+                       USBDeviceID(vendorID: 0x05ac, productID: 0x024f),
+                       "the value a consumer recovers must parse back to the pair")
     }
 
     /// A block that can never match is refused at the keyboard, exactly as an
@@ -604,7 +649,7 @@ final class CLIRejectionMessageTests: XCTestCase {
         // about, one level up.
         for flag in ["--for", "--until", "--while-app", "--while-process",
                      "--while-display", "--while-ac-power", "--while-cpu-busy",
-                     "--while-volume", "--while-subnet", "--while-vpn"]
+                     "--while-volume", "--while-subnet", "--while-vpn", "--while-usb"]
                     + WakeMode.selectingFlags {
             XCTAssertTrue(message.contains(flag), "'on''s usage line does not mention \(flag): \(message)")
         }

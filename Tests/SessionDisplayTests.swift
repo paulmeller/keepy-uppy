@@ -78,6 +78,14 @@ final class SessionDisplayTests: XCTestCase {
         XCTAssertEqual(remainingTimeText(for: s, now: t0), "While a VPN is connected")
     }
 
+    /// A device that is not attached renders as its identifiers rather than as
+    /// nothing — the `appDisplayName` bargain, and here it is the ordinary case
+    /// rather than the exception.
+    func testWhileUSBDevicePresentFallsBackToTheIdentifiersWhenNothingIsAttached() {
+        let s = session(.whileUSBDevicePresent(vendorID: 0xdead, productID: 0xbeef))
+        XCTAssertEqual(remainingTimeText(for: s, now: t0), "While 0xdead:0xbeef is attached")
+    }
+
     func testOriginTextDistinguishesManualAndTrigger() {
         XCTAssertEqual(originText(for: session(.indefinite, origin: .manual)), "Started manually")
         XCTAssertEqual(originText(for: session(.indefinite, origin: .trigger)), "Started automatically")
@@ -309,6 +317,7 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionKindLabel(.volumeMounted), "A volume is mounted")
         XCTAssertEqual(triggerConditionKindLabel(.onSubnet), "This Mac is on a network")
         XCTAssertEqual(triggerConditionKindLabel(.vpnActive), "A VPN is connected")
+        XCTAssertEqual(triggerConditionKindLabel(.usbDevicePresent), "A USB device is attached")
     }
 
     /// The subnet condition binds too, so its copy has to name the leaving —
@@ -349,6 +358,31 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertTrue(note.contains("won't be detected"), note)
         for tool in ["wg-quick", "openvpn", "Tunnelblick"] {
             XCTAssertTrue(note.contains(tool), "the note must name what is not covered: \(note)")
+        }
+    }
+
+    /// The USB condition binds, so it says "while" — and both the title and the
+    /// row subtitle go through the live-lookup display helper, which falls back
+    /// to `0x05ac:0x024f` for a device that is not plugged in. That fallback is
+    /// the *common* case for this condition (the point of the rule is a device
+    /// that is not attached yet), so it is what is pinned here: a made-up pair
+    /// nothing can be reporting.
+    func testTheUSBConditionSaysWhatWillEndTheSession() {
+        let absent = TriggerCondition.usbDevicePresent(vendorID: 0xdead, productID: 0xbeef)
+        XCTAssertEqual(triggerConditionTitle(absent), "While 0xdead:0xbeef is attached")
+        XCTAssertEqual(triggerBoundEffectSubtitle(absent),
+                       "Keeps this Mac awake until 0xdead:0xbeef is unplugged")
+    }
+
+    /// Unlike the volume and subnet footnotes, this one names no device: it is
+    /// read while the field is still being filled in, where the value is
+    /// whatever half-typed hex is there — `0x0000:0x0000` before anything is
+    /// chosen. "The device" is true at every moment the sheet is open.
+    func testTheUSBAddSheetFootnoteNamesNoDeviceBecauseThereMayNotBeOneYet() {
+        for condition: TriggerCondition in [.usbDevicePresent(vendorID: 0, productID: 0),
+                                            .usbDevicePresent(vendorID: 0x05ac, productID: 0x024f)] {
+            XCTAssertEqual(triggerBindingFootnote(condition),
+                           "Ends automatically when the device is unplugged — no duration to pick.")
         }
     }
 

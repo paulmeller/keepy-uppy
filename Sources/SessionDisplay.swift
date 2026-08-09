@@ -47,6 +47,8 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While on \(cidr)"
     case .whileVPNActive:
         return "While a VPN is connected"
+    case .whileUSBDevicePresent(let vendorID, let productID):
+        return "While \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is attached"
     }
 }
 
@@ -70,6 +72,29 @@ func appDisplayName(bundleID: String) -> String {
           let bundle = Bundle(url: url),
           let name = bundle.infoDictionary?["CFBundleName"] as? String
     else { return bundleID }
+    return name
+}
+
+/// Best-effort friendly name for a USB device, falling back to
+/// `0x05ac:0x024f` when it isn't plugged in or doesn't report one — the exact
+/// bargain `appDisplayName(bundleID:)` makes for an app that isn't installed.
+/// Display text only, never used for matching.
+///
+/// **The fallback is the common case, not the exception**, and that is what
+/// makes it worth having: the whole point of a `.usbDevicePresent` rule is a
+/// device that is *not* attached yet, so the Triggers list spends most of its
+/// life rendering rules for absent devices. A row reading "0x05ac:0x024f" is
+/// terse but honest and stays stable; a row reading "Unknown device" would tell
+/// the user nothing about which rule they were looking at.
+///
+/// Enumerates on every call, as `appDisplayName` does its Launch Services
+/// lookup — a full USB pass is 0.009 ms measured, so a menu rebuild does not
+/// notice it.
+func usbDeviceDisplayName(vendorID: UInt16, productID: UInt16) -> String {
+    let wanted = USBDeviceID(vendorID: vendorID, productID: productID)
+    guard case .attached(let devices) = IOKitUSBDeviceReader().read(),
+          let name = devices.first(where: { $0.id == wanted })?.name
+    else { return wanted.text }
     return name
 }
 
@@ -100,6 +125,7 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
     case .volumeMounted: return "A volume is mounted"
     case .onSubnet: return "This Mac is on a network"
     case .vpnActive: return "A VPN is connected"
+    case .usbDevicePresent: return "A USB device is attached"
     }
 }
 
@@ -131,8 +157,8 @@ let vpnDetectionLimitationNote = "Detects VPNs macOS knows about — anything yo
 /// truth, because `sessionKind(firing:now:)` starts the bound kind and
 /// `sessionsToEnd` really does end it.
 ///
-/// `.processRunning`, `.volumeMounted`, `.onSubnet` and `.vpnActive` are the
-/// four such conditions today.
+/// `.processRunning`, `.volumeMounted`, `.onSubnet`, `.vpnActive` and
+/// `.usbDevicePresent` are the five such conditions today.
 /// Which ones say "while" is pinned against `bindsSessionLifetime` in
 /// `SessionDisplayTests`, not against a list of case names, so a ninth
 /// condition cannot pick the wrong voice quietly.
@@ -146,6 +172,8 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     case .volumeMounted(let name): return "While \(name) is mounted"
     case .onSubnet(let cidr): return "While this Mac is on \(cidr)"
     case .vpnActive: return "While a VPN is connected"
+    case .usbDevicePresent(let vendorID, let productID):
+        return "While \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is attached"
     }
 }
 
@@ -181,6 +209,8 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
         return "Keeps this Mac awake until it leaves \(cidr)"
     case .vpnActive:
         return "Keeps this Mac awake until the VPN disconnects"
+    case .usbDevicePresent(let vendorID, let productID):
+        return "Keeps this Mac awake until \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is unplugged"
     }
 }
 
@@ -209,6 +239,13 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
         // No associated value, so nothing to fill in and no empty-field
         // variant: the sentence is the same before and after saving.
         return "Ends automatically when the VPN disconnects — no duration to pick."
+    case .usbDevicePresent:
+        // Deliberately unnamed, unlike the row subtitle above. This is read
+        // while the sheet is still being filled in, and the value at that point
+        // is whatever half-typed hex is in the field — which would render as
+        // `0x0000:0x0000` before anything is chosen. "The device" is true at
+        // every moment the sheet is open.
+        return "Ends automatically when the device is unplugged — no duration to pick."
     }
 }
 

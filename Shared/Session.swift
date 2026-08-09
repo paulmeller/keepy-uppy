@@ -37,6 +37,14 @@ enum SessionKind: Equatable, Codable {
     /// VPN up", because the request is never about a particular tunnel and
     /// naming one would mean typing a service identifier nobody has seen.
     case whileVPNActive
+    /// Ends when the named USB device is unplugged. "Keep this Mac awake while
+    /// the backup dongle is in" — the same shape as `.whileExternalDisplay`,
+    /// and as stable a fact: a device is attached or it is not, and it does not
+    /// flicker between two ticks the way a Bluetooth connection does.
+    ///
+    /// Identified by vendor and product ID rather than by name; see
+    /// `USBDeviceID`.
+    case whileUSBDevicePresent(vendorID: UInt16, productID: UInt16)
 
     /// A kind's identity without its associated value, so that `CaseIterable`
     /// guarantees are available to anything that has to cover every kind: the
@@ -72,6 +80,7 @@ enum SessionKind: Equatable, Codable {
         case whileVolumeMounted = "while-volume-mounted"
         case whileOnSubnet = "while-on-subnet"
         case whileVPNActive = "while-vpn-active"
+        case whileUSBDevicePresent = "while-usb-device-present"
     }
 
     /// This kind's family, dropping its associated value. Exhaustive, so a new
@@ -91,6 +100,7 @@ enum SessionKind: Equatable, Codable {
         case .whileVolumeMounted: return .whileVolumeMounted
         case .whileOnSubnet: return .whileOnSubnet
         case .whileVPNActive: return .whileVPNActive
+        case .whileUSBDevicePresent: return .whileUSBDevicePresent
         }
     }
 
@@ -100,7 +110,7 @@ enum SessionKind: Equatable, Codable {
         switch self {
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower: return true
         case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
-             .whileVolumeMounted, .whileOnSubnet, .whileVPNActive: return false
+             .whileVolumeMounted, .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent: return false
         }
     }
 
@@ -139,6 +149,12 @@ enum SessionKind: Equatable, Codable {
         case .whileProcessRunning(let processName): return "\(family.rawValue):\(processName)"
         case .whileVolumeMounted(let name): return "\(family.rawValue):\(name)"
         case .whileOnSubnet(let cidr): return "\(family.rawValue):\(cidr)"
+        // The value itself contains a colon (`while-usb-device-present:0x05ac:0x024f`),
+        // which the "everything after the *first* colon" rule above already
+        // covers — a consumer that splits once gets `USBDeviceID.text` back
+        // whole. `%04x` carries no locale, so no formatting can vary here.
+        case .whileUSBDevicePresent(let vendorID, let productID):
+            return "\(family.rawValue):\(USBDeviceID(vendorID: vendorID, productID: productID).text)"
         // `.whileVPNActive` is here rather than above because it has no
         // associated value to put after the colon: the condition is "any VPN",
         // so there is nothing that identifies *which* tunnel was watched.
@@ -158,7 +174,7 @@ enum SessionKind: Equatable, Codable {
             return until
         case .indefinite, .whileAppRunning, .whileExternalDisplay,
              .whileOnACPower, .whileCPUBusy, .whileProcessRunning, .whileVolumeMounted,
-             .whileOnSubnet, .whileVPNActive:
+             .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent:
             return nil
         }
     }

@@ -2,6 +2,8 @@ import Foundation
 import AppKit
 import CoreGraphics
 import SystemConfiguration
+import IOKit
+import IOKit.usb
 
 // MARK: - Pure logic
 
@@ -733,6 +735,142 @@ final class SystemVPNObserver: VPNObserving {
         switch result {
         case .liveServiceIDs(let ids): return ConditionReading(!ids.isEmpty)
         case .unavailable: return .undetermined
+        }
+    }
+}
+
+// MARK: - USB devices
+
+/// One attached USB device: the pair a rule matches on, and the name a person
+/// would recognise it by.
+///
+/// The name is `Optional` and is **display only** — plenty of devices report
+/// none, and none of them is required to report a unique one. Nothing matches
+/// on it; see `USBDeviceID`.
+struct AttachedUSBDevice: Equatable, Hashable {
+    let id: USBDeviceID
+    let name: String?
+}
+
+/// The result of one pass over the USB tree: every device attached right now,
+/// or an admission that the registry could not be enumerated.
+///
+/// **An empty list is a real answer**, as it is for `NetworkAddressReading` and
+/// unlike `MountedVolumeReading`: a laptop with nothing plugged into it
+/// genuinely has no USB devices. Measured on the machine this was written on —
+/// three USB host controllers and zero devices, agreed independently by
+/// `ioreg -p IOUSB` and `system_profiler SPUSBDataType`. There is no
+/// always-present member here to make emptiness impossible, the way `/` is for
+/// volumes and this process is for `runningApplications`.
+enum USBDeviceReading: Equatable {
+    case attached([AttachedUSBDevice])
+    case unavailable
+}
+
+/// Reading the USB tree, split out from the matching for the reason
+/// `NetworkAddressReader` is: the matching is then testable with nothing
+/// plugged in, and one enumeration serves every rule and session on a tick.
+protocol USBDeviceReader {
+    func read() -> USBDeviceReading
+}
+
+/// `IOServiceMatching(kIOUSBHostDeviceClassName)`: no entitlement, no prompt,
+/// and — measured — 0.009 ms for a full pass.
+///
+/// ## The class name is the part that had to be checked
+///
+/// `kIOUSBDeviceClassName` **no longer exists** in the macOS 26 SDK; only
+/// `kIOUSBHostDeviceClassName` (`"IOUSBHostDevice"`) does, so any snippet found
+/// online using the old name does not compile. And the obvious sanity check
+/// does not settle it either: `IOServiceMatching("IOUSBHostController")` finds
+/// **nothing** on Apple Silicon despite three host controllers being present,
+/// because the class chain runs through `AppleUSBHostController` instead.
+///
+/// Two facts establish that an attached device really does match, both recorded
+/// in `.superpowers/sdd/plan5-device-research.md`: `IOServiceMatching` matches
+/// subclasses (verified — `AppleUSBXHCI` finds the three `AppleT8122USBXHCI`
+/// instances two levels down), and ten shipping Apple kexts declare
+/// `IOUSBHostDevice` as the provider class they attach to, so devices must be
+/// that class or a subclass of it or no USB audio interface would ever bind a
+/// driver.
+///
+/// ## Lifetime
+///
+/// The iterator and every `io_object_t` it yields are released on **every**
+/// path, including the early returns, by `defer` placed immediately after each
+/// acquisition. This runs every 5 seconds for as long as the agent lives, so a
+/// leaked registry entry here is not a one-off.
+struct IOKitUSBDeviceReader: USBDeviceReader {
+    /// `kUSBHostMatchingPropertyVendorID` / `…ProductID` from
+    /// `IOUSBHostFamilyDefinitions.h`, quoted rather than imported so the two
+    /// property names are visible next to the code that reads them.
+    static let vendorIDProperty = "idVendor"
+    static let productIDProperty = "idProduct"
+    /// The name macOS itself shows for a device, and the older key some devices
+    /// still populate instead. Display only — the match never consults either.
+    static let nameProperties = ["USB Product Name", "kUSBProductString", "Product Name"]
+
+    func read() -> USBDeviceReading {
+        guard let matching = IOServiceMatching(kIOUSBHostDeviceClassName) else { return .unavailable }
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS
+        else { return .unavailable }
+        defer { IOObjectRelease(iterator) }
+
+        var devices: [AttachedUSBDevice] = []
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            defer { IOObjectRelease(service) }
+            // A device that will not answer for its own identifiers is a
+            // per-device shortfall, not a failure to enumerate the tree —
+            // exactly as a process that exits mid-enumeration still
+            // contributes its `p_comm`.
+            guard let vendorID = Self.number(service, Self.vendorIDProperty),
+                  let productID = Self.number(service, Self.productIDProperty)
+            else { continue }
+            devices.append(AttachedUSBDevice(
+                id: USBDeviceID(vendorID: vendorID, productID: productID),
+                name: Self.nameProperties.lazy.compactMap { Self.string(service, $0) }.first))
+        }
+        return .attached(devices)
+    }
+
+    /// The identifiers are 16-bit fields in the USB device descriptor, so
+    /// anything outside `UInt16` is not a device this can be asked about.
+    private static func number(_ service: io_object_t, _ key: String) -> UInt16? {
+        guard let value = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? NSNumber else { return nil }
+        return UInt16(exactly: value)
+    }
+
+    private static func string(_ service: io_object_t, _ key: String) -> String? {
+        guard let value = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? String, !value.isEmpty else { return nil }
+        return value
+    }
+}
+
+/// Answers `.usbDevicePresent` questions from a single USB enumeration.
+///
+/// Memoized with the tick's lifetime, exactly as the four observers above are:
+/// no invalidation logic, because `EvidenceLoopRunner` builds a new one every
+/// tick and the cache therefore cannot go stale.
+final class SystemUSBDeviceObserver: USBDeviceObserving {
+    private let reader: USBDeviceReader
+    private var thisTick: USBDeviceReading?
+
+    init(reader: USBDeviceReader = IOKitUSBDeviceReader()) {
+        self.reader = reader
+    }
+
+    func isPresent(vendorID: UInt16, productID: UInt16) -> ConditionReading {
+        let result = thisTick ?? reader.read()
+        thisTick = result
+        switch result {
+        case .attached(let devices):
+            let wanted = USBDeviceID(vendorID: vendorID, productID: productID)
+            return ConditionReading(devices.contains { $0.id == wanted })
+        case .unavailable:
+            return .undetermined
         }
     }
 }

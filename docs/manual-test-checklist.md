@@ -76,6 +76,29 @@ measurements. These two items are the missing half.
 - [ ] With no VPN connected, a `vpnActive` trigger does nothing; connecting one starts a session within ~5s reading `While a VPN is connected — started elsewhere`, and it survives a Wi-Fi hop that leaves the tunnel up
 - [ ] On a Mac with **no VPN configured at all**, a live `--while-vpn` session ends rather than hanging — an empty answer is a confident negative here, deliberately unlike the volume observer's
 - [ ] The Add-trigger sheet's "A VPN is connected" row shows the limitation footnote naming wg-quick/openvpn/Tunnelblick, and a tunnel started by one of those really is *not* detected (this is the stated limitation, not a bug to file)
+
+**The USB condition — the half no test could reach either.**
+`IOKitUSBDeviceReader` was written and verified on a Mac with **nothing plugged
+into it**: three USB host controllers and zero devices, agreed independently by
+`ioreg -p IOUSB` and `system_profiler SPUSBDataType`. So the enumeration
+machinery, the class name and the property names are all established (see
+`.superpowers/sdd/plan5-device-research.md`) but *a real device appearing in the
+list* never was. That is what these items are for.
+
+- [ ] Plug something in and open the Add-trigger sheet: "Attached…" lists it **by name**, picking it fills the field with `0x….0x…`, and the saved rule's row names the device rather than the hex
+- [ ] `system_profiler SPUSBDataType` and the "Attached…" menu list the same devices — a device in one and not the other means the class or property names are wrong
+- [ ] With that device unplugged, the rule's row falls back to `0x05ac:0x024f`-style identifiers rather than going blank
+- [ ] `keepy-uppy on --while-usb <vid>:<pid>` with the device attached starts a session; unplugging it ends the session within ~10s, and re-plugging within one tick does not
+- [ ] Two devices from the same vendor: a rule for one does **not** fire for the other (both identifiers have to match)
+- [ ] A hub with devices behind it: the devices behind it are listed, and unplugging the hub ends a session bound to one of them
+
+**Bluetooth is deliberately absent**, not missing. It was specified alongside
+USB and cut on the research: `bluetoothd` enforces `kTCCServiceBluetoothAlways`
+and can raise the dialog, neither the app nor the agent carries a Bluetooth
+usage description, and the observer would run in a background LaunchAgent whose
+worst case is termination — taking every other trigger with it. There is
+nothing to test; the argument and the one experiment that would settle it are in
+`.superpowers/sdd/plan5-device-research.md`.
 - [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field

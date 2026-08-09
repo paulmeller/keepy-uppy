@@ -172,7 +172,7 @@ struct TriggersSettingsTab: View {
                 .foregroundStyle(.tertiary)
             Text("No Triggers")
                 .font(.title3.weight(.semibold))
-            Text("Triggers start a session for you — when an app launches or comes to the front, a display is plugged in, power is connected, a volume is mounted, this Mac joins a network, a VPN connects, or a process (like a coding-assistant CLI) is running.")
+            Text("Triggers start a session for you — when an app launches or comes to the front, a display is plugged in, power is connected, a volume is mounted, this Mac joins a network, a VPN connects, a USB device is attached, or a process (like a coding-assistant CLI) is running.")
                 .settingsFootnote()
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
@@ -303,6 +303,22 @@ private struct AddTriggerSheet: View {
             // saying the same thing — and a duplicate `ForEach` id.
             guard seen.insert(block).inserted else { return nil }
             return (address: octets.map(String.init).joined(separator: "."), block: block)
+        }
+    }()
+    @State private var usbDeviceText = ""
+    /// What is plugged in *now*, read once when the sheet is built — the
+    /// `mountedVolumeNames` bargain exactly: a convenience for filling the field
+    /// in, never a constraint on it, because a rule naming a dongle that is not
+    /// plugged in yet is most of the reason to write one.
+    ///
+    /// Sorted by name so the menu is stable between openings; devices that
+    /// report no name sort last under their identifiers, which is also what they
+    /// are shown as. `.unavailable` becomes an empty list and a disabled menu
+    /// rather than an error, so the field still works.
+    @State private var attachedUSBDevices: [AttachedUSBDevice] = {
+        guard case .attached(let devices) = IOKitUSBDeviceReader().read() else { return [] }
+        return devices.sorted {
+            ($0.name ?? "\u{10FFFF}\($0.id.text)") < ($1.name ?? "\u{10FFFF}\($1.id.text)")
         }
     }()
     @State private var sessionKind: DefaultSessionKind = .indefinite
@@ -442,6 +458,37 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
+                if inputField == .usbDevice {
+                    LabeledContent("Device") {
+                        HStack {
+                            TextField("05ac:024f", text: $usbDeviceText)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body.monospaced())
+                            // The third outing for the same bargain: pick from
+                            // what is actually attached, but leave the field
+                            // editable, because the point of this trigger is a
+                            // device that is not plugged in *yet*.
+                            Menu("Attached…") {
+                                ForEach(attachedUSBDevices, id: \.id) { device in
+                                    Button(device.name ?? device.id.text) {
+                                        usbDeviceText = device.id.text
+                                    }
+                                }
+                            }
+                            .fixedSize()
+                            .disabled(attachedUSBDevices.isEmpty)
+                        }
+                    }
+                    Text("Matched on the device's vendor and product ID, not its name: names are neither unique nor stable, and two identical dongles share one. Pick from “Attached…” rather than typing — the IDs are hexadecimal.")
+                        .settingsFootnote()
+
+                    if let problem = TriggerCondition.usbDeviceProblem(usbDeviceText) {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
+                }
+
                 // The VPN condition has no field to fill in, so this footnote is
                 // the only place its one limitation can be said at the moment the
                 // rule is being written. A rule that looks correct and never
@@ -497,7 +544,7 @@ private struct AddTriggerSheet: View {
     /// is one: a new condition must *state* which field it wants. A chain of
     /// equality tests answers "none" on its author's behalf, silently, and the
     /// result is a sheet whose Add button is enabled with nothing filled in.
-    private enum InputField { case app, process, volume, subnet, none }
+    private enum InputField { case app, process, volume, subnet, usbDevice, none }
 
     private var inputField: InputField {
         switch conditionKind {
@@ -508,6 +555,7 @@ private struct AddTriggerSheet: View {
         case .processRunning: return .process
         case .volumeMounted: return .volume
         case .onSubnet: return .subnet
+        case .usbDevicePresent: return .usbDevice
         // `.vpnActive` names no tunnel — see `VPNObserving` — so there is
         // nothing to fill in, exactly like the display and power conditions.
         case .externalDisplayConnected, .acPowerConnected, .vpnActive: return .none
@@ -522,6 +570,8 @@ private struct AddTriggerSheet: View {
         case .volumeMounted: return !volumeName.isEmpty
         case .onSubnet:
             return !subnetCIDR.isEmpty && TriggerCondition.subnetProblem(subnetCIDR) == nil
+        case .usbDevicePresent:
+            return !usbDeviceText.isEmpty && TriggerCondition.usbDeviceProblem(usbDeviceText) == nil
         case .externalDisplayConnected, .acPowerConnected, .vpnActive: return true
         }
     }
@@ -536,6 +586,13 @@ private struct AddTriggerSheet: View {
         case .volumeMounted: return .volumeMounted(name: volumeName)
         case .onSubnet: return .onSubnet(cidr: subnetCIDR)
         case .vpnActive: return .vpnActive
+        case .usbDevicePresent:
+            // The Add button is disabled unless this parses, so the fallback is
+            // unreachable from the keyboard; it is here because `condition` is
+            // also read to build the binding footnote while the field is still
+            // half-typed, and that footnote names no device.
+            let device = USBDeviceID(text: usbDeviceText) ?? USBDeviceID(vendorID: 0, productID: 0)
+            return .usbDevicePresent(vendorID: device.vendorID, productID: device.productID)
         }
     }
 

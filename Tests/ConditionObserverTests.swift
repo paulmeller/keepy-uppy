@@ -1,6 +1,8 @@
 import XCTest
 import AppKit
 import SystemConfiguration
+import IOKit
+import IOKit.usb
 @testable import KeepyUppy
 
 final class CPUBusyWindowTests: XCTestCase {
@@ -819,6 +821,189 @@ final class SCDynamicStoreVPNServiceReaderTests: XCTestCase {
         }
         XCTAssertEqual(SystemVPNObserver().isVPNActive(), .absent,
                        "\(tunnels.sorted()) exist and none of them is a VPN")
+    }
+}
+
+final class USBDeviceIDTests: XCTestCase {
+    func testTheFormsPeopleActuallyWriteAllParseToTheSamePair() throws {
+        let apple = USBDeviceID(vendorID: 0x05ac, productID: 0x024f)
+        for text in ["05ac:024f", "0x05ac:0x024f", "0X05AC:0X024F", "5ac:24f", "05AC:024F"] {
+            XCTAssertEqual(USBDeviceID(text: text), apple, text)
+        }
+    }
+
+    func testTheShapeIsRefusedRatherThanGuessedAt() {
+        for bad in ["", "05ac", "05ac:", ":024f", "::", "05ac:024f:0", "zzzz:024f", "05ac:zzzz",
+                    "05ac024f", "12345:024f", "05ac:12345", " 05ac:024f", "05ac: 024f", "0x:0x"] {
+            XCTAssertNil(USBDeviceID(text: bad), "'\(bad)' is not a device identifier")
+        }
+    }
+
+    /// Zero-padded, lowercase, four digits each — the form every USB tool
+    /// prints, so a value copied out of one of them goes straight back in.
+    func testTheTextFormIsPaddedAndRoundTrips() {
+        XCTAssertEqual(USBDeviceID(vendorID: 0x05ac, productID: 0x024f).text, "0x05ac:0x024f")
+        XCTAssertEqual(USBDeviceID(vendorID: 0, productID: 0).text, "0x0000:0x0000")
+        XCTAssertEqual(USBDeviceID(vendorID: 0xffff, productID: 0xffff).text, "0xffff:0xffff")
+        for id in [USBDeviceID(vendorID: 0x05ac, productID: 0x024f),
+                   USBDeviceID(vendorID: 0, productID: 0xbeef),
+                   USBDeviceID(vendorID: 0xffff, productID: 1)] {
+            XCTAssertEqual(USBDeviceID(text: id.text), id)
+        }
+    }
+
+    /// Hexadecimal always, with no decimal fallback — stated as a test so that
+    /// nobody "helpfully" adds one. `1452:591` is the decimal spelling of
+    /// Apple's `05ac:024f`, and it must **not** parse to the same pair: there
+    /// is nothing in the string to tell the two readings apart, so guessing
+    /// would silently produce a rule for a different device.
+    func testTheDecimalSpellingIsNotQuietlyAccepted() {
+        XCTAssertNotEqual(USBDeviceID(text: "1452:591"), USBDeviceID(vendorID: 0x05ac, productID: 0x024f))
+        XCTAssertEqual(USBDeviceID(text: "1452:591"), USBDeviceID(vendorID: 0x1452, productID: 0x0591))
+    }
+}
+
+final class USBDeviceObserverContractTests: XCTestCase {
+    private final class CountingReader: USBDeviceReader {
+        let result: USBDeviceReading
+        private(set) var reads = 0
+        init(_ result: USBDeviceReading) { self.result = result }
+        func read() -> USBDeviceReading {
+            reads += 1
+            return result
+        }
+    }
+
+    private func device(_ text: String, name: String? = nil) -> AttachedUSBDevice {
+        AttachedUSBDevice(id: USBDeviceID(text: text)!, name: name)
+    }
+
+    func testAFailedEnumerationIsUndeterminedRatherThanUnplugged() {
+        XCTAssertEqual(SystemUSBDeviceObserver(reader: CountingReader(.unavailable))
+                        .isPresent(vendorID: 0x05ac, productID: 0x024f), .undetermined,
+                       "a registry that could not be enumerated says nothing about what is plugged in")
+    }
+
+    /// **The deliberate difference from `SystemMountedVolumeObserver`, and the
+    /// same call `SystemNetworkAddressObserver` makes.** A laptop with nothing
+    /// plugged into it genuinely has no USB devices — measured: three host
+    /// controllers and zero devices on the machine this was written on, agreed
+    /// by `ioreg` and `system_profiler`. There is no always-present member to
+    /// make emptiness impossible, the way `/` is for volumes.
+    func testAnEmptyUSBTreeIsAConfidentNegativeRatherThanAFailure() {
+        XCTAssertEqual(SystemUSBDeviceObserver(reader: CountingReader(.attached([])))
+                        .isPresent(vendorID: 0x05ac, productID: 0x024f), .absent)
+    }
+
+    /// **Both** identifiers, not either. Matching the vendor alone would hold a
+    /// Mac awake for any peripheral from the same manufacturer.
+    func testBothIdentifiersHaveToMatch() {
+        let observer = SystemUSBDeviceObserver(reader: CountingReader(
+            .attached([device("05ac:024f", name: "Magic Keyboard")])))
+        XCTAssertEqual(observer.isPresent(vendorID: 0x05ac, productID: 0x024f), .present)
+        XCTAssertEqual(observer.isPresent(vendorID: 0x05ac, productID: 0x0250), .absent,
+                       "same vendor, different product")
+        XCTAssertEqual(observer.isPresent(vendorID: 0x1234, productID: 0x024f), .absent,
+                       "same product id, different vendor")
+    }
+
+    /// The name plays no part in matching — two identical dongles report the
+    /// same one, and plenty of devices report none.
+    func testANamelessDeviceStillMatches() {
+        let observer = SystemUSBDeviceObserver(reader: CountingReader(
+            .attached([device("05ac:024f", name: nil)])))
+        XCTAssertEqual(observer.isPresent(vendorID: 0x05ac, productID: 0x024f), .present)
+    }
+
+    func testOneObserverEnumeratesAtMostOncePerTick() {
+        let reader = CountingReader(.attached([device("05ac:024f")]))
+        let observer = SystemUSBDeviceObserver(reader: reader)
+        for _ in 1...20 {
+            _ = observer.isPresent(vendorID: 0x05ac, productID: 0x024f)
+            _ = observer.isPresent(vendorID: 0xdead, productID: 0xbeef)
+        }
+        XCTAssertEqual(reader.reads, 1)
+    }
+
+    func testANewObserverEnumeratesAgain() {
+        let reader = CountingReader(.attached([]))
+        _ = SystemUSBDeviceObserver(reader: reader).isPresent(vendorID: 1, productID: 2)
+        _ = SystemUSBDeviceObserver(reader: reader).isPresent(vendorID: 1, productID: 2)
+        XCTAssertEqual(reader.reads, 2)
+    }
+}
+
+/// The live IOKit reader, against this Mac's real USB tree.
+///
+/// **The machine this was written on had nothing plugged in**, so the "a real
+/// device appears with readable identifiers" half is a manual-checklist item
+/// rather than a test — see `.superpowers/sdd/plan5-device-research.md`, which
+/// records how the enumeration machinery and the device class were established
+/// instead (the same code path against a class with instances, and ten shipping
+/// kexts that declare `IOUSBHostDevice` as their provider). These pin what is
+/// true whatever is attached.
+final class IOKitUSBDeviceReaderTests: XCTestCase {
+    private func attached() throws -> [AttachedUSBDevice] {
+        guard case .attached(let devices) = IOKitUSBDeviceReader().read() else {
+            throw XCTSkip("the USB tree could not be enumerated, which is the .unavailable case")
+        }
+        return devices
+    }
+
+    /// The class name, pinned. `kIOUSBDeviceClassName` no longer exists in this
+    /// SDK, and the near-miss is not hypothetical: `IOUSBHostController` matches
+    /// **nothing** on Apple Silicon despite three host controllers being
+    /// present, because the class chain runs through `AppleUSBHostController`.
+    func testTheClassNameIsTheOneThisSDKStillHas() {
+        XCTAssertEqual(kIOUSBHostDeviceClassName, "IOUSBHostDevice")
+    }
+
+    /// The two property names, quoted from `IOUSBHostFamilyDefinitions.h`. A
+    /// typo in either would make every device report no identifiers, which this
+    /// reader treats as a per-device shortfall — so the observer would answer
+    /// `.absent` forever rather than failing loudly.
+    func testThePropertyNamesAreTheOnesIOKitPublishes() {
+        XCTAssertEqual(IOKitUSBDeviceReader.vendorIDProperty, kUSBHostMatchingPropertyVendorID)
+        XCTAssertEqual(IOKitUSBDeviceReader.productIDProperty, kUSBHostMatchingPropertyProductID)
+    }
+
+    /// A Mac with nothing plugged in is `.attached([])`, not `.unavailable` —
+    /// the read has to *complete* whatever the answer is. This runs every 5s
+    /// for as long as the agent lives.
+    func testTheLiveReadCompletes() throws {
+        _ = try attached()
+    }
+
+    /// Whatever is attached, every device it reports must be one a rule could
+    /// actually name: identifiers inside `UInt16`, and a name that is either
+    /// absent or non-empty rather than a blank string that would render as a
+    /// nameless row.
+    func testEveryDeviceReportedIsOneARuleCouldName() throws {
+        for device in try attached() {
+            XCTAssertEqual(USBDeviceID(text: device.id.text), device.id, device.id.text)
+            if let name = device.name { XCTAssertFalse(name.isEmpty, device.id.text) }
+        }
+    }
+
+    /// The live observer agrees with the live reader — the join the
+    /// memoization could break — and a made-up pair is a confident negative
+    /// rather than a failure.
+    func testTheLiveObserverAgreesWithTheLiveReader() throws {
+        let devices = try attached()
+        let observer = SystemUSBDeviceObserver()
+        for device in devices {
+            XCTAssertEqual(observer.isPresent(vendorID: device.id.vendorID,
+                                              productID: device.id.productID), .present,
+                           device.id.text)
+        }
+        XCTAssertEqual(SystemUSBDeviceObserver().isPresent(vendorID: 0xdead, productID: 0xbeef), .absent,
+                       "a successful enumeration that found no match is a confident negative")
+    }
+
+    /// The display helper's fallback, against the live tree: a pair nothing can
+    /// be reporting renders as its identifiers rather than as an empty string.
+    func testTheDisplayHelperFallsBackToTheIdentifiers() {
+        XCTAssertEqual(usbDeviceDisplayName(vendorID: 0xdead, productID: 0xbeef), "0xdead:0xbeef")
     }
 }
 

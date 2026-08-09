@@ -33,6 +33,11 @@ enum TriggerCondition: Codable, Equatable {
     /// what counts as a VPN, why "a `utun` exists" is not it, and the one
     /// class of tunnel this cannot see. Binds its session's lifetime.
     case vpnActive
+    /// A USB device with these identifiers is attached. Stored as vendor and
+    /// product ID rather than as a name — see `USBDeviceID` — and the Add sheet
+    /// fills them in from what is plugged in right now, so nobody types hex.
+    /// Binds its session's lifetime.
+    case usbDevicePresent(vendorID: UInt16, productID: UInt16)
 
     /// Why a `.processRunning` name can never match anything, or `nil` if it
     /// can. Lives here rather than inside the Add-trigger sheet so it is
@@ -77,6 +82,22 @@ enum TriggerCondition: Codable, Equatable {
         return "Enter an IPv4 address or block, like 192.168.1.0/24 or 192.168.1.50 — "
             + "anything else can never match."
     }
+
+    /// Why a `.usbDevicePresent` value can never match anything, or `nil` if it
+    /// can. `subnetProblem`'s sibling, and it exists for the same two reasons:
+    /// the rule has one statement, and that statement is testable without a UI.
+    ///
+    /// The empty field is `nil` — incomplete, not wrong — exactly as it is
+    /// there. Everything else gets the same sentence, because unlike an IPv6
+    /// address there is no *interesting* way to be wrong here: the value is
+    /// four hex digits, a colon, four hex digits, and anything that is not that
+    /// shape is a typo rather than a different kind of correct.
+    static func usbDeviceProblem(_ text: String) -> String? {
+        guard !text.isEmpty else { return nil }
+        guard USBDeviceID(text: text) == nil else { return nil }
+        return "Enter a vendor and product ID in hexadecimal, like 05ac:024f — "
+            + "anything else can never match. Use the “Attached…” menu to fill this in from a device that is plugged in."
+    }
 }
 
 /// The *kind* of a `TriggerCondition`, without its associated value.
@@ -100,7 +121,7 @@ enum TriggerCondition: Codable, Equatable {
 /// user actually typed.
 enum TriggerConditionKind: String, CaseIterable, Identifiable {
     case appLaunched, externalDisplayConnected, acPowerConnected, processRunning
-    case appFrontmost, volumeMounted, onSubnet, vpnActive
+    case appFrontmost, volumeMounted, onSubnet, vpnActive, usbDevicePresent
 
     var id: String { rawValue }
 
@@ -166,10 +187,19 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     ///   an address, a VPN that reconnects mid-session is *reported* as down
     ///   for at most the reconnection, which the two-consecutive-negatives
     ///   debounce absorbs at 5s a tick.
+    /// * `.usbDevicePresent` — **yes.** A device's presence is as stable a fact
+    ///   as an external display's, and "keep this Mac awake while the backup
+    ///   dongle is plugged in" is the request as people state it. The contrast
+    ///   that decided it is the condition that was cut alongside: a Bluetooth
+    ///   *connection* flaps by design — headphones idle-disconnect, a mouse
+    ///   sleeps, a phone wanders out of range — and nothing cheap tells "powered
+    ///   down to save battery" from "left". A lifetime bound on that would end
+    ///   sessions for reasons a user experiences as random. A USB cable is
+    ///   either in or out.
     var bindsSessionLifetime: Bool {
         switch self {
         case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost: return false
-        case .processRunning, .volumeMounted, .onSubnet, .vpnActive: return true
+        case .processRunning, .volumeMounted, .onSubnet, .vpnActive, .usbDevicePresent: return true
         }
     }
 
@@ -186,6 +216,7 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
         case .volumeMounted: return .volumeMounted(name: "Backup")
         case .onSubnet: return .onSubnet(cidr: "192.168.1.0/24")
         case .vpnActive: return .vpnActive
+        case .usbDevicePresent: return .usbDevicePresent(vendorID: 0x05ac, productID: 0x024f)
         }
     }
 }
@@ -202,6 +233,7 @@ extension TriggerCondition {
         case .volumeMounted: return .volumeMounted
         case .onSubnet: return .onSubnet
         case .vpnActive: return .vpnActive
+        case .usbDevicePresent: return .usbDevicePresent
         }
     }
 
@@ -228,6 +260,8 @@ extension TriggerCondition {
             return .whileOnSubnet(cidr: cidr)
         case .vpnActive:
             return .whileVPNActive
+        case .usbDevicePresent(let vendorID, let productID):
+            return .whileUSBDevicePresent(vendorID: vendorID, productID: productID)
         }
     }
 }
@@ -626,6 +660,9 @@ func triggersToFire(
             return observers.networkAddress.isOnSubnet(subnet).isConfidentlyPresent
         case .vpnActive:
             return observers.vpn.isVPNActive().isConfidentlyPresent
+        case .usbDevicePresent(let vendorID, let productID):
+            return observers.usbDevice.isPresent(vendorID: vendorID,
+                                                 productID: productID).isConfidentlyPresent
         }
     }
 }
@@ -636,8 +673,9 @@ func triggersToFire(
 ///
 /// A condition that binds ignores `defaultKind` entirely. It is still stored on
 /// the rule (the Settings UI needs somewhere to persist it, and the schema
-/// didn't need to change), but for each of the four binding conditions —
-/// `.processRunning`, `.volumeMounted`, `.onSubnet`, `.vpnActive` — ending the session when
+/// didn't need to change), but for each of the five binding conditions —
+/// `.processRunning`, `.volumeMounted`, `.onSubnet`, `.vpnActive`,
+/// `.usbDevicePresent` — ending the session when
 /// the thing being watched goes away, rather than after some picked duration,
 /// is the entire reason to use that trigger over a plain `--for`. The Add
 /// sheet hides the duration picker for exactly these conditions rather than

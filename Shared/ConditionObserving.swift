@@ -9,7 +9,7 @@ import Foundation
 // (SystemAppRunningObserver, SystemFrontmostAppObserver,
 // SystemDisplayObserver, SystemProcessRunningObserver,
 // SystemMountedVolumeObserver, SystemNetworkAddressObserver,
-// SystemVPNObserver, SystemCPUBusyObserver) stays in
+// SystemVPNObserver, SystemUSBDeviceObserver, SystemCPUBusyObserver) stays in
 // Agent/ConditionObservers.swift.
 
 /// One observation of a condition, including the answer a `Bool` return type
@@ -182,6 +182,30 @@ protocol VPNObserving {
     func isVPNActive() -> ConditionReading
 }
 
+/// Whether a USB device with these identifiers is attached right now.
+///
+/// Matched on `idVendor`/`idProduct` rather than on the device's name, for the
+/// reason `USBDeviceID` gives at length: names are neither unique nor stable,
+/// and the rule has to keep working across a firmware update and a second
+/// identical dongle.
+///
+/// A device's presence is as stable a fact as an external display's — it does
+/// not flicker — which is why `.usbDevicePresent` binds its session's lifetime
+/// (`TriggerConditionKind.bindsSessionLifetime`) where a Bluetooth *connection*
+/// would not have.
+///
+/// **Bluetooth is deliberately not here.** It was specified alongside this and
+/// was cut on the research rather than built: `bluetoothd` enforces
+/// `kTCCServiceBluetoothAlways` and can raise the dialog, neither the app nor
+/// the agent carries a Bluetooth usage description, and the agent is a
+/// background LaunchAgent whose worst case is not a dead condition but
+/// termination — taking every other trigger with it. The whole argument, and
+/// the one experiment that would settle it, are in
+/// `.superpowers/sdd/plan5-device-research.md`.
+protocol USBDeviceObserving {
+    func isPresent(vendorID: UInt16, productID: UInt16) -> ConditionReading
+}
+
 /// Lives here with the other three rather than in
 /// Agent/ConditionObservers.swift (where it used to sit, on the grounds that
 /// nothing outside the agent evaluates CPU-busy conditions) so that the whole
@@ -255,6 +279,7 @@ struct ObserverSet {
     var mountedVolume: MountedVolumeObserving
     var networkAddress: NetworkAddressObserving
     var vpn: VPNObserving
+    var usbDevice: USBDeviceObserving
     var acPower: ConditionReading
     var cpuBusy: CPUBusyReading
 }

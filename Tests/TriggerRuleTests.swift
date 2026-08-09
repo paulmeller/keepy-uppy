@@ -80,6 +80,21 @@ final class TriggerRuleTests: XCTestCase {
         func isVPNActive() -> ConditionReading { reading }
     }
 
+    /// Answers from a set of attached devices, exactly as the live observer
+    /// does, so the fake exercises the identifier comparison rather than
+    /// standing in for it. `reading` overrides the lot, for the failure case.
+    struct FakeUSBDevice: USBDeviceObserving {
+        let attached: Set<USBDeviceID>
+        var reading: ConditionReading? = nil
+        init(_ texts: [String] = [], reading: ConditionReading? = nil) {
+            attached = Set(texts.compactMap { USBDeviceID(text: $0) })
+            self.reading = reading
+        }
+        func isPresent(vendorID: UInt16, productID: UInt16) -> ConditionReading {
+            reading ?? ConditionReading(attached.contains(USBDeviceID(vendorID: vendorID, productID: productID)))
+        }
+    }
+
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
     }
@@ -100,6 +115,7 @@ final class TriggerRuleTests: XCTestCase {
                       volume: FakeMountedVolume = FakeMountedVolume(mounted: []),
                       network: FakeNetworkAddress = FakeNetworkAddress(),
                       vpn: FakeVPN = FakeVPN(),
+                      usbDevice: FakeUSBDevice = FakeUSBDevice(),
                       acPower: ConditionReading = .absent) -> [TriggerRule] {
         triggersToFire(rules, activeSessions: activeSessions,
                        // No trigger condition consults the CPU sample, so this
@@ -108,7 +124,7 @@ final class TriggerRuleTests: XCTestCase {
                        observers: ObserverSet(appRunning: app, display: display,
                                               processRunning: process, frontmostApp: frontmost,
                                               mountedVolume: volume, networkAddress: network,
-                                              vpn: vpn,
+                                              vpn: vpn, usbDevice: usbDevice,
                                               acPower: acPower, cpuBusy: .undetermined))
     }
 
@@ -268,6 +284,67 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertEqual(sessionKind(firing: r, now: Date()), .whileVPNActive)
     }
 
+    // MARK: - USB devices
+
+    func testUSBDevicePresentFiresWhenThatDeviceIsAttached() {
+        let r = rule(.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+        XCTAssertEqual(fire([r], usbDevice: FakeUSBDevice(["05ac:024f"])).map(\.id), [r.id])
+    }
+
+    /// **Both** identifiers have to match. A vendor's other product is a
+    /// different device, and matching on the vendor alone would hold a Mac
+    /// awake for any Apple peripheral at all.
+    func testUSBDevicePresentDoesNotFireForADifferentProductFromTheSameVendor() {
+        let r = rule(.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+        XCTAssertTrue(fire([r], usbDevice: FakeUSBDevice(["05ac:0250", "1234:024f"])).isEmpty)
+    }
+
+    /// A laptop with nothing plugged in genuinely has no USB devices — the
+    /// same confident negative the network observer makes, and deliberately
+    /// unlike the volume observer, whose empty list means the enumeration
+    /// broke.
+    func testUSBDevicePresentDoesNotFireWithNothingAttachedAtAll() {
+        XCTAssertTrue(fire([rule(.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f))],
+                           usbDevice: FakeUSBDevice([])).isEmpty)
+    }
+
+    /// `IOServiceGetMatchingServices` failing is not "you unplugged it".
+    func testUSBDevicePresentUndeterminedNeverFires() {
+        let r = rule(.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+        XCTAssertTrue(fire([r], usbDevice: FakeUSBDevice(["05ac:024f"], reading: .undetermined)).isEmpty,
+                      "the device really is attached, but the registry read failed")
+    }
+
+    func testUSBDevicePresentBindsItsSessionToTheDevice() {
+        XCTAssertTrue(TriggerConditionKind.usbDevicePresent.bindsSessionLifetime)
+        let r = rule(.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f), kind: .fourHours)
+        XCTAssertEqual(sessionKind(firing: r, now: Date()),
+                       .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+    }
+
+    // MARK: - USB identifier validation
+
+    func testAValidDevicePairHasNoProblem() {
+        for good in ["05ac:024f", "0x05ac:0x024F", "5AC:24f", "0:0", "ffff:ffff"] {
+            XCTAssertNil(TriggerCondition.usbDeviceProblem(good), good)
+        }
+    }
+
+    func testTheEmptyDeviceFieldIsNotYetAnError() {
+        XCTAssertNil(TriggerCondition.usbDeviceProblem(""),
+                     "an empty field is incomplete, not wrong — the Add button is disabled separately")
+    }
+
+    func testADeviceValueThatCanNeverMatchIsRejectedWithASentence() {
+        for bad in ["05ac", "05ac:", ":024f", "05ac:024f:0", "zzzz:024f", "05ac024f",
+                    "12345:024f", "05ac:12345", "05 ac:024f"] {
+            let problem = TriggerCondition.usbDeviceProblem(bad)
+            XCTAssertNotNil(problem, "'\(bad)' can never match and must say so")
+            XCTAssertTrue(problem?.contains("05ac:024f") ?? false,
+                          "the message must give a form that would work: \(problem ?? "nil")")
+        }
+    }
+
     // MARK: - Subnet validation
 
     func testAValidBlockOrAddressHasNoProblem() {
@@ -380,6 +457,10 @@ final class TriggerRuleTests: XCTestCase {
         let vpnRule = rule(.vpnActive)
         XCTAssertTrue(fire([vpnRule], vpn: FakeVPN(.undetermined)).isEmpty,
                       "a network configuration that could not be read is not a connected VPN")
+
+        let usbRule = rule(.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+        XCTAssertTrue(fire([usbRule], usbDevice: FakeUSBDevice(reading: .undetermined)).isEmpty,
+                      "a USB tree that could not be enumerated is not a device being plugged in")
     }
 
     /// The reading, not the fake's backing set, is what decides — proving the
@@ -424,6 +505,7 @@ final class TriggerRuleTests: XCTestCase {
                     mountedVolume: FakeMountedVolume(mounted: [], reading: .present),
                     networkAddress: FakeNetworkAddress(reading: .present),
                     vpn: FakeVPN(.present),
+                    usbDevice: FakeUSBDevice(reading: .present),
                     acPower: .present,
                     // No trigger condition consults the CPU sample today;
                     // `.busy(fraction: 1)` is that reading's analogue of
@@ -440,6 +522,7 @@ final class TriggerRuleTests: XCTestCase {
                     mountedVolume: FakeMountedVolume(mounted: [], reading: .undetermined),
                     networkAddress: FakeNetworkAddress(reading: .undetermined),
                     vpn: FakeVPN(.undetermined),
+                    usbDevice: FakeUSBDevice(reading: .undetermined),
                     acPower: .undetermined,
                     cpuBusy: .undetermined)
     }
