@@ -177,30 +177,83 @@ final class TriggerCopyTests: XCTestCase {
         let labels = TriggerConditionKind.allCases.map(triggerConditionKindLabel)
         for (kind, label) in zip(TriggerConditionKind.allCases, labels) {
             XCTAssertFalse(label.isEmpty, "\(kind) has no label, so its picker row would be blank")
-            XCTAssertFalse(squashed(label).contains(squashed(kind.rawValue)),
+            XCTAssertFalse(wireNameLeaks(kind.rawValue, into: label),
                            "\(kind.rawValue) is a wire name, not a thing to show a user: \(label)")
         }
         XCTAssertEqual(Set(labels).count, labels.count,
                        "two conditions sharing a label are indistinguishable in the picker")
     }
 
-    /// Lowercased with everything that is not a letter or a digit removed, so
-    /// the leak check above sees a wire name however it was prettified on the
-    /// way into a label. It was a plain case-sensitive `contains`, which
-    /// matches only a verbatim paste: `wifiSSID` against a label reading
-    /// "Wi-Fi SSID" slipped through it on both the capitalisation and the
-    /// hyphen, and Plan 5's six conditions are exactly the ones with names
-    /// like that.
+    /// Whether `wireName` survives into `label` as one unbroken run of letters
+    /// and digits — which is what a pasted or interpolated case name always
+    /// looks like, and what English copy about the same subject does not.
     ///
-    /// It remains a heuristic and is deliberately a cheap one. It cannot see a
-    /// label that paraphrases rather than pastes ("A wireless network is
-    /// joined" for `wifiNetwork`), and it sits one character away from a false
-    /// alarm already: `externalDisplayConnected` misses "An external display
-    /// connects" only because the label ends "connects". A label that close to
-    /// its own case name deserves a second look anyway, so that is the right
-    /// side to err on — but read the label before believing the message.
-    private func squashed(_ text: String) -> String {
-        text.lowercased().filter { $0.isLetter || $0.isNumber }
+    /// **Separators in the label are now required, and that is the fix.** This
+    /// used to squash the label too — lowercase it and delete everything that
+    /// was not a letter or a digit — so any label whose words happened to spell
+    /// the case name in order tripped it. That is the natural way to write this
+    /// copy, not a leak. Of ten plausible Plan 5 labels a reviewer tried, five
+    /// false-alarmed: `wifiNetwork`/"A Wi-Fi network is joined",
+    /// `wifiSSID`/"A Wi-Fi SSID matches", `bluetoothDevice`/"A Bluetooth device
+    /// connects", `batteryLevel`/"Battery level is above" and
+    /// `timeOfDay`/"A time of day arrives". The four current cases passed only
+    /// by an accident of English tense and the copula — "An app launche**s**"
+    /// against `appLaunche**d**` — which is not a property that survives six
+    /// more conditions.
+    ///
+    /// It is loosened rather than tuned because of what a failure here provokes:
+    /// the obvious response to "wire name leaked" on correct copy is to reword
+    /// the copy, so a check that cries wolf does not merely waste time, it
+    /// actively degrades the thing it guards.
+    ///
+    /// What it no longer catches, said plainly so nobody rediscovers it as a
+    /// bug: "Wi-Fi SSID" for `wifiSSID`, because the hyphen breaks the run.
+    /// That was this check's motivating catch, and it is arguably a false
+    /// positive anyway — "Wi-Fi SSID" is the term macOS itself shows users, and
+    /// there is no better name for the thing. A paraphrase ("A wireless network
+    /// is joined") was never caught either. This finds a case name that reached
+    /// the UI verbatim, which is the failure that actually happens.
+    private func wireNameLeaks(_ wireName: String, into label: String) -> Bool {
+        let needle = wireName.lowercased().filter { $0.isLetter || $0.isNumber }
+        return label.lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .contains { $0.contains(needle) }
+    }
+
+    /// The heuristic checked against the copy it is about to meet.
+    ///
+    /// These are the labels Plan 5's six conditions want. Every one is correct
+    /// copy with no wire name in it, and five of them failed the previous form
+    /// of the check. Asserting them here, rather than only through the loop
+    /// over `allCases`, means the next attempt to tighten this cannot
+    /// reintroduce the nuisance quietly — it has to turn these red first, with
+    /// the labels in front of it.
+    func testThePickerLabelCheckAcceptsTheCopyPlan5ActuallyWants() {
+        for (wireName, label) in [("wifiNetwork", "A Wi-Fi network is joined"),
+                                  ("wifiSSID", "A Wi-Fi SSID matches"),
+                                  ("bluetoothDevice", "A Bluetooth device connects"),
+                                  ("batteryLevel", "Battery level is above"),
+                                  ("timeOfDay", "A time of day arrives"),
+                                  ("appLaunched", "An app launches"),
+                                  ("externalDisplayConnected", "An external display connects"),
+                                  ("acPowerConnected", "Power is connected"),
+                                  ("processRunning", "A process is running")] {
+            XCTAssertFalse(wireNameLeaks(wireName, into: label),
+                           "\(wireName): \"\(label)\" is copy about the condition, not its wire name")
+        }
+    }
+
+    /// ...and it still catches what it exists for: a case name that reached the
+    /// label verbatim, whatever the capitalisation and wherever it sits.
+    func testThePickerLabelCheckStillCatchesAWireNameThatReachedTheLabel() {
+        for (wireName, label) in [("wifiNetwork", "wifiNetwork"),
+                                  ("wifiNetwork", "Trigger: wifiNetwork"),
+                                  ("wifiNetwork", "WIFINETWORK"),
+                                  ("batteryLevel", "When batteryLevel is above"),
+                                  ("timeOfDay", "timeofday")] {
+            XCTAssertTrue(wireNameLeaks(wireName, into: label),
+                          "\(wireName) reached the label verbatim: \"\(label)\"")
+        }
     }
 
     /// The labels the picker shipped with, pinned. The parallel enum they came
