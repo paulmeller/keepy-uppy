@@ -216,9 +216,21 @@ func menuStatusLine(mine: [Session], others: [Session], now: Date) -> String {
 /// that will one day forget, and a forgotten mode tag is invisible — it looks
 /// exactly like a lid-safe session. `menuAutomaticSuffix` stays separate
 /// because it is genuinely optional trim; this is not.
+///
+/// The tagged single-session row names a **noun** — "Stop this session (lid
+/// open only)", not "Stop keeping awake (lid open only)". A parenthetical after
+/// a bare imperative attaches to the verb, so the latter can be read as "stop
+/// only while the lid is open", which is a statement about the button rather
+/// than about the session. The multi-session form below never had the problem,
+/// because its parenthetical follows a quoted description. The untagged label
+/// is left exactly as it was: it is the overwhelmingly common case, it has no
+/// parenthetical to misparse, and "annotate the exception, not the rule" means
+/// a user who never opens Settings sees the menu unchanged.
 func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> String {
     let tag = menuWakeModeSuffix(session.wakeMode)
-    guard !isOnlyOneOfMine else { return "Stop keeping awake" + tag }
+    guard !isOnlyOneOfMine else {
+        return (tag.isEmpty ? "Stop keeping awake" : "Stop this session") + tag
+    }
     return "Stop “\(remainingTimeText(for: session, now: now).lowercased())”" + tag
 }
 
@@ -375,9 +387,17 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
     }
 }
 
-/// Whose sessions this actually governs. Three of the four clients ignore it:
-/// `keepy-uppy on` chooses per invocation with a flag, and a trigger-started
-/// session is built by `Agent/EvidenceLoopRunner.swift` with no `wakeMode:` at
-/// all, so it is `.clamshell` whatever is stored here. Said as the positive
-/// fact about triggers, which stays true under the union.
-let wakeModeSettingsScopeNote = "Sessions you start from the menu use this. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."
+/// Whose sessions this actually governs, and **when**. Three of the four
+/// clients ignore it: `keepy-uppy on` chooses per invocation with a flag, and a
+/// trigger-started session is built by `Agent/EvidenceLoopRunner.swift` with no
+/// `wakeMode:` at all, so it is `.clamshell` whatever is stored here. Said as
+/// the positive fact about triggers, which stays true under the union.
+///
+/// "from now on" is not filler. A session's mode is fixed when it starts —
+/// nothing here reaches a running one — and someone who switches this picker to
+/// the lid-closed mode expecting their live `.system` session to follow will
+/// shut the lid on a Mac that then sleeps. Two surfaces still tell the truth
+/// (that session's own tag in the menu, and `menuLidCaveat`), so this clause is
+/// a nudge rather than the guard; it is here because it costs three words and
+/// the failure it heads off is the one that loses work.
+let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."

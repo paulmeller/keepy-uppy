@@ -311,14 +311,34 @@ final class WakeModeMenuCopyTests: XCTestCase {
 
     // MARK: - Where the tag actually appears
 
+    /// The tag has to follow a *noun*. "Stop keeping awake (lid open only)" is
+    /// an imperative followed by a parenthetical that grammatically attaches to
+    /// the verb, so it can be read as "stop only while the lid is open" — a
+    /// condition on the button instead of a fact about the session. It is worst
+    /// in the mixed case (`testAConcurrentDefaultSessionSuppressesTheLidLine`),
+    /// where a concurrent clamshell session correctly suppresses `menuLidCaveat`
+    /// and this row is the only mode signal on screen, with nothing above it to
+    /// prime the meaning. The multi-session form is exempt: its parenthetical
+    /// follows a quoted description, which a tag can only qualify.
     func testTheStopButtonCarriesItsSessionSMode() {
         let plain = menuStopLabel(for: session(.clamshell), isOnlyOneOfMine: true, now: t0)
         XCTAssertEqual(plain, "Stop keeping awake", "the default mode adds nothing")
 
         let tagged = menuStopLabel(for: session(.system), isOnlyOneOfMine: true, now: t0)
-        XCTAssertTrue(tagged.hasPrefix("Stop keeping awake"), tagged)
-        XCTAssertTrue(tagged.contains("lid"),
-                      "a session of your own can be non-default now that Settings can choose: \(tagged)")
+        XCTAssertEqual(tagged, "Stop this session" + menuWakeModeSuffix(.system),
+                       "a session of your own can be non-default now that Settings can choose")
+        XCTAssertTrue(tagged.contains("lid"), tagged)
+        XCTAssertFalse(tagged.hasPrefix("Stop keeping awake"),
+                       "the tag must not sit against the verb, where it reads as a condition on "
+                       + "stopping rather than a fact about the session: \(tagged)")
+    }
+
+    /// The multi-session form keeps the shape it already had — the noun it
+    /// needs is the quoted description — so this pins that the fix above did
+    /// not spread to a row that never had the problem.
+    func testTheMultiSessionStopLabelStillQualifiesItsQuotedDescription() {
+        let tagged = menuStopLabel(for: session(.system), isOnlyOneOfMine: false, now: t0)
+        XCTAssertEqual(tagged, "Stop “indefinite”" + menuWakeModeSuffix(.system))
     }
 
     func testAForeignSessionCarriesItsModeToo() {
@@ -485,11 +505,19 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
         }
     }
 
-    /// The pane sets a default for one client among four. Someone reading it
-    /// must not conclude that a `keepy-uppy on` in a terminal, or a trigger
-    /// firing while they are away, will follow it — neither does.
+    /// The pane sets a default for one client among four, and only for that
+    /// client's *future* sessions. Someone reading it must not conclude that a
+    /// `keepy-uppy on` in a terminal, or a trigger firing while they are away,
+    /// will follow it — neither does — nor that the session already running
+    /// changed mode when they moved the picker. A session's mode is fixed at
+    /// start; the picker cannot reach it. That last misreading is the one that
+    /// loses work: it ends with someone shutting the lid on a Mac that then
+    /// sleeps.
     func testTheScopeNoteSaysWhichSessionsThisActuallyGoverns() {
         XCTAssertTrue(wakeModeSettingsScopeNote.contains("menu"), wakeModeSettingsScopeNote)
+        XCTAssertTrue(wakeModeSettingsScopeNote.contains("from now on"),
+                      "the scope has to be prospective on its face, not merely inferable: "
+                      + wakeModeSettingsScopeNote)
         XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("command line"),
                       wakeModeSettingsScopeNote)
         // Trigger-started sessions are built by `Agent/EvidenceLoopRunner.swift`

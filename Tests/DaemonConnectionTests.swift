@@ -95,18 +95,50 @@ final class DaemonConnectionRequestTests: XCTestCase {
         }
     }
 
-    /// A whole-struct comparison rather than a field list, for the same reason
-    /// `SessionEngineTests`' renewal test is one: a field added later is
-    /// covered without anyone remembering to add it here.
+    /// A whole-struct comparison rather than a field list, so a field the
+    /// request sets that it has no business setting fails here, and so does a
+    /// field it drops — **for the fields pinned below**.
+    ///
+    /// That qualifier is the whole point, and this comment used to omit it. It
+    /// claimed the shape gave what `SessionEngineTests`' renewal test gives:
+    /// "a field added later is covered without anyone remembering to add it
+    /// here". It does not, and cannot. The expectation is built with the *same*
+    /// memberwise initialiser as the value under test, so a field added later
+    /// with a default that nobody names below is absent from both sides and
+    /// compares default-to-default — silently uncovered. Defaulted fields are
+    /// exactly the class that has silently broken this repo four times, and
+    /// `Session.renewed(until:)`'s comment lists the three that carry one
+    /// today (`ownerUID`, `triggerID`, `wakeMode`).
+    ///
+    /// So: adding a defaulted field to `Session` means naming it here with a
+    /// **non-default** value, and nothing but this sentence will say so.
+    /// `wakeMode` is `.systemAndDisplay` rather than `.clamshell` for that
+    /// reason, and the server-owned fields are asserted against literals rather
+    /// than read back off `request` — `ownerUID: request.ownerUID` compared the
+    /// value to itself, so the app could have claimed any UID it liked and this
+    /// test would have stayed green.
     func testTheRequestIsExactlyTheClientChosenFieldsAndNothingElse() {
+        let until = t0.addingTimeInterval(3600)
         let request = DaemonConnection.requestedSession(
-            kind: .duration(until: t0.addingTimeInterval(3600)), wakeMode: .systemAndDisplay,
+            kind: .duration(until: until), wakeMode: .systemAndDisplay,
             persistence: .detached, origin: .trigger, now: t0)
+
         // `id`, `owner`, `ownerUID` and `startedAt` are all overwritten by the
-        // daemon, so the request's own values for them are not the contract —
-        // everything else is.
-        XCTAssertEqual(request, Session(id: request.id, kind: .duration(until: t0.addingTimeInterval(3600)),
-                                        owner: request.owner, ownerUID: request.ownerUID,
+        // daemon (`Session.authorized(id:owner:ownerUID:startedAt:)`), so the
+        // request's values for them are not the contract with the daemon — but
+        // they are still what this app puts on the wire, and a client that
+        // tries to mint a session as another user is worth failing on even
+        // though the daemon would ignore the attempt.
+        XCTAssertEqual(request.owner, ClientID(rawValue: "app"))
+        XCTAssertEqual(request.ownerUID, 0,
+                       "the app must not claim a UID; only the daemon can establish one")
+        XCTAssertEqual(request.startedAt, t0)
+        // `id` is the one server-owned field with no literal to compare
+        // against — it is a fresh UUID per request by design. It is also the
+        // one that cannot be dropped by accident: it has no memberwise
+        // default, so omitting it is a compile error.
+        XCTAssertEqual(request, Session(id: request.id, kind: .duration(until: until),
+                                        owner: ClientID(rawValue: "app"), ownerUID: 0,
                                         persistence: .detached, origin: .trigger, startedAt: t0,
                                         triggerID: nil, wakeMode: .systemAndDisplay))
     }
