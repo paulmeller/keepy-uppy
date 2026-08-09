@@ -82,6 +82,25 @@ enum SessionKind: Equatable, Codable {
 enum SessionPersistence: String, Codable { case clientBound, detached }
 enum SessionOrigin: String, Codable { case manual, trigger }
 
+/// How a session keeps the Mac awake. Deliberately *not* a single flag:
+/// `SleepDisabled` is the only thing that survives a lid close, and
+/// assertions are the only things that can be selective about the display.
+/// See spec §1 — the two mechanisms are complementary and the daemon holds
+/// both.
+enum WakeMode: String, Codable, Equatable, CaseIterable {
+    /// Idle system sleep prevented; the display may sleep. The mode most
+    /// long-running headless work actually wants.
+    case system
+    /// Idle system *and* display sleep prevented.
+    case systemAndDisplay
+    /// Awake with the lid shut. The only mode needing the global setting,
+    /// and the only one that works in clamshell.
+    case clamshell
+
+    var requiresSleepDisabled: Bool { self == .clamshell }
+    var holdsDisplayAwake: Bool { self == .systemAndDisplay }
+}
+
 struct Session: Equatable, Codable, Identifiable {
     let id: UUID
     let kind: SessionKind
@@ -99,10 +118,16 @@ struct Session: Equatable, Codable, Identifiable {
     /// (Shared/TriggerRule.swift) recognize a rule already represented by a
     /// live session and not refire it every tick.
     let triggerID: UUID?
+    /// How this session keeps the Mac awake. Defaults to `.clamshell` in
+    /// both the memberwise initialiser and decoding: every session that
+    /// exists today is a clamshell session, and a payload stored before this
+    /// field existed must decode to the strongest mode, not silently become
+    /// weaker.
+    let wakeMode: WakeMode
 
     init(id: UUID, kind: SessionKind, owner: ClientID, ownerUID: UInt32 = 0,
          persistence: SessionPersistence, origin: SessionOrigin,
-         startedAt: Date, triggerID: UUID? = nil) {
+         startedAt: Date, triggerID: UUID? = nil, wakeMode: WakeMode = .clamshell) {
         self.id = id
         self.kind = kind
         self.owner = owner
@@ -111,5 +136,30 @@ struct Session: Equatable, Codable, Identifiable {
         self.origin = origin
         self.startedAt = startedAt
         self.triggerID = triggerID
+        self.wakeMode = wakeMode
+    }
+
+    // `wakeMode` needs a *decode-time* default, not just an initializer
+    // default: Swift's synthesized Decodable requires a non-Optional
+    // stored property's key to be present unless the property itself
+    // carries a declaration-site default (`let wakeMode: WakeMode =
+    // .clamshell`) — and that alternative is worse, because Swift then
+    // excludes the property from decoding entirely, so a *real*,
+    // non-clamshell `wakeMode` would silently come back as `.clamshell`
+    // after any encode/decode round trip. A hand-written `init(from:)`
+    // with `decodeIfPresent(...) ?? .clamshell` is the only way to get
+    // "absent key defaults to clamshell" and "present key decodes
+    // faithfully" at the same time. `encode(to:)` is left to synthesis.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        kind = try container.decode(SessionKind.self, forKey: .kind)
+        owner = try container.decode(ClientID.self, forKey: .owner)
+        ownerUID = try container.decode(UInt32.self, forKey: .ownerUID)
+        persistence = try container.decode(SessionPersistence.self, forKey: .persistence)
+        origin = try container.decode(SessionOrigin.self, forKey: .origin)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        triggerID = try container.decodeIfPresent(UUID.self, forKey: .triggerID)
+        wakeMode = try container.decodeIfPresent(WakeMode.self, forKey: .wakeMode) ?? .clamshell
     }
 }
