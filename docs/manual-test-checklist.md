@@ -51,8 +51,10 @@ it lands in `MenuContent`'s `others` list, which renders
 `menuForeignSessionLabel` and never `menuAutomaticSuffix`. So it reads
 `… — started elsewhere`, indistinguishable from the CLI's or another user's
 session. That a user cannot tell an automatic session from a foreign one is a
-real gap, and it belongs to Plan 5 (trigger expansion); it is not something to
-fix by editing this list.
+real gap. Plan 5 was where it was expected to land and did not take it — that
+plan added five conditions and left the labelling exactly as it was — so the
+gap is still open, with five more ways to reach it, and it is still not
+something to fix by editing this list.
 
 - [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and shows up in the menu as an unclickable row reading `Indefinite — started elsewhere` (or `Xh Ym left — started elsewhere` for a timed `defaultKind`), and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
 - [ ] A trigger does not fire again while its session is still active (leave the triggering app running, confirm no duplicate session appears)
@@ -62,6 +64,21 @@ fix by editing this list.
 - [ ] Typing a *path* (`/opt/homebrew/bin/claude`) rather than a name into the process field is rejected in the sheet with an explanation, rather than being accepted as a rule that could never fire
 - [ ] A process-running rule for a `node`/`bun`-wrapped CLI (`claude`, installed by npm as a `claude` symlink to `claude.exe`) really does fire — this is the case `p_comm` matching alone could not see, since the kernel records `claude.exe` there and only `argv[0]` ever says `claude`
 - [ ] `keepy-uppy on --while-process <name>` behaves like `--while-app`, ending within ~10s of that process exiting
+
+**The frontmost-app, volume and network conditions.** All three read something
+a test target has no way to hold still: which app owns the front, what is
+mounted, and what address this Mac holds. The observers are unit-tested against
+fake readers; what follows is the half that needs a real desk.
+
+- [ ] Add an "An app comes to the front" rule for an app you can leave running. Launch it and leave it *behind* another window: no session starts. Now click it to the front: a session appears in the menu within ~5s. Send it to the back again and the session keeps running — this condition is a starting gun, not a lifetime, and its row in Settings → Triggers should say `When <app> comes to the front` over `Starts a session that keeps this Mac awake …`, never a "While …" line
+- [ ] With that rule live, lock the screen (or fast-user-switch to another account) for a minute and come back. No session was started while the screen was locked, and any session that was already running is still running — `frontmostApplication` is `nil` in both states, and that has to read as "I don't know", never as "the app went away"
+- [ ] `keepy-uppy on --while-volume <name>` with an external drive attached: start a large copy *to* that drive and confirm the session does not end while it runs, then eject the drive and confirm the session ends within ~10s (two 5s ticks)
+- [ ] Attach an enclosure whose filesystem does **not** mount (an unformatted or unreadable disk, or one you decline to initialise): a `volumeMounted` rule for it does not fire. The condition is "mounted", not "plugged in" — that is what `--while-usb` is for
+- [ ] Open Settings → Triggers → Add → "A volume is mounted" and drop the "Mounted…" menu: it names exactly what Finder's sidebar names — `Macintosh HD` plus whatever is plugged in — and none of `VM`, `Preboot`, `Update`, `xART`, `iSCPreboot`, `Hardware` or a simulator runtime. A hidden volume offered here is a rule somebody can write and never understand
+- [ ] `keepy-uppy on --while-subnet <your block>` survives a Wi-Fi roam between two access points on the same network (walk between them, or toggle between two bands of the same SSID), and ends within ~10s of joining a different network entirely
+- [ ] Turning Wi-Fi off entirely ends a `--while-subnet` session within ~10s; so does unplugging Ethernet on a wired Mac. Neither should take longer than two ticks, and neither should end a `--for` session running alongside it
+- [ ] With a `--while-subnet` session live on a Wi-Fi block, dock to Ethernet on the same network: the session **survives**, because the block matches whichever interface holds the address. This is the behaviour a Wi-Fi-name trigger could not have had, and it is the reason there isn't one
+- [ ] Install a build from before these conditions existed over one from after (or the reverse), open Settings → Triggers, change something unrelated, and confirm the rules the older build could not read are still there when the newer one comes back. The older build hides them and counts them; it must not write them away
 
 **The VPN condition — the one half of it no test can reach.**
 `SCDynamicStoreVPNServiceReader` was verified with a real (split-tunnel) VPN
@@ -74,6 +91,7 @@ measurements. These two items are the missing half.
 
 - [ ] With a VPN connected, `keepy-uppy on --while-vpn` starts a session; disconnecting the VPN ends it within ~10s (two 5s ticks), and it does **not** end when the VPN merely reconnects
 - [ ] With no VPN connected, a `vpnActive` trigger does nothing; connecting one starts a session within ~5s reading `While a VPN is connected — started elsewhere`, and it survives a Wi-Fi hop that leaves the tunnel up
+- [ ] Turn **iCloud Private Relay on** with no VPN connected, wait a minute, and confirm a `vpnActive` trigger stays quiet and `keepy-uppy on --while-vpn` refuses to stay up. Private Relay adds another `utun` to the eight this Mac already carries, so this is the false-positive check that decides whether the condition is honest rather than merely permanently true
 - [ ] On a Mac with **no VPN configured at all**, a live `--while-vpn` session ends rather than hanging — an empty answer is a confident negative here, deliberately unlike the volume observer's
 - [ ] The Add-trigger sheet's "A VPN is connected" row shows the limitation footnote naming wg-quick/openvpn/Tunnelblick, and a tunnel started by one of those really is *not* detected (this is the stated limitation, not a bug to file)
 
@@ -116,6 +134,7 @@ and it covers Ethernet on the same network as well.
 - [ ] Add-trigger sheet → "This Mac is on a network": the footnote says plainly that this is how a Wi-Fi network is named here, and why it is matched by address block rather than by name — a user looking for a Wi-Fi trigger must not be left hunting for one
 - [ ] While on Wi-Fi, "This Mac…" offers the block that Mac's Wi-Fi address sits in, and a rule built from it fires — i.e. the Wi-Fi case really is served by this condition
 - [ ] **Nothing, anywhere in the app, ever raises a Location Services prompt** — including opening the Add sheet on this row, saving a network rule, and letting the agent run with one live
+- [ ] The broader version of that, because the README now promises it: save one rule of **every** condition kind, leave the agent running for an hour with an external drive and a USB device attached, and confirm no privacy dialog of any kind appears (Location, Bluetooth, Files and Folders, removable volumes, Accessibility). Then open System Settings → Privacy & Security and confirm Keepy Uppy appears under nothing but Login Items — a grant that was never asked for still shows up there once something triggers it
 - [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field

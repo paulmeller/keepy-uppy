@@ -86,19 +86,30 @@ keepy-uppy on --while-process claude         # until the process exits
 keepy-uppy on --while-display                # until the external screen is unplugged
 keepy-uppy on --while-ac-power               # until the charger comes out
 keepy-uppy on --while-cpu-busy 30            # until the CPU drops under 30% for 2 min
+keepy-uppy on --while-volume Backup          # until that drive is ejected
+keepy-uppy on --while-subnet 192.168.1.0/24  # until you leave that network
+keepy-uppy on --while-vpn                    # until the tunnel drops
+keepy-uppy on --while-usb 05ac:024f          # until that device is unplugged
 keepy-uppy off                               # stop yours
 keepy-uppy off --all                         # stop everything
 keepy-uppy status --json                     # {"keepingAwake": true}
 keepy-uppy sessions
 ```
 
-The last three end when something stops being true, so they are refused up
-front when it already isn't: `--while-ac-power` wants the charger in when you
-start, and `--while-display` and `--while-cpu-busy` want the per-user agent
-running, since a daemon with no login session can see neither a screen nor a
-CPU. `--while-cpu-busy` takes a whole percentage from 1 to 99, and needs two
-solid minutes below it before it gives up — a lull between test runs won't end
-your session.
+Every `--while-…` session lasts exactly as long as the thing it names, and two
+things are checked before one starts rather than left to end it a tick later.
+`--while-ac-power` wants the charger actually in. Every other `--while-…` wants
+the per-user agent running, since a daemon with no login session can't see a
+screen, a CPU, a volume, an address, a tunnel or a USB port.
+
+`--while-cpu-busy` takes a whole percentage from 1 to 99 and needs two solid
+minutes below it before it gives up — a lull between test runs won't end your
+session. `--while-subnet` takes an address or a block, and matches Ethernet as
+happily as Wi-Fi, so docking doesn't end it. `--while-usb` takes the vendor and
+product ID `system_profiler SPUSBDataType` prints. `--while-vpn` sees any VPN
+macOS itself knows about — System Settings, Tailscale, Cloudflare WARP, a work
+client — but not a `wg-quick` or bare `openvpn` tunnel, which macOS never
+models as a VPN at all.
 
 `on` also takes one flag saying *how* awake, and it combines with any of the
 above:
@@ -134,6 +145,49 @@ them. See [Status](#status).*
 CLI sessions outlive the shell that started them. Menu-bar sessions end when
 you quit the app. That's deliberate — one is for automation, the other is for
 you.
+
+## Or don't type anything at all
+
+Settings → Triggers turns a condition into a standing rule, so the Mac starts
+keeping itself awake without you remembering to ask. Nine conditions, and they
+fall into two groups that behave differently — which is the thing worth knowing
+before you write a rule.
+
+**Five hold a session open for exactly as long as the condition lasts:** a
+process is running, a volume is mounted, this Mac is on a given network, a VPN
+is connected, a USB device is attached. Eject the drive, drop the tunnel or
+unplug the dongle and the session goes with it, the same way `--while-…` does
+from the command line.
+
+**Four are a starting gun:** an app launches, an app comes to the front, an
+external display connects, power is connected. The condition fires the session;
+the session then runs for the duration you picked on the rule, and unplugging
+the display doesn't end it.
+
+The split isn't waiting to be finished. "While this app is frontmost" sounds
+coherent and isn't — frontmost changes the instant you glance at a browser
+window, and a session that ends because you looked away for ten seconds is
+worse than no session; the durable version is `--while-app`, and it's already
+there. The display and power conditions could bind and deliberately don't,
+because rules people have already saved mean "start four hours when I dock",
+and quietly turning those into "…and stop when I undock" would change what
+somebody's Mac does without them asking for it.
+
+There's no Wi-Fi-network trigger and no Bluetooth-device one, and that's also a
+decision. Each needs a privacy grant that a background agent with no window can
+never obtain, and a refused grant doesn't produce an error — it produces a rule
+that looks right and silently never fires. The network condition covers the
+same "while I'm at the office" intent by address block instead, with no
+permission at all, and it keeps working when you dock to Ethernet, which a
+network name never could.
+
+Which leaves something worth saying out loud: **Keepy Uppy asks for no privacy
+permissions.** No Location, no Bluetooth, no Accessibility, no prompts to
+dismiss and nothing to grant per-trigger. The single thing macOS does ask you
+to approve is the pair of background Login Items, once, when you enable it.
+
+*Six of those nine conditions are on `main` only — the current download has
+three. See [Status](#status).*
 
 ## Safety, in detail
 
@@ -185,7 +239,7 @@ another user's.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **370 unit tests**.
+by **553 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -211,19 +265,32 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 387 tests on `main`, and
+**v0.1 — new, and moving fast.** Signed and notarized, 553 tests on `main`, and
 a privilege boundary that's been through three adversarial review passes. What
-it hasn't had yet is months on other people's hardware — and two claims above
-are still unverified there specifically: closed-lid behaviour on real hardware
-over a long job, and the thermal and battery guards actually firing. Both are
-designed for and covered as pure logic; neither has been watched happen on a
-machine in a bag.
+it hasn't had yet is months on other people's hardware, and four claims above
+have never been watched happen on a real machine:
 
-The build on [Releases](../../releases) is **v0.1.0**, cut before wake modes
-existed — no `--display-may-sleep`, no `--keep-display-awake`, no picker in
-Settings, and none of `--while-display`, `--while-ac-power` or
-`--while-cpu-busy`. Those are on `main` and haven't been notarized into a
-release yet, so build it yourself if you want them now.
+- closed-lid behaviour over a long job — the headline claim;
+- the thermal and battery guards actually firing;
+- a VPN going *down* under a live session (there was exactly one VPN on the Mac
+  this was written on and it was already up; planting a fake one needs root);
+- a USB device appearing at all — nothing is plugged into that Mac, so the
+  enumeration was verified against zero devices.
+
+All four are designed for and covered as pure logic, which is not the same
+thing. [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the
+list of what only hardware can settle.
+
+**Most of this page is `main`, not the download.** The build on
+[Releases](../../releases) is **v0.1.0**, and `main` is more than forty commits
+past it — its own notes say 182 tests. It knows `--for`, `--until`,
+`--while-app` and three trigger conditions, and that is the lot: no
+`--while-process` and no `keepy-uppy finished`, so none of the AI-coding-agent
+wiring above; no wake modes and no picker in Settings; and none of
+`--while-display`, `--while-ac-power`, `--while-cpu-busy`, `--while-volume`,
+`--while-subnet`, `--while-vpn` or `--while-usb`, nor the six trigger
+conditions that arrived with them. Nothing since has been notarized into a
+release, so build it yourself if you want any of it now.
 
 If something misbehaves, an issue with the daemon log is genuinely useful:
 
