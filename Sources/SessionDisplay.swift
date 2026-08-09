@@ -58,20 +58,42 @@ func appDisplayName(bundleID: String) -> String {
 
 // MARK: - Trigger rows
 
+/// The picker row in the Add sheet — the *kind* on its own, before anything has
+/// been typed into it.
+///
+/// These strings used to be the raw values of a parallel enum,
+/// `AddTriggerSheet.ConditionKind`, which is exactly the arrangement that let
+/// three `SessionKind` cases become unreachable from every client. They are here
+/// instead for the reason `wakeModeSettingsTitle` is: user-facing copy belongs
+/// on this side of the boundary, and a raw value is a wire name that `Shared/`
+/// compiles into the daemon and the CLI, neither of which should carry Settings
+/// prose. The picker now loops `TriggerConditionKind.allCases`, so a new
+/// condition appears in it automatically and fails to compile *here* until
+/// somebody writes its label.
+func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
+    switch kind {
+    case .appLaunched: return "An app launches"
+    case .externalDisplayConnected: return "An external display connects"
+    case .acPowerConnected: return "Power is connected"
+    case .processRunning: return "A process is running"
+    }
+}
+
 /// **A trigger starts a session; it does not bind that session's lifetime to
-/// the condition.** `EvidenceLoopRunner` starts `rule.defaultKind`'s kind —
-/// `.indefinite`, `.duration(...)` — and `sessionsToEnd` explicitly skips
-/// exactly those kinds, so nothing ends the session when the condition stops
-/// being true. Wording that implies otherwise ("while it's running") promises
-/// a stop that will never come: plug a display in, unplug it, and an
-/// indefinite session keeps the Mac awake forever. Every string here is
-/// phrased as the *starting event* for that reason —
-/// **except `.processRunning`, deliberately.** That condition is the one
-/// exception to the rule above: `TriggerRule.sessionKind(firing:now:)`
-/// ignores `defaultKind` for it and always starts `.whileProcessRunning`,
-/// which `sessionsToEnd` *does* end when the process exits. So this is the
-/// only condition allowed to say "while" — because it's the only one that's
-/// actually true.
+/// the condition** — unless `TriggerCondition.boundSessionKind` says it does.
+/// `EvidenceLoopRunner` starts `rule.defaultKind`'s kind — `.indefinite`,
+/// `.duration(...)` — and `sessionsToEnd` explicitly skips exactly those kinds,
+/// so nothing ends the session when the condition stops being true. Wording that
+/// implies otherwise ("while it's running") promises a stop that will never
+/// come: plug a display in, unplug it, and an indefinite session keeps the Mac
+/// awake forever. Every string here is phrased as the *starting event* for that
+/// reason — except for a condition that binds, where "while" is the literal
+/// truth, because `sessionKind(firing:now:)` starts the bound kind and
+/// `sessionsToEnd` really does end it.
+///
+/// `.processRunning` is the only such condition today. Which one says "while" is
+/// pinned against `bindsSessionLifetime` in `SessionDisplayTests`, not against a
+/// list of case names, so a fifth condition cannot pick the wrong voice quietly.
 func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     switch condition {
     case .appLaunched(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) launches"
@@ -82,15 +104,50 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
 }
 
 /// The second line of a trigger row: what starting it actually does.
-/// `.processRunning` is again the deliberate exception documented on
-/// `triggerConditionTitle` above — `defaultKind` is stored on the rule but
-/// ignored when it fires, so describing it here would be describing a
-/// duration that will never take effect.
+///
+/// A condition that binds its session's lifetime gets `triggerBoundEffectSubtitle`
+/// instead of the duration phrase — `defaultKind` is stored on the rule but
+/// ignored when it fires, so describing it here would be describing a duration
+/// that will never take effect. The branch is keyed off `boundSessionKind`, the
+/// same table `sessionKind(firing:now:)` reads, rather than off a second
+/// `.processRunning` match as it was.
 func triggerEffectSubtitle(_ rule: TriggerRule) -> String {
-    if case .processRunning(let processName) = rule.condition {
+    if let bound = triggerBoundEffectSubtitle(rule.condition) { return bound }
+    return "Starts a session that keeps this Mac awake \(rule.defaultKind.durationPhrase)"
+}
+
+/// What a lifetime-binding condition's row says instead of a duration, or `nil`
+/// for a condition that has a duration to report.
+///
+/// Exhaustive, so a new condition must decide; and `SessionDisplayTests` pins
+/// which branch it lands in against `bindsSessionLifetime`, so "binds but reads
+/// as timed" and "timed but reads as bound" are both test failures rather than a
+/// row that quietly misdescribes what the daemon will do.
+func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
+    switch condition {
+    case .appLaunched, .externalDisplayConnected, .acPowerConnected:
+        return nil
+    case .processRunning(let processName):
         return "Keeps this Mac awake until \(processName) exits"
     }
-    return "Starts a session that keeps this Mac awake \(rule.defaultKind.durationPhrase)"
+}
+
+/// The Add sheet's replacement for the duration picker: for a binding condition
+/// there is no duration to pick, and a picker that was shown and then discarded
+/// is worse than one that isn't there. This is the sentence that goes where it
+/// would have been, so its absence is explained rather than merely noticed.
+///
+/// Distinct from `triggerBoundEffectSubtitle` because it is read while the sheet
+/// is still being filled in — the process name is typically empty — where the row
+/// subtitle only ever describes a saved rule.
+func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
+    switch condition {
+    case .appLaunched, .externalDisplayConnected, .acPowerConnected:
+        return nil
+    case .processRunning(let processName):
+        let subject = processName.isEmpty ? "the process" : processName
+        return "Ends automatically when \(subject) exits — no duration to pick."
+    }
 }
 
 extension DefaultSessionKind {

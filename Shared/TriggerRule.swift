@@ -6,8 +6,8 @@ enum TriggerCondition: Codable, Equatable {
     case acPowerConnected
     /// Matches a plain executable name (see `ProcessRunningObserving`), for
     /// CLI tools with no bundle ID — coding-assistant CLIs like `claude` or
-    /// `codex` are the motivating case. The one condition
-    /// `sessionKind(firing:now:)` below treats specially.
+    /// `codex` are the motivating case. The one condition that currently binds
+    /// its session's lifetime (`TriggerConditionKind.bindsSessionLifetime`).
     case processRunning(processName: String)
 
     /// Why a `.processRunning` name can never match anything, or `nil` if it
@@ -30,6 +30,107 @@ enum TriggerCondition: Codable, Equatable {
             return "Enter just the name the tool runs as (\"claude\"), not a path — a path can never match."
         }
         return nil
+    }
+}
+
+/// The *kind* of a `TriggerCondition`, without its associated value.
+///
+/// It exists so that one list drives everything: the Add sheet's picker, the
+/// copy tests, and the lifetime-binding rule below. `TriggerCondition` cannot be
+/// `CaseIterable` (its cases carry values) and the Settings UI therefore grew a
+/// hand-maintained parallel enum, which is a condition-nobody-can-create waiting
+/// to happen — the same shape as the `WakeMode` reachability hole Plan 4 closed.
+///
+/// The two enums are welded together in both directions, by the compiler rather
+/// than by a test: a new `TriggerCondition` case makes `TriggerCondition.kind`
+/// below non-exhaustive, and a new `TriggerConditionKind` case makes
+/// `sampleCondition` non-exhaustive. Neither can be added alone.
+///
+/// `sampleCondition` is a representative value of each kind — the bridge from
+/// "every kind there is" to "a condition to try it with", which is what lets
+/// every surface be checked over `allCases` instead of over a hand-written list
+/// that a fifth condition would silently not appear in. It is deliberately
+/// *not* used to build the rule the Add sheet saves: that comes from what the
+/// user actually typed.
+enum TriggerConditionKind: String, CaseIterable, Identifiable {
+    case appLaunched, externalDisplayConnected, acPowerConnected, processRunning
+
+    var id: String { rawValue }
+
+    /// Whether a session started by this condition ends when the condition
+    /// does, rather than after `TriggerRule.defaultKind`'s duration.
+    ///
+    /// **Three of the four answer `false`, and that is a decision about
+    /// existing users, not an oversight.** `.externalDisplayConnected` and
+    /// `.acPowerConnected` both *have* a lifetime `SessionKind`
+    /// (`.whileExternalDisplay`, `.whileOnACPower`) and deliberately do not
+    /// bind to it: rules people have already saved mean "start a 4-hour session
+    /// when the display connects", and quietly turning those into "…and end it
+    /// when I unplug" would change behaviour under them. `.processRunning`
+    /// binds because a duration was never meaningful for it.
+    ///
+    /// It is an exhaustive `switch` and not `self == .processRunning` for the
+    /// reason `ObserverSet` gives no member a default: a new condition must
+    /// *state* its answer, and the six Plan 5 is about to add are exactly the
+    /// ones where "while I'm on this Wi-Fi network" is a plausible reading. A
+    /// one-line expression would hand each of them `false` without their author
+    /// ever meeting the question, which is the silent-default trap this project
+    /// has been bitten by four times. One line per condition, and the choice is
+    /// argued in the task that adds it.
+    ///
+    /// Offering *both* per rule ("for 4 hours" vs "while it holds") is a real
+    /// improvement and is a Plan 7 UI decision — it needs a new stored field on
+    /// `TriggerRule`, which is exactly the defaulted-field trap above. Do not
+    /// smuggle it in here.
+    var bindsSessionLifetime: Bool {
+        switch self {
+        case .appLaunched, .externalDisplayConnected, .acPowerConnected: return false
+        case .processRunning: return true
+        }
+    }
+
+    /// A representative condition of this kind. Associated values are stand-ins
+    /// chosen to be recognisable in a failure message, never matched against
+    /// anything live.
+    var sampleCondition: TriggerCondition {
+        switch self {
+        case .appLaunched: return .appLaunched(bundleID: "com.apple.dt.Xcode")
+        case .externalDisplayConnected: return .externalDisplayConnected
+        case .acPowerConnected: return .acPowerConnected
+        case .processRunning: return .processRunning(processName: "claude")
+        }
+    }
+}
+
+extension TriggerCondition {
+    /// This condition's kind, dropping its associated value.
+    var kind: TriggerConditionKind {
+        switch self {
+        case .appLaunched: return .appLaunched
+        case .externalDisplayConnected: return .externalDisplayConnected
+        case .acPowerConnected: return .acPowerConnected
+        case .processRunning: return .processRunning
+        }
+    }
+
+    /// The `SessionKind` this condition binds its session's lifetime to, or
+    /// `nil` when the session it starts is governed by `TriggerRule.defaultKind`
+    /// instead.
+    ///
+    /// Non-nil for exactly the kinds `bindsSessionLifetime` names — the two are
+    /// separate statements because only this one can see the associated value a
+    /// bound `SessionKind` needs, and `TriggerRuleTests` pins them against each
+    /// other over `allCases`. This is the single place the carve-out lives;
+    /// `sessionKind(firing:now:)`, `triggerEffectSubtitle` and the Add sheet all
+    /// read it rather than re-matching `.processRunning`, which is what they
+    /// each used to do.
+    var boundSessionKind: SessionKind? {
+        switch self {
+        case .appLaunched, .externalDisplayConnected, .acPowerConnected:
+            return nil
+        case .processRunning(let processName):
+            return .whileProcessRunning(processName: processName)
+        }
     }
 }
 
@@ -122,20 +223,22 @@ func triggersToFire(
     }
 }
 
-/// The `SessionKind` a firing rule actually starts. For every condition
-/// except `.processRunning` this is exactly `rule.defaultKind.sessionKind(now:)`
-/// — unchanged from before this function existed. `.processRunning` is the
-/// one deliberate exception: `defaultKind` is stored on the rule (so the
-/// Settings UI has somewhere to persist it, and so the schema didn't need to
-/// change) but ignored here, because ending the session when the process
-/// exits — not after some picked duration — is the entire reason to use a
-/// process trigger over a plain `--for`. See `Sources/SessionDisplay.swift`'s
-/// `triggerConditionTitle`/`triggerEffectSubtitle` for the matching UI-copy
-/// exception, and `Tests/TriggerRuleTests.swift` for the regression coverage
-/// pinning that the other three conditions are unaffected by this carve-out.
+/// The `SessionKind` a firing rule actually starts: whatever the condition
+/// binds its session's lifetime to, and otherwise `defaultKind` materialized
+/// at this instant.
+///
+/// A condition that binds ignores `defaultKind` entirely. It is still stored on
+/// the rule (the Settings UI needs somewhere to persist it, and the schema
+/// didn't need to change), but for `.processRunning` — the only binding
+/// condition today — ending the session when the process exits, not after some
+/// picked duration, is the entire reason to use a process trigger over a plain
+/// `--for`. The Add sheet hides the duration picker for exactly these
+/// conditions rather than showing one it would discard.
+///
+/// This used to match `.processRunning` here, and again in two places in
+/// `Sources/SessionDisplay.swift`, and a fourth time in the Add sheet. All four
+/// now read `TriggerCondition.boundSessionKind`, so a fifth condition that
+/// binds is described correctly everywhere by adding one line to one table.
 func sessionKind(firing rule: TriggerRule, now: Date) -> SessionKind {
-    if case .processRunning(let processName) = rule.condition {
-        return .whileProcessRunning(processName: processName)
-    }
-    return rule.defaultKind.sessionKind(now: now)
+    rule.condition.boundSessionKind ?? rule.defaultKind.sessionKind(now: now)
 }

@@ -98,6 +98,102 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertTrue(subtitle.contains("claude"))
         XCTAssertFalse(subtitle.contains("4 hours"), "defaultKind must be ignored for a process-running rule")
     }
+
+    // MARK: - Driven by TriggerConditionKind rather than by a hand-written list
+
+    /// Every condition must have copy. Before this, adding a case to the switch in
+    /// triggerConditionTitle was compiler-forced but adding it to the *picker* was
+    /// not, so the failure mode was a condition with perfect copy and no way to
+    /// create it.
+    func testEveryConditionKindHasATitleAndASubtitle() {
+        for kind in TriggerConditionKind.allCases {
+            let rule = TriggerRule(id: UUID(), condition: kind.sampleCondition,
+                                   defaultKind: .oneHour, enabled: true)
+            XCTAssertFalse(triggerConditionTitle(rule.condition).isEmpty, "\(kind)")
+            XCTAssertFalse(triggerEffectSubtitle(rule).isEmpty, "\(kind)")
+        }
+    }
+
+    /// A binding condition must never describe a duration it will ignore. This is
+    /// the copy bug `.processRunning` already documents: `defaultKind` is stored on
+    /// the rule but discarded at fire time, so a subtitle promising "for 4 hours"
+    /// would be describing something that never happens.
+    func testABindingConditionsSubtitleNeverPromisesADuration() {
+        for kind in TriggerConditionKind.allCases where kind.bindsSessionLifetime {
+            let rule = TriggerRule(id: UUID(), condition: kind.sampleCondition,
+                                   defaultKind: .fourHours, enabled: true)
+            XCTAssertFalse(triggerEffectSubtitle(rule).contains("4 hours"), "\(kind)")
+        }
+    }
+
+    /// The general form of `testConditionTitlesDescribeTheStartingEventNotAnOngoingState`
+    /// above, which names its three conditions by hand and so cannot see a
+    /// fourth. "While" is licensed by `bindsSessionLifetime` and by nothing
+    /// else: a title saying "while" for a condition whose session outlives it
+    /// promises a stop that never comes.
+    func testOnlyABindingConditionsTitleMaySayWhile() {
+        for kind in TriggerConditionKind.allCases {
+            let title = triggerConditionTitle(kind.sampleCondition).lowercased()
+            XCTAssertEqual(title.contains("while "), kind.bindsSessionLifetime,
+                           "\(kind): the title and the lifetime table disagree — \(title)")
+        }
+    }
+
+    /// The two copy tables that only a *binding* condition may fill in. Each is
+    /// an exhaustive switch, so a new condition cannot skip them silently; this
+    /// pins that whichever branch it lands in matches the lifetime table, since
+    /// a binding condition with no footnote leaves the Add sheet showing
+    /// neither a duration picker nor a reason there isn't one.
+    func testTheBoundCopyExistsForExactlyTheBindingConditions() {
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            XCTAssertEqual(triggerBoundEffectSubtitle(condition) != nil, kind.bindsSessionLifetime,
+                           "\(kind): the row subtitle and the lifetime table disagree")
+            XCTAssertEqual(triggerBindingFootnote(condition) != nil, kind.bindsSessionLifetime,
+                           "\(kind): the Add sheet footnote and the lifetime table disagree")
+            if kind.bindsSessionLifetime {
+                XCTAssertFalse(triggerBoundEffectSubtitle(condition)?.isEmpty ?? true, "\(kind)")
+                XCTAssertFalse(triggerBindingFootnote(condition)?.isEmpty ?? true, "\(kind)")
+            }
+        }
+    }
+
+    /// The picker labels. They live here rather than as raw values on the
+    /// `Shared/` enum — where the old parallel `AddTriggerSheet.ConditionKind`
+    /// kept them — for the same reason `wakeModeSettingsTitle` does: a raw
+    /// value is a wire name, and `Shared/` compiles into the daemon and the
+    /// CLI, neither of which has any business carrying Settings copy.
+    func testEveryConditionKindHasItsOwnPickerLabel() {
+        let labels = TriggerConditionKind.allCases.map(triggerConditionKindLabel)
+        for (kind, label) in zip(TriggerConditionKind.allCases, labels) {
+            XCTAssertFalse(label.isEmpty, "\(kind) has no label, so its picker row would be blank")
+            XCTAssertFalse(label.contains(kind.rawValue),
+                           "\(kind.rawValue) is a wire name, not a thing to show a user: \(label)")
+        }
+        XCTAssertEqual(Set(labels).count, labels.count,
+                       "two conditions sharing a label are indistinguishable in the picker")
+    }
+
+    /// The labels the picker shipped with, pinned. The parallel enum they came
+    /// off is gone; these are the strings it held.
+    func testThePickerLabelsAreTheOnesTheSheetAlreadyShowed() {
+        XCTAssertEqual(triggerConditionKindLabel(.appLaunched), "An app launches")
+        XCTAssertEqual(triggerConditionKindLabel(.externalDisplayConnected), "An external display connects")
+        XCTAssertEqual(triggerConditionKindLabel(.acPowerConnected), "Power is connected")
+        XCTAssertEqual(triggerConditionKindLabel(.processRunning), "A process is running")
+    }
+
+    /// The Add sheet's footnote names the process before one has been typed,
+    /// where the row subtitle never has to — the sheet renders it while the
+    /// field is still empty.
+    func testTheAddSheetFootnoteReadsBeforeAnythingHasBeenTyped() {
+        guard let empty = triggerBindingFootnote(.processRunning(processName: "")) else {
+            return XCTFail("a binding condition needs a footnote")
+        }
+        XCTAssertEqual(empty, "Ends automatically when the process exits — no duration to pick.")
+        XCTAssertEqual(triggerBindingFootnote(.processRunning(processName: "claude")),
+                       "Ends automatically when claude exits — no duration to pick.")
+    }
 }
 
 final class SafetyCopyTests: XCTestCase {

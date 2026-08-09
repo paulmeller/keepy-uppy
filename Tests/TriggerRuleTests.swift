@@ -287,4 +287,70 @@ final class TriggerRuleTests: XCTestCase {
             XCTAssertEqual(sessionKind(firing: r, now: now), r.defaultKind.sessionKind(now: now))
         }
     }
+
+    // MARK: - The condition table
+    //
+    // The generalisation of the carve-out above: `sessionKind(firing:now:)`
+    // now reads `boundSessionKind` rather than matching `.processRunning`, and
+    // `TriggerConditionKind` is the one list the picker and the copy both read.
+
+    /// Plan 4 proved a mode can exist that nobody can select
+    /// (`testEveryWakeModeIsReachableFromTheCommandLine`). The same hole is open
+    /// here and is wider: `AddTriggerSheet.ConditionKind` is a *parallel* enum, so
+    /// adding a `TriggerCondition` case does not fail to compile — it just produces
+    /// a condition no user can ever create. `TriggerConditionKind` closes it by
+    /// being the single list both the model and the picker read.
+    func testEveryConditionKindBuildsACondition() {
+        for kind in TriggerConditionKind.allCases {
+            XCTAssertEqual(kind.sampleCondition.kind, kind,
+                           "\(kind) does not round-trip through TriggerCondition.kind")
+        }
+    }
+
+    /// ...and no two kinds collapse onto the same condition.
+    func testEveryConditionKindIsDistinct() {
+        let kinds = TriggerConditionKind.allCases.map(\.sampleCondition.kind)
+        XCTAssertEqual(Set(kinds).count, TriggerConditionKind.allCases.count)
+    }
+
+    /// The carve-out, stated once instead of hardcoded in three places. A condition
+    /// that binds its session's lifetime must produce a `SessionKind`; one that
+    /// does not must produce nil, so `sessionKind(firing:now:)` falls through to
+    /// `defaultKind`.
+    func testBindingConditionsProduceASessionKindAndOthersDoNot() {
+        for kind in TriggerConditionKind.allCases {
+            let bound = kind.sampleCondition.boundSessionKind
+            XCTAssertEqual(bound != nil, kind.bindsSessionLifetime,
+                           "\(kind): bindsSessionLifetime and boundSessionKind disagree")
+        }
+    }
+
+    /// Regression guard for the one condition that already had this behaviour.
+    func testProcessRunningStillBindsAndTheOriginalThreeStillDoNot() {
+        XCTAssertTrue(TriggerConditionKind.processRunning.bindsSessionLifetime)
+        XCTAssertFalse(TriggerConditionKind.appLaunched.bindsSessionLifetime)
+        XCTAssertFalse(TriggerConditionKind.externalDisplayConnected.bindsSessionLifetime)
+        XCTAssertFalse(TriggerConditionKind.acPowerConnected.bindsSessionLifetime)
+    }
+
+    /// The table restated as the behaviour it drives: whatever
+    /// `boundSessionKind` says is exactly what a firing rule starts, and a
+    /// non-binding kind is untouched by the stored `defaultKind`. This is the
+    /// general form of the two `sessionKind(firing:now:)` tests above, which
+    /// name `.processRunning` and the original three by hand.
+    func testFiringMaterializesTheBoundKindOrDefersToDefaultKind() {
+        let now = Date(timeIntervalSince1970: 4_000_000)
+        for kind in TriggerConditionKind.allCases {
+            let r = rule(kind.sampleCondition, kind: .fourHours)
+            if let bound = kind.sampleCondition.boundSessionKind {
+                XCTAssertEqual(sessionKind(firing: r, now: now), bound, "\(kind)")
+                XCTAssertNotEqual(sessionKind(firing: r, now: now),
+                                  r.defaultKind.sessionKind(now: now),
+                                  "\(kind) binds, so defaultKind must be ignored")
+            } else {
+                XCTAssertEqual(sessionKind(firing: r, now: now),
+                               r.defaultKind.sessionKind(now: now), "\(kind)")
+            }
+        }
+    }
 }

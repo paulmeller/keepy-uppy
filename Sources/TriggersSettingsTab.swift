@@ -229,13 +229,12 @@ struct TriggersSettingsTab: View {
 /// its own surface. Inline, it had to share a row with the list it was adding
 /// to, and the app field appeared and disappeared as the condition changed.
 private struct AddTriggerSheet: View {
-    enum ConditionKind: String, CaseIterable, Identifiable {
-        case appLaunched = "An app launches"
-        case externalDisplayConnected = "An external display connects"
-        case acPowerConnected = "Power is connected"
-        case processRunning = "A process is running"
-        var id: String { rawValue }
-    }
+    // This sheet used to declare its own `ConditionKind`, a parallel enum whose
+    // raw values were the picker labels. Nothing linked it to `TriggerCondition`,
+    // so a new condition simply never appeared here — the shape that left three
+    // `SessionKind` cases unreachable from every client. It now picks
+    // `TriggerConditionKind` directly: `allCases` fills the picker, and the two
+    // switches below stop compiling until a new case is handled.
 
     /// Quick-add shortcuts for the CLI coding-assistant tools this condition
     /// exists for — none of them have a bundle ID, so the app-picker flow
@@ -254,7 +253,7 @@ private struct AddTriggerSheet: View {
     let onAdd: (TriggerRule) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var conditionKind: ConditionKind = .appLaunched
+    @State private var conditionKind: TriggerConditionKind = .appLaunched
     @State private var bundleID = ""
     @State private var appName = ""
     @State private var processName = ""
@@ -269,7 +268,9 @@ private struct AddTriggerSheet: View {
 
             Form {
                 Picker("When", selection: $conditionKind) {
-                    ForEach(ConditionKind.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(TriggerConditionKind.allCases) {
+                        Text(triggerConditionKindLabel($0)).tag($0)
+                    }
                 }
 
                 if conditionKind == .appLaunched {
@@ -334,13 +335,19 @@ private struct AddTriggerSheet: View {
                             .foregroundStyle(.orange)
                             .font(.callout)
                     }
+                }
 
-                    // Unlike every other condition, this one's session ends
-                    // on its own — see triggerConditionTitle/EffectSubtitle
-                    // in SessionDisplay.swift for why the duration picker
-                    // below is hidden rather than shown-but-ignored.
-                    Text("Ends automatically when \(processName.isEmpty ? "the process" : processName) exits — no duration to pick.")
-                        .settingsFootnote()
+                // A condition that binds its session's lifetime has no duration
+                // to pick — `sessionKind(firing:now:)` would discard whatever
+                // was chosen — so the picker is replaced by the sentence saying
+                // what will end the session instead. Keyed off the one table
+                // rather than off `== .processRunning`, which is what this line
+                // and three others used to match on.
+                if conditionKind.bindsSessionLifetime {
+                    if let footnote = triggerBindingFootnote(condition) {
+                        Text(footnote)
+                            .settingsFootnote()
+                    }
                 } else {
                     Picker("Keep awake", selection: $sessionKind) {
                         ForEach(DefaultSessionKind.allCases) { Text($0.label).tag($0) }
