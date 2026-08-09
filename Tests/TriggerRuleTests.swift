@@ -534,6 +534,137 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1)
     }
 
+    // MARK: - The gap element-wise skipping does not close
+    //
+    // `StoredTriggerRule.init(from:)` is not total: it throws for a JSON number
+    // outside `Double`'s finite range, and Foundation's synthesized array
+    // decoder propagates that, failing the *whole* decode. The doc used to
+    // claim decoding could not throw, which hid this. These pin what it really
+    // costs, so the honest version cannot quietly revert to the false one.
+
+    /// Raw bytes rather than `JSONSerialization`, because `1e999` is a payload
+    /// `JSONSerialization` itself refuses to build ("Number wound up as NaN").
+    /// `JSONDecoder`'s parser accepts it, which is the whole reason it reaches
+    /// `JSONValue` at all.
+    private func writeRawStoredPayload(_ json: String) {
+        PreferencesSuite.defaults.set(Data(json.utf8), forKey: TriggerStore.key)
+    }
+
+    /// A number no `Double` can hold still costs the entire file. Stated as a
+    /// test rather than left in a doc comment, because the last doc comment
+    /// about this said the opposite.
+    func testANumberOutsideDoublesRangeStillCostsTheWholeFile() {
+        let good = rule(.acPowerConnected, kind: .oneHour)
+        guard let goodJSON = try? JSONEncoder().encode(good),
+              let goodText = String(data: goodJSON, encoding: .utf8)
+        else { return XCTFail("could not build the readable element") }
+        writeRawStoredPayload(
+            "[\(goodText),{\"id\":\"7F0C6C9E-3C6E-4A3C-9E52-2F5B1E0A77D1\","
+            + "\"condition\":{\"wifiNetwork\":{\"lastSeen\":1e999}},"
+            + "\"defaultKind\":\"eightHours\",\"enabled\":true}]")
+
+        XCTAssertTrue(TriggerStore.load().isEmpty,
+                      "one unmodellable number fails the array decode, taking the readable rule too")
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0,
+                       "nothing was skipped — the decode never got as far as an element")
+    }
+
+    /// ...but it is no longer *silent*. This is the distinction `loadStored()`
+    /// cannot express: `[]` from an empty store and `[]` from a store that
+    /// would not decode are the same value and very different facts.
+    func testAnUndecodablePayloadIsDistinguishableFromAnEmptyOne() {
+        XCTAssertFalse(TriggerStore.storedPayloadIsUndecodable,
+                       "nothing stored is not a failure to read")
+
+        TriggerStore.save([rule(.acPowerConnected)])
+        XCTAssertFalse(TriggerStore.storedPayloadIsUndecodable,
+                       "a payload this build wrote must read back cleanly")
+
+        writeRawStoredPayload("[{\"condition\":{\"x\":{\"n\":1e999}}}]")
+        XCTAssertTrue(TriggerStore.storedPayloadIsUndecodable,
+                      "the one case where an empty load is not the whole truth")
+    }
+
+    /// The boundary the docs quote, measured rather than assumed: nesting is
+    /// *not* a `JSONValue` limit. `JSONDecoder` refuses the document itself
+    /// past 512 levels, so it lands in the "not a rule store at all" branch and
+    /// never reaches an element.
+    func testDeepNestingIsRefusedByTheParserRatherThanByJSONValue() {
+        func nested(depth: Int) -> String {
+            "[" + String(repeating: "[", count: depth - 1) + String(repeating: "]", count: depth - 1) + "]"
+        }
+        writeRawStoredPayload(nested(depth: 512))
+        XCTAssertFalse(TriggerStore.storedPayloadIsUndecodable,
+                       "512 levels parse; the element is simply not a rule")
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1,
+                       "an array of one non-rule element is one skipped element")
+
+        writeRawStoredPayload(nested(depth: 513))
+        XCTAssertTrue(TriggerStore.storedPayloadIsUndecodable,
+                      "513 levels is refused by the parser, not by JSONValue")
+    }
+
+    // MARK: - A newer build that adds a *field* is dropped, not preserved
+    //
+    // `StoredTriggerRule.unreadable`'s doc used to say "any field this build
+    // cannot decode lands here". Only a field whose decode *fails* does. A rule
+    // carrying an unknown extra field decodes cleanly, because a synthesized
+    // `init(from:)` ignores unknown keys — and the next save writes it back
+    // without the field. `TriggerRule`'s doc comment is where the consequence
+    // for Plan 7 is argued; these are the proof it is real.
+
+    func testARuleWithAnUnknownFieldIsAcceptedAndLosesTheField() {
+        let good = rule(.acPowerConnected, kind: .oneHour)
+        var withFutureField = storedElement(good)
+        withFutureField["bindsLifetime"] = true
+        writeStoredPayload([withFutureField])
+
+        XCTAssertEqual(TriggerStore.load(), [good],
+                       "an unknown field does not make the rule unreadable — it is ignored")
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0,
+                       "so nothing is counted, and the pane says nothing")
+
+        TriggerStore.save(TriggerStore.load())
+
+        let survivor = storedPayload().first as? [String: Any]
+        XCTAssertEqual(survivor?["id"] as? String, storedElement(good)["id"] as? String)
+        XCTAssertNil(survivor?["bindsLifetime"],
+                     "the field is gone — this is the Plan 7 hazard, not a hypothetical")
+    }
+
+    /// The same thing one level down: a new key inside a condition this build
+    /// already knows. The condition still decodes, so the rule is readable and
+    /// the key is dropped.
+    func testANewKeyInsideAKnownConditionIsAlsoDroppedRatherThanKept() {
+        let good = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
+        var element = storedElement(good)
+        element["condition"] = ["appLaunched": ["bundleID": "com.apple.dt.Xcode",
+                                                "matchByExecutablePath": true]]
+        writeStoredPayload([element])
+
+        XCTAssertEqual(TriggerStore.load(), [good])
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0)
+
+        TriggerStore.save(TriggerStore.load())
+
+        let condition = (storedPayload().first as? [String: Any])?["condition"] as? [String: Any]
+        let payload = condition?["appLaunched"] as? [String: Any]
+        XCTAssertEqual(payload?["bundleID"] as? String, "com.apple.dt.Xcode")
+        XCTAssertNil(payload?["matchByExecutablePath"],
+                     "a new key in a known condition is dropped just as a new top-level field is")
+    }
+
+    /// The contrast that makes the hazard legible: change the condition's *wire
+    /// name* and the rule is preserved verbatim instead. This is the shape Plan
+    /// 7's field has to be given, and the reason `TriggerRule`'s doc argues for
+    /// making the change undecodable rather than defaulted.
+    func testAnUnknownConditionNameIsPreservedWhereAnUnknownFieldIsNot() {
+        writeStoredPayload([futureRule])
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1)
+        TriggerStore.save([])
+        XCTAssertEqual(storedPayload().count, 1, "kept, where the unknown field was dropped")
+    }
+
     /// What the UI needs to be able to say "one of your triggers was made by a
     /// newer version and isn't shown here" — a rule that is silently invisible
     /// is a milder failure than one that is silently deleted, but the user

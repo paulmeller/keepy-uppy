@@ -88,6 +88,15 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     /// improvement and is a Plan 7 UI decision — it needs a new stored field on
     /// `TriggerRule`, which is exactly the defaulted-field trap above. Do not
     /// smuggle it in here.
+    ///
+    /// Read `TriggerRule`'s own doc comment before designing that field. A
+    /// field added the ordinary way is *dropped* by any older build that
+    /// touches the file — decoded cleanly, ignored, and written back without
+    /// it — so the rule silently reverts to whichever lifetime this table
+    /// gives it, and the newer build then obeys the reverted rule. The store's
+    /// skip-and-preserve machinery does not catch that, because nothing
+    /// failed. Making the change undecodable to older builds is what routes it
+    /// through the machinery that does.
     var bindsSessionLifetime: Bool {
         switch self {
         case .appLaunched, .externalDisplayConnected, .acPowerConnected: return false
@@ -140,6 +149,50 @@ extension TriggerCondition {
     }
 }
 
+/// One saved trigger.
+///
+/// **Adding a field here is a downgrade hazard, and it is the next thing
+/// somebody is going to do.** `Codable` is synthesized for this type, and a
+/// synthesized `init(from:)` *ignores* keys it does not recognise. So a rule
+/// written by a newer build that carries an extra field decodes here cleanly:
+/// it is `.readable`, not `.unreadable`, it is not counted by
+/// `unreadableCount`, the pane shows it, the agent fires it — and the next
+/// `save()` re-encodes it from these four properties and writes it back
+/// **without the field**. Same for a new key inside a known condition's
+/// payload. Pinned by `testARuleWithAnUnknownFieldIsAcceptedAndLosesTheField`.
+///
+/// That is a worse failure than the one `StoredTriggerRule` was built to fix,
+/// because it looks like success. Losing an unknown *condition* costs the rule
+/// and says so; losing an unknown *field* changes what a rule means and says
+/// nothing — and the newer build then reads the mutated rule back and obeys it.
+///
+/// It is not hypothetical: `TriggerConditionKind.bindsSessionLifetime` records
+/// that Plan 7 ("for 4 hours" vs "while it holds", per rule) needs exactly such
+/// a field. If it is added the way `Session.swift` adds its optional fields —
+/// `decodeIfPresent(...) ?? default`, which is right *there* because those
+/// fields are only ever written and read by one process pair — an older build
+/// will silently rewrite every rule that uses it back to the default.
+///
+/// **Design the field so an older build fails to decode it.** That is the one
+/// move that turns this into the failure this file already handles well: the
+/// rule becomes `.unreadable`, is preserved verbatim, is hidden rather than
+/// misinterpreted, and is counted in the pane's notice. Two ways to get it,
+/// both cheap at design time and neither available afterwards:
+/// carry the new meaning inside `condition` under a new wire name (an unknown
+/// case already throws), or add the field as a *required* `decode(...)` and
+/// accept that rules written by the new build are opaque to old ones — which
+/// is the honest description of what they are.
+///
+/// Round-tripping unknown keys per rule — a `[String: JSONValue]` bag captured
+/// in a hand-written `init(from:)` and re-emitted by `encode(to:)` — was
+/// considered and rejected. It fixes the wrong half: the bytes would survive,
+/// but the older build still cannot *honour* the field, so it goes on
+/// displaying and firing the rule under the old meaning while the file says
+/// otherwise. It also buys nothing for the builds that will actually meet Plan
+/// 7's files — v1 is already shipped and has no such bag — and it costs this
+/// type its synthesized `Codable`, replacing it with an encoder that must be
+/// hand-updated for every future field, which is the same class of silent
+/// omission. Making the change undecodable costs nothing and fails safe.
 struct TriggerRule: Codable, Equatable, Identifiable {
     let id: UUID
     var condition: TriggerCondition
@@ -175,6 +228,37 @@ struct TriggerRule: Codable, Equatable, Identifiable {
 /// numbers at the mercy of whatever the encoder does with `5.0`. A preservation
 /// that quietly alters what it preserved is a slower version of the loss this
 /// whole file is about.
+///
+/// **It does not hold every JSON value, and the two gaps are measured, not
+/// assumed.** This type used to be documented as total ("holds any JSON at
+/// all"); it is not, and `init(from:)` below is `throws` precisely because it
+/// isn't.
+///
+/// 1. **A number Foundation's parser accepts but `Double` cannot represent.**
+///    `1e309`, `1e999`, `-1e999` and friends: `JSONDecoder` parses them
+///    happily, `Int` overflows, `Double` refuses (the default
+///    `nonConformingFloatDecodingStrategy` is `.throw`), and `String`, array
+///    and object all decline — so the `dataCorruptedError` at the bottom of
+///    `init(from:)` fires. `1e308` is fine; the boundary is
+///    `Double.greatestFiniteMagnitude`. Adding a `.double(.infinity)` case
+///    would not help: `JSONEncoder` refuses to *write* a non-finite double
+///    (verified — it throws `EncodingError`), so such a value cannot be
+///    round-tripped through Foundation's Swift JSON writer by any route.
+///    `TriggerStore` documents what this costs.
+/// 2. **An integer literal outside `Int64` but inside `Double`'s range.**
+///    `9223372036854775808` decodes as `.double` and is written back as
+///    `9.223372036854776e+18` — a different number, silently. That is exactly
+///    the failure the `Int` case above exists to prevent, one range further
+///    out, and closing it needs arbitrary-precision decimal handling that
+///    nothing in this project has a use for. Named here so the `Int` case is
+///    not read as a guarantee it does not give.
+///
+/// Deep nesting is *not* one of these gaps, despite looking like one.
+/// `JSONDecoder` refuses a document nested deeper than 512 levels at the top
+/// level — `codingPath` is empty and the message is "The given data was not
+/// valid JSON" — so it never reaches this type at all, and it lands in
+/// `TriggerStore.loadStored()`'s already-documented "not a rule store at all"
+/// branch. Measured: total depth 512 decodes, 513 does not.
 enum JSONValue: Codable, Equatable {
     case null
     case bool(Bool)
@@ -196,8 +280,11 @@ enum JSONValue: Codable, Equatable {
         if let value = try? container.decode(String.self) { self = .string(value); return }
         if let value = try? container.decode([JSONValue].self) { self = .array(value); return }
         if let value = try? container.decode([String: JSONValue].self) { self = .object(value); return }
+        // Not "not a value JSON can express" — JSON expresses `1e999` fine,
+        // and saying otherwise sends whoever reads this message looking for a
+        // malformed file instead of for the gap listed above.
         throw DecodingError.dataCorruptedError(
-            in: container, debugDescription: "not a value JSON can express")
+            in: container, debugDescription: "JSON this type cannot model (see JSONValue's limits)")
     }
 
     func encode(to encoder: Encoder) throws {
@@ -226,19 +313,38 @@ enum JSONValue: Codable, Equatable {
 /// the new build, then run an older one for any reason, and every rule you have
 /// disappears from the pane at once.
 ///
-/// Decoding cannot throw here, and that is deliberate — `init(from:)` falls back
-/// to `JSONValue`, which holds any JSON at all. An element-wise loop that lets a
-/// failure escape has to advance the unkeyed container past the element it just
-/// refused, and `UnkeyedDecodingContainer` only advances on success: the obvious
-/// `while !container.isAtEnd { if let rule = try? container.decode(...) }` spins
-/// forever on the first bad element. A wrapper that always succeeds is how the
-/// container keeps moving.
+/// There is no hand-written element loop here, and that is what makes the
+/// skipping work. `loadStored()` asks `JSONDecoder` for `[StoredTriggerRule]`
+/// and Foundation's synthesized `Array` decoder drives the unkeyed container;
+/// this type only ever decodes *one* element, from a decoder handed to it.
+/// Writing the loop by hand is the thing to avoid: it has to advance the
+/// container past an element it just refused, and `UnkeyedDecodingContainer`
+/// only advances on success, so the obvious
+/// `while !container.isAtEnd { if let rule = try? container.decode(...) }`
+/// spins forever on the first bad element.
+///
+/// **`init(from:)` is not total, and the safety of the loop does not come from
+/// pretending it is.** It `throws`, and `try JSONValue(from: decoder)` really
+/// does throw — for the one value listed under `JSONValue`'s limits. What
+/// Foundation's array decoder does with that throw is propagate it, which fails
+/// the *whole* decode: one element holding `1e999` therefore still costs the
+/// entire file, exactly as an unknown condition used to. This doc previously
+/// claimed decoding could not throw, which made that hole invisible; the cost
+/// is now stated on `TriggerStore.storedPayloadIsUndecodable`, which is also
+/// where the case stops being silent.
 enum StoredTriggerRule: Codable, Equatable {
     case readable(TriggerRule)
-    /// Written by another build, and kept exactly as it arrived. Not
-    /// necessarily an unknown *condition* — any field this build cannot decode
-    /// lands here, which is the right rule: the store's job is to preserve what
-    /// it cannot use, not to guess why it cannot use it.
+    /// Written by another build, and kept exactly as it arrived.
+    ///
+    /// Only an element whose decode *fails* lands here — not "any field this
+    /// build cannot decode", which is what this said and which is materially
+    /// wrong in the direction that matters. A rule carrying an extra field
+    /// this build has never heard of decodes **cleanly** as `.readable`:
+    /// `Codable`'s synthesized `init(from:)` ignores unknown keys, so the rule
+    /// is not counted as unreadable, is shown and acted on normally, and the
+    /// unknown field is dropped by the next `save()`. Same for a new key inside
+    /// a known condition's payload. See `TriggerRule` for why that is the
+    /// hazard Plan 7 has to design around rather than a curiosity.
     case unreadable(JSONValue)
 
     var rule: TriggerRule? {
@@ -302,16 +408,50 @@ enum TriggerStore {
 
     /// The stored array as it actually is, element by element.
     ///
-    /// The outer `try?` still returns `[]`, and that is a different judgement,
+    /// `[]` here means "no rules to show", and it means it for two different
+    /// reasons — see `storedPayloadIsUndecodable` for the one where it is not
+    /// the whole truth.
+    static func loadStored() -> [StoredTriggerRule] { decodeStored().elements }
+
+    /// Whether there is a payload on disk that this build could not decode at
+    /// all — which `loadStored()` cannot tell you, because it answers `[]` for
+    /// that and for "nothing was ever stored" alike.
+    ///
+    /// For one of those two, `[]` is a lie with consequences: the pane shows no
+    /// triggers, the user edits something, and `save()` writes the empty list
+    /// over a file that still held all of their rules. That is the destruction
+    /// `StoredTriggerRule` exists to prevent, reappearing through the one gap
+    /// element-wise skipping does not cover — a `JSONValue` that will not
+    /// decode fails the whole array, not just its element (see
+    /// `StoredTriggerRule`, and `JSONValue`'s limits for the only value that
+    /// does it).
+    ///
+    /// Reachability is low and worth stating so nobody over-reads this:
+    /// `JSONEncoder` refuses to write a non-finite double, so no Keepy Uppy
+    /// build can produce such a file. A hand-edited plist or a non-Swift writer
+    /// can. The remaining exposure is therefore small, but silent, and silent
+    /// is the part this fixes: `save()` logs before it overwrites, and this
+    /// property is the hook for a Triggers-pane notice. The pane does not read
+    /// it yet — that notice says "lost", not "kept", so it is different copy
+    /// from `unreadableTriggerNotice` and a UI decision rather than a
+    /// mechanical one.
+    static var storedPayloadIsUndecodable: Bool { decodeStored().undecodable }
+
+    /// The stored array, plus the fact `loadStored()`'s return type cannot
+    /// carry. One decode serves both, so `save()` does not pay for it twice.
+    ///
+    /// The outer failure still returns `[]`, and that is a different judgement,
     /// not an oversight: an element that will not decode is somebody's rule from
     /// another build, whereas a payload that is not an array of *anything* is
     /// not a rule store at all, and there is nothing in it worth carrying
-    /// forward.
-    static func loadStored() -> [StoredTriggerRule] {
-        guard let data = defaults.data(forKey: key),
-              let stored = try? JSONDecoder().decode([StoredTriggerRule].self, from: data)
-        else { return [] }
-        return stored
+    /// forward. `undecodable` does not distinguish those two — a truly corrupt
+    /// payload and an array with one unmodellable number both set it — because
+    /// nothing downstream would do anything different with the distinction.
+    private static func decodeStored() -> (elements: [StoredTriggerRule], undecodable: Bool) {
+        guard let data = defaults.data(forKey: key) else { return ([], false) }
+        guard let stored = try? JSONDecoder().decode([StoredTriggerRule].self, from: data)
+        else { return ([], true) }
+        return (stored, false)
     }
 
     /// Writes `rules`, and re-emits every element this build could not read.
@@ -336,12 +476,21 @@ enum TriggerStore {
     /// key, from the main thread, so there is no second writer to race; the
     /// agent and daemon only ever read.
     static func save(_ rules: [TriggerRule]) {
-        let preserved = loadStored().filter { $0.rule == nil }
+        let stored = decodeStored()
+        let preserved = stored.elements.filter { $0.rule == nil }
         guard let data = try? JSONEncoder().encode(rules.map(StoredTriggerRule.readable) + preserved)
         else { return }
         if !preserved.isEmpty {
             triggerLogger.notice(
                 "kept \(preserved.count, privacy: .public) trigger rule(s) this build cannot decode")
+        }
+        // The one loss element-wise skipping cannot prevent, said out loud at
+        // the instant it becomes permanent. Bounded for the same reason the
+        // line above is: only the Settings UI ever reaches `save()`, whereas
+        // `load()` runs every 5s forever and is deliberately silent.
+        if stored.undecodable {
+            triggerLogger.error(
+                "overwriting a stored trigger payload this build could not decode at all; any rules it held are being lost now, not merely hidden")
         }
         defaults.set(data, forKey: key)
     }
