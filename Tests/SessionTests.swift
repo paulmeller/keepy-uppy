@@ -54,6 +54,69 @@ final class WakeModeTests: XCTestCase {
     }
 }
 
+/// `HelperService.startSession`'s trusted/untrusted split — which fields of a
+/// client's request the daemon honours and which it overwrites with facts only
+/// it can establish. It is the most security-relevant step in starting a
+/// session, and while it was written out inline in `Helper/` no test could
+/// reach it at all (`Helper/` is not in this target's module graph), so
+/// dropping `wakeMode:` or `triggerID:` from it was undetectable — exactly how
+/// every session in production ended up `.clamshell` regardless of what was
+/// asked for. `Session.authorized(id:owner:ownerUID:startedAt:)` moved it into
+/// `Shared/` for the same reason `SessionTable.desiredPowerPlan` lives there.
+final class SessionAuthorizationTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    /// The whole struct in one comparison, rather than a field list that can
+    /// forget the field that matters: `Session` is `Equatable`, the request
+    /// below sets every client-chosen field to a non-default value *and*
+    /// every server-owned field to something the daemon must refuse to
+    /// believe, and the expectation states exactly which of the two each
+    /// field should have come from. A field dropped from `authorized` takes
+    /// its initialiser default and this fails.
+    func testAuthorizingKeepsWhatTheClientChoseAndOverwritesWhatItCannotBeTrustedWith() {
+        let triggerID = UUID()
+        let requested = Session(id: UUID(), kind: .whileProcessRunning(processName: "claude"),
+                                owner: ClientID(rawValue: "root"), ownerUID: 0,
+                                persistence: .detached, origin: .trigger,
+                                startedAt: t0, triggerID: triggerID,
+                                wakeMode: .systemAndDisplay)
+
+        let serverID = UUID()
+        let serverStartedAt = t0.addingTimeInterval(3600)
+        let authorized = requested.authorized(id: serverID,
+                                              owner: ClientID(rawValue: "cli-501"),
+                                              ownerUID: 501, startedAt: serverStartedAt)
+
+        XCTAssertEqual(authorized,
+                       Session(id: serverID, kind: .whileProcessRunning(processName: "claude"),
+                               owner: ClientID(rawValue: "cli-501"), ownerUID: 501,
+                               persistence: .detached, origin: .trigger,
+                               startedAt: serverStartedAt, triggerID: triggerID,
+                               wakeMode: .systemAndDisplay))
+    }
+
+    /// The reason the four server-owned fields are server-owned, stated as
+    /// the attacks they refuse rather than as a list.
+    func testAClientCannotMintASessionOwnedBySomebodyElse() {
+        let claimed = Session(id: UUID(), kind: .indefinite,
+                              owner: ClientID(rawValue: "app-502"), ownerUID: 502,
+                              persistence: .clientBound, origin: .manual,
+                              startedAt: .distantPast)
+
+        let authorized = claimed.authorized(id: UUID(), owner: ClientID(rawValue: "cli-501"),
+                                            ownerUID: 501, startedAt: t0)
+
+        XCTAssertEqual(authorized.owner, ClientID(rawValue: "cli-501"),
+                       "a client must not be able to start a session owned by another client")
+        XCTAssertEqual(authorized.ownerUID, 501,
+                       "ownerUID is what binds an agent-evaluated session to a user's agent")
+        XCTAssertNotEqual(authorized.id, claimed.id,
+                          "a client must not be able to choose an id, and so collide with a live session")
+        XCTAssertEqual(authorized.startedAt, t0,
+                       "a backdated startedAt would dodge the max-duration backstop, which keys off it")
+    }
+}
+
 /// Plan 4 Task 4 rests on the claim that `wakeMode` needs **no XPC protocol
 /// change**, because `Session` already crosses the boundary as a JSON blob
 /// (`HelperProtocol.startSession(_ sessionJSON: Data, …)`). That is a claim

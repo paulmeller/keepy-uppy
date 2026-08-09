@@ -125,6 +125,33 @@ struct Session: Equatable, Codable, Identifiable {
     /// weaker.
     let wakeMode: WakeMode
 
+    /// This session with its lease deadline moved, and **nothing else**
+    /// changed.
+    ///
+    /// It lives here, immediately under the field list it has to mirror,
+    /// because rebuilding a `Session` field by field is this type's one
+    /// recurring trap: exactly three of its fields carry defaults in the
+    /// memberwise initialiser (`ownerUID`, `triggerID`, `wakeMode`), and
+    /// omitting any of those three at a rebuild site does **not** fail to
+    /// compile — it silently substitutes the default. `triggerID` was dropped
+    /// from `SessionEngine`'s lease renewal once; `wakeMode` was dropped from
+    /// the same line when it was added, which *escalated* a renewed session
+    /// (a client that asked for the display to be free to sleep had the
+    /// global `SleepDisabled` switched on for it at the first renewal), and
+    /// `ownerUID` could still have been dropped there with every test
+    /// passing.
+    ///
+    /// One copy, adjacent to the fields, is the structural fix: a new field
+    /// is added a few lines above the only place that has to carry it
+    /// across, and `SessionEngineTests`' whole-struct renewal test — a
+    /// `Session == Session` comparison, not a hand-written list of fields —
+    /// fails if it isn't.
+    func renewed(until: Date) -> Session {
+        Session(id: id, kind: .lease(expires: until), owner: owner, ownerUID: ownerUID,
+                persistence: persistence, origin: origin, startedAt: startedAt,
+                triggerID: triggerID, wakeMode: wakeMode)
+    }
+
     init(id: UUID, kind: SessionKind, owner: ClientID, ownerUID: UInt32 = 0,
          persistence: SessionPersistence, origin: SessionOrigin,
          startedAt: Date, triggerID: UUID? = nil, wakeMode: WakeMode = .clamshell) {
@@ -161,5 +188,46 @@ struct Session: Equatable, Codable, Identifiable {
         startedAt = try container.decode(Date.self, forKey: .startedAt)
         triggerID = try container.decodeIfPresent(UUID.self, forKey: .triggerID)
         wakeMode = try container.decodeIfPresent(WakeMode.self, forKey: .wakeMode) ?? .clamshell
+    }
+}
+
+extension Session {
+    /// The session the daemon will actually run, given `self` as the
+    /// *request* a client sent over XPC.
+    ///
+    /// Every field of `Session` falls into exactly one of two categories, and
+    /// the split is the whole security model of starting a session. Adding a
+    /// field means deciding which category it is in, and the signature says
+    /// which one it landed in without anyone having to re-derive it:
+    ///
+    /// SERVER-OWNED — the four parameters below, overwritten and never
+    ///   trusted from the client. A client must not be able to mint a session
+    ///   "owned" by someone else, collide its id with an existing session's,
+    ///   or backdate `startedAt` to dodge the max-duration backstop. These are
+    ///   facts about *who is calling*, which only the daemon can establish.
+    ///
+    /// CLIENT-CHOSEN — everything read off `self`: `kind`, `persistence`,
+    ///   `origin`, `triggerID`, and `wakeMode`. These are the request: what
+    ///   the caller wants, which the daemon then admits or rejects on its own
+    ///   terms (`SessionAdmission`) but does not silently rewrite. `wakeMode`
+    ///   is here and not above because how a session keeps the Mac awake is
+    ///   the caller's business, exactly like when it ends — there is no mode a
+    ///   caller can select that would let it affect another client's session,
+    ///   since the daemon unions every live session's mode itself
+    ///   (`PowerPlan.reduce`).
+    ///
+    /// This lives in `Shared/` for the same reason `SessionTable.desiredPowerPlan`
+    /// does: `Helper/` is not reachable from the test target, so anything left
+    /// there is verified by reading alone — and this is the most
+    /// security-relevant line in `HelperService.startSession`, with the same
+    /// silent-default trap as `renewed(until:)` above. Omitting `wakeMode:`
+    /// from the rebuild is exactly what made every session in production a
+    /// clamshell session no matter what any client asked for, and it did not
+    /// fail to compile. `SessionTests` now covers the split directly, with a
+    /// whole-struct comparison rather than a hand-written field list.
+    func authorized(id: UUID, owner: ClientID, ownerUID: UInt32, startedAt: Date) -> Session {
+        Session(id: id, kind: kind, owner: owner, ownerUID: ownerUID,
+                persistence: persistence, origin: origin, startedAt: startedAt,
+                triggerID: triggerID, wakeMode: wakeMode)
     }
 }

@@ -77,6 +77,8 @@ idle timer.
 - [ ] `keepy-uppy on --keep-display-awake` also holds the display on (`PreventUserIdleDisplaySleep` in `pmset -g assertions`), and likewise does not survive a lid close
 - [ ] With a `--display-may-sleep` session and a default (clamshell) session running at once, the lid-closed guarantee is back — the daemon unions the two, it does not pick one
 - [ ] Ending only the clamshell session of that pair drops the lid-closed guarantee but leaves the machine awake with the display free to sleep
+- [ ] Either wake-mode flag prints a one-line note naming that flag and saying it does not keep the Mac awake with the lid closed — and it goes to **stderr**: `keepy-uppy on --for 30s --keep-display-awake 2>/dev/null` prints only "Started session …", and `1>/dev/null` prints only the note
+- [ ] `keepy-uppy sessions` shows each session's mode, so a `--display-may-sleep` session is distinguishable from a default one (`status` and `status --json` are deliberately unchanged — both still say "keeping awake" for every mode)
 
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary

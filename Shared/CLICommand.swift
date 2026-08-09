@@ -74,40 +74,104 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
     }
 }
 
+/// Every option `on` accepts that takes a value. Named once, because the
+/// tokenising loop below needs both "is this a known option" and "what does it
+/// mean" and they must not be able to disagree.
+private enum OnOption: String, CaseIterable {
+    case duration = "--for"
+    case untilTime = "--until"
+    case whileApp = "--while-app"
+    case whileProcess = "--while-process"
+}
+
+private let onUsage = "usage: keepy-uppy on [--for 2h | --until 17:00 | --while-app <bundle-id> "
+    + "| --while-process <name>] [" + WakeMode.selectingFlags.joined(separator: " | ") + "]"
+
+/// One left-to-right pass over the arguments, rather than one `contains` scan
+/// per option.
+///
+/// The scans could not tell an option's *value* from a flag, because nothing
+/// tracked which tokens had already been consumed. So a missing value silently
+/// ate the next flag and that flag still counted: `on --while-app
+/// --display-may-sleep` produced a session watching a bundle id of
+/// "--display-may-sleep" **and** selected `.system`, from the same token. This
+/// loop consumes a value at the point it reads the option it belongs to, so a
+/// token can only ever play one role.
+///
+/// It also means an unrecognised token is now an error. Silently ignoring one
+/// is worse here than in most CLIs: `on --keep-dispaly-awake` is a typo whose
+/// old behaviour — accept, start a clamshell session — differs from what was
+/// asked for in the direction the user cannot see.
 private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParseError> {
     var endConditions: [SessionKind] = []
+    var modes: [WakeMode] = []
+    var index = 0
 
-    if let forIndex = args.firstIndex(of: "--for"), args.indices.contains(forIndex + 1) {
-        switch parseDuration(args[forIndex + 1]) {
-        case .success(let interval): endConditions.append(.duration(until: now.addingTimeInterval(interval)))
-        case .failure(let error): return .failure(error)
+    /// The next token, consumed as `option`'s value. A value that looks like
+    /// a flag is refused rather than taken literally: no duration, time,
+    /// bundle id or process name starts with a hyphen, so this is only ever
+    /// reached by an invocation that meant to pass a flag and forgot a value.
+    func value(for option: String) -> Result<String, CLIParseError> {
+        guard index < args.count, !args[index].hasPrefix("-") else {
+            return .failure(CLIParseError(message: "\(option) needs a value"))
         }
+        defer { index += 1 }
+        return .success(args[index])
     }
-    if let untilIndex = args.firstIndex(of: "--until"), args.indices.contains(untilIndex + 1) {
-        guard let date = parseTimeOfDay(args[untilIndex + 1], relativeTo: now) else {
-            return .failure(CLIParseError(message: "could not parse --until time '\(args[untilIndex + 1])'"))
+
+    while index < args.count {
+        let token = args[index]
+        index += 1
+
+        if let mode = WakeMode.selectedBy(flag: token) {
+            modes.append(mode)
+            continue
         }
-        endConditions.append(.untilTime(date))
-    }
-    if let appIndex = args.firstIndex(of: "--while-app"), args.indices.contains(appIndex + 1) {
-        endConditions.append(.whileAppRunning(bundleID: args[appIndex + 1]))
-    }
-    if let processIndex = args.firstIndex(of: "--while-process"), args.indices.contains(processIndex + 1) {
-        endConditions.append(.whileProcessRunning(processName: args[processIndex + 1]))
+
+        switch OnOption(rawValue: token) {
+        case .duration:
+            switch value(for: token).flatMap(parseDuration) {
+            case .success(let interval): endConditions.append(.duration(until: now.addingTimeInterval(interval)))
+            case .failure(let error): return .failure(error)
+            }
+        case .untilTime:
+            switch value(for: token) {
+            case .success(let raw):
+                guard let date = parseTimeOfDay(raw, relativeTo: now) else {
+                    return .failure(CLIParseError(message: "could not parse --until time '\(raw)'"))
+                }
+                endConditions.append(.untilTime(date))
+            case .failure(let error): return .failure(error)
+            }
+        case .whileApp:
+            switch value(for: token) {
+            case .success(let raw): endConditions.append(.whileAppRunning(bundleID: raw))
+            case .failure(let error): return .failure(error)
+            }
+        case .whileProcess:
+            switch value(for: token) {
+            case .success(let raw): endConditions.append(.whileProcessRunning(processName: raw))
+            case .failure(let error): return .failure(error)
+            }
+        case nil:
+            return .failure(CLIParseError(message: "unknown option '\(token)' for 'on'; \(onUsage)"))
+        }
     }
 
     guard endConditions.count <= 1 else {
-        return .failure(CLIParseError(message: "only one of --for, --until, --while-app, --while-process may be given"))
+        return .failure(CLIParseError(
+            message: "only one of \(OnOption.allCases.map(\.rawValue).joined(separator: ", ")) may be given"))
+    }
+    guard modes.count <= 1 else {
+        return .failure(CLIParseError(
+            message: "only one of \(WakeMode.selectingFlags.joined(separator: ", ")) may be given"))
     }
 
-    switch parseWakeMode(args) {
-    case .success(let wakeMode):
-        return .success(.on(kind: endConditions.first ?? .indefinite,
-                            persistence: .detached, wakeMode: wakeMode))
-    case .failure(let error):
-        return .failure(error)
-    }
+    return .success(.on(kind: endConditions.first ?? .indefinite,
+                        persistence: .detached, wakeMode: modes.first ?? .clamshell))
 }
+
+// MARK: - The wake-mode surface
 
 /// `on`'s second, independent axis: how the session keeps the Mac awake.
 ///
@@ -116,7 +180,8 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
 /// (it is the one that sets the global `SleepDisabled`; assertions do not
 /// survive a lid close — spec §1), and it is what every `keepy-uppy on`
 /// written before these flags existed already got. Any other default would
-/// silently weaken every script and every documented invocation.
+/// silently weaken every script and every documented invocation. That is why
+/// `.clamshell` is the one mode with no flag: it is selected by absence.
 ///
 /// Two flags rather than one boolean because `WakeMode` has three cases and a
 /// bool can only name two. Two flags rather than a `--wake-mode <name>`
@@ -125,26 +190,66 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
 /// that have no business being typed at a shell prompt.
 ///
 /// They are mutually exclusive for the same reason `--for` and `--until` are,
-/// and the rejection is written the same way: a session holds exactly one
+/// and `parseOn` rejects them the same way: a session holds exactly one
 /// `WakeMode`, so asking for two is a contradiction to reject, not a
 /// precedence rule to invent. (Two *different* live sessions may hold
 /// different modes; unioning those is `PowerPlan.reduce`'s job in the daemon,
 /// not something one `on` invocation can express.)
-///
-/// Worth knowing when reading an invocation: both flags *drop* the clamshell
-/// axis, because the mode they select is not `.clamshell`. `--keep-display-awake`
-/// therefore keeps the display lit but no longer keeps a lid-shut laptop
-/// awake. It reads additive and is not; the README says so out loud.
-private func parseWakeMode(_ args: [String]) -> Result<WakeMode, CLIParseError> {
-    var modes: [WakeMode] = []
-    if args.contains("--display-may-sleep") { modes.append(.system) }
-    if args.contains("--keep-display-awake") { modes.append(.systemAndDisplay) }
-
-    guard modes.count <= 1 else {
-        return .failure(CLIParseError(
-            message: "only one of --display-may-sleep, --keep-display-awake may be given"))
+extension WakeMode {
+    /// The `on` flag that selects this mode; `nil` for the default.
+    ///
+    /// Named here rather than as literals inside the parser so that the
+    /// parser, the "only one of …" rejection, the usage line, and the caveat
+    /// the CLI prints to stderr cannot drift apart — they all read this.
+    var selectingFlag: String? {
+        switch self {
+        case .clamshell: return nil
+        case .system: return "--display-may-sleep"
+        case .systemAndDisplay: return "--keep-display-awake"
+        }
     }
-    return .success(modes.first ?? .clamshell)
+
+    /// Every flag that selects a mode, for messages that name them all.
+    static var selectingFlags: [String] { allCases.compactMap(\.selectingFlag) }
+
+    static func selectedBy(flag: String) -> WakeMode? {
+        allCases.first { $0.selectingFlag == flag }
+    }
+
+    /// The thing the flag's own name does not say, for the CLI to print to
+    /// **stderr** the moment it is used — at the keyboard, where the mistake
+    /// is being made, not in a README nobody rereads.
+    ///
+    /// Both flags *drop* the clamshell axis, because the mode they select is
+    /// not `.clamshell`. `--keep-display-awake` reads purely additive — "same
+    /// as before, plus the screen stays on" — and is not: it keeps the display
+    /// lit and stops keeping a lid-shut laptop awake. A user who types
+    /// `on --for 8h --keep-display-awake`, shuts the lid and walks away loses
+    /// the eight hours, and nothing they typed hinted at it.
+    ///
+    /// `nil` for `.clamshell`, which takes nothing away and is what an
+    /// unflagged invocation already got.
+    var lidCloseCaveat: String? {
+        guard let flag = selectingFlag else { return nil }
+        return "\(flag) does not keep this Mac awake with the lid closed; only the default does."
+    }
+
+    /// How this mode reads in a `keepy-uppy sessions` row.
+    ///
+    /// The raw name is kept as the stem — it is what the README and the spec
+    /// call each mode — but it is not left to speak for itself, because the
+    /// one fact a reader is looking for is not in it. Before the flags
+    /// existed, "keeping awake" *implied* lid-safe, since every session was a
+    /// clamshell session; a `--display-may-sleep` session now prints the same
+    /// `status` output as a default one, so this listing is where the
+    /// difference has to become visible.
+    var sessionListDescription: String {
+        switch self {
+        case .clamshell: return "clamshell (survives a lid close)"
+        case .system: return "system (no lid close; display may sleep)"
+        case .systemAndDisplay: return "systemAndDisplay (no lid close; display stays on)"
+        }
+    }
 }
 
 /// `--tool` is optional context, not a selector — `finished` fires the same

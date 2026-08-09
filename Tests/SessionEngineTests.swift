@@ -145,63 +145,48 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertFalse(engine.desiredKeepAwake, "no sessions remain, so the Mac must not be kept awake")
     }
 
-    // Regression: prevents `.renewLease` from rebuilding the session with a fresh id or dropped
-    // fields, which would corrupt the max-duration backstop that keys off the original `startedAt`.
-    func testRenewLeasePreservesIdentityAndOnlyMovesDeadline() {
-        var engine = SessionEngine()
-        let original = make(.lease(expires: t0.addingTimeInterval(60)))
-        _ = engine.apply(.start(original), now: t0)
-
-        let outcome = engine.renewLease(
-            id: original.id, until: t0.addingTimeInterval(120),
-            now: t0.addingTimeInterval(30))
-
-        guard let renewed = engine.sessions.first(where: { $0.id == original.id }) else {
-            return XCTFail("the renewed session should still be present under its original id")
-        }
-
-        XCTAssertEqual(renewed.id, original.id)
-        XCTAssertEqual(renewed.owner, original.owner)
-        XCTAssertEqual(renewed.persistence, original.persistence)
-        XCTAssertEqual(renewed.origin, original.origin)
-        XCTAssertEqual(renewed.startedAt, original.startedAt)
-        XCTAssertEqual(renewed.kind, .lease(expires: t0.addingTimeInterval(120)), "only the deadline should have moved")
-        XCTAssertEqual(outcome, .renewed(renewed))
-    }
-
-    // Regression: `.renewLease` reconstructed the session by hand and, before this fix, silently
-    // dropped `triggerID`. A renewed trigger-started lease must keep its `triggerID` so
-    // `triggersToFire`'s already-active check doesn't refire the same rule after a renewal.
-    func testRenewLeasePreservesTriggerID() {
-        var engine = SessionEngine()
+    /// Renewal, as one whole-struct assertion — replacing three separate
+    /// tests that each named the fields they happened to think of
+    /// (`…PreservesIdentityAndOnlyMovesDeadline`, `…PreservesTriggerID`,
+    /// `…PreservesWakeMode`) and, between them, still missed one.
+    ///
+    /// Exactly three of `Session`'s fields carry defaults in its memberwise
+    /// initialiser — `ownerUID`, `triggerID`, `wakeMode` — and those three,
+    /// and only those three, can be silently omitted from a rebuild without
+    /// failing to compile. Two of them had been dropped from this renewal for
+    /// real; the third was still open, and deleting `ownerUID` from the copy
+    /// left all of `SessionEngineTests`, `SessionIsolationTests` and
+    /// `ClientIdentityTests` passing.
+    ///
+    /// So this names no fields at all. `Session` is `Equatable`: the lease is
+    /// built with *every* field set to a non-default value, and the
+    /// expectation comes from the same factory with only the deadline moved.
+    /// A field dropped from `Session.renewed(until:)` takes its initialiser
+    /// default, the two structs stop being equal, and this fails — whether or
+    /// not anyone thought to name it. A field added to `Session` is covered
+    /// the moment it is added to the factory below.
+    func testRenewingALeaseMovesTheDeadlineAndChangesNothingElse() {
+        let id = UUID()
         let triggerID = UUID()
-        let session = Session(id: UUID(), kind: .lease(expires: t0.addingTimeInterval(60)),
-                              owner: ClientID(rawValue: "agent"), persistence: .detached,
-                              origin: .trigger, startedAt: t0, triggerID: triggerID)
-        engine.startSession(session, now: t0, liveAgentConnections: 1)
-        _ = engine.renewLease(id: session.id, until: t0.addingTimeInterval(120), now: t0)
-        XCTAssertEqual(engine.sessions.first?.triggerID, triggerID)
-    }
-
-    // Regression, and the same trap `triggerID` fell into directly above:
-    // `.renewLease` rebuilds the session field by field, and an omitted
-    // argument does not fail to compile — it silently takes `Session.init`'s
-    // default. For `wakeMode` that default is `.clamshell`, so a renewal
-    // *escalated* the session: a client that explicitly asked for the display
-    // to be allowed to sleep got the global `SleepDisabled` turned on for it
-    // instead, at the first renewal, with nothing logged and nothing failing.
-    //
-    // Checked for every mode rather than one, so this cannot pass by
-    // accident on whichever mode happens to be the default.
-    func testRenewLeasePreservesWakeMode() {
-        for mode in WakeMode.allCases {
-            var engine = SessionEngine()
-            let session = make(.lease(expires: t0.addingTimeInterval(60)), wakeMode: mode)
-            engine.startSession(session, now: t0, liveAgentConnections: 1)
-            _ = engine.renewLease(id: session.id, until: t0.addingTimeInterval(120), now: t0)
-            XCTAssertEqual(engine.sessions.first?.wakeMode, mode,
-                           "renewing a \(mode.rawValue) lease changed its wake mode")
+        func lease(expires: Date) -> Session {
+            Session(id: id, kind: .lease(expires: expires),
+                    owner: ClientID(rawValue: "agent-501"), ownerUID: 501,
+                    persistence: .detached, origin: .trigger, startedAt: t0,
+                    triggerID: triggerID, wakeMode: .system)
         }
+
+        var engine = SessionEngine()
+        XCTAssertEqual(
+            engine.startSession(lease(expires: t0.addingTimeInterval(60)), now: t0,
+                                liveAgentConnections: 1),
+            .admitted)
+
+        let outcome = engine.renewLease(id: id, until: t0.addingTimeInterval(120),
+                                        now: t0.addingTimeInterval(30))
+
+        let expected = lease(expires: t0.addingTimeInterval(120))
+        XCTAssertEqual(engine.sessions, [expected])
+        XCTAssertEqual(outcome, .renewed(expected))
     }
 
     /// The consequence the test above exists to prevent, stated in the terms

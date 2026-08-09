@@ -52,38 +52,20 @@ final class HelperService: NSObject, HelperProtocol {
         guard let requested = try? JSONDecoder().decode(Session.self, from: sessionJSON) else {
             return reply(nil, "invalid session payload")
         }
-        // Every field of `Session` falls into exactly one of two categories,
-        // and the split is the whole security model of this method. Adding a
-        // field means deciding which category it is in — so both lists are
-        // written out here rather than left to be re-derived from which
-        // arguments happen to read `requested.`:
+        // The trusted/untrusted split — the most security-relevant step in
+        // this method — is `Session.authorized(id:owner:ownerUID:startedAt:)`,
+        // in `Shared/`. Read its doc comment for which fields the daemon owns
+        // and which the client chooses, and why.
         //
-        // SERVER-OWNED, overwritten and never trusted from the client — `id`,
-        //   `owner`, `ownerUID`, `startedAt`. A client must not be able to
-        //   mint a session "owned" by someone else, collide its id with an
-        //   existing session's, or backdate `startedAt` to dodge the
-        //   max-duration backstop. These are facts about *who is calling*,
-        //   which only the daemon can establish.
-        //
-        // CLIENT-CHOSEN, passed through as asked — `kind`, `persistence`,
-        //   `origin`, `triggerID`, and `wakeMode`. These are the *request*:
-        //   what the caller wants, which the daemon then admits or rejects on
-        //   its own terms (`DaemonRuntime.startSession`) but does not
-        //   silently rewrite. `wakeMode` is here and not above because how a
-        //   session keeps the Mac awake is the caller's business, exactly
-        //   like when it ends — there is no mode a caller can select that
-        //   would let it affect another client's session, since the daemon
-        //   unions every live session's mode itself (`PowerPlan.reduce`).
-        //
-        // Omitting `wakeMode:` here — as this call did until plan 4 task 4 —
-        // does not fail to compile: it silently takes the initialiser's
-        // `.clamshell` default, so every session in production was a
-        // clamshell session no matter what any client asked for.
-        let session = Session(id: UUID(), kind: requested.kind, owner: clientID,
-                              ownerUID: userID,
-                              persistence: requested.persistence, origin: requested.origin,
-                              startedAt: Date(), triggerID: requested.triggerID,
-                              wakeMode: requested.wakeMode)
+        // It is not written out here on purpose. `Helper/` is not reachable
+        // from the test target, so a field silently dropped from a rebuild at
+        // this call site — which does not fail to compile; it takes
+        // `Session.init`'s default — was undetectable by any test. Omitting
+        // `wakeMode:` here is exactly what made every session in production a
+        // clamshell session no matter what any client asked for. What remains
+        // below is decode, authorize, switch.
+        let session = requested.authorized(id: UUID(), owner: clientID,
+                                           ownerUID: userID, startedAt: Date())
         switch runtime.startSession(session) {
         case .started:
             reply(session.id.uuidString, nil)

@@ -73,6 +73,15 @@ guard let proxy = connect() else { fail("could not connect to the Keepy Uppy dae
 
 switch command {
 case .on(let kind, let persistence, let wakeMode):
+    // Said here, on stderr, because here is where the mistake is made: a
+    // wake-mode flag *removes* the lid-closed guarantee, and neither flag's
+    // name mentions it. stderr and not stdout — `status --json` and
+    // `sessions` output must stay machine-clean, and this is a note about
+    // the invocation, not part of the answer. `nil` for the default, which
+    // takes nothing away.
+    if let caveat = wakeMode.lidCloseCaveat {
+        FileHandle.standardError.write("keepy-uppy: note: \(caveat)\n".data(using: .utf8)!)
+    }
     // `wakeMode` needs no new XPC method and no new parameter: `Session` is
     // what crosses the boundary, as JSON, and it carries the field. See
     // `HelperProtocol.startSession` for which fields of this payload the
@@ -134,7 +143,14 @@ case .sessions:
             print("No active sessions.")
         } else {
             for session in sessions {
-                print("\(session.id)  \(session.kind)  origin=\(session.origin.rawValue)")
+                // `wake=` is here because nothing else reports it. `status`
+                // answers a boolean that is true for every mode — deliberately
+                // unchanged, scripts parse it — and the menu bar shows the
+                // same filled balloon either way, so before this line a
+                // `--display-may-sleep` session was indistinguishable from a
+                // lid-safe one in every output the product has.
+                print("\(session.id)  \(session.kind)  origin=\(session.origin.rawValue)"
+                      + "  wake=\(session.wakeMode.sessionListDescription)")
             }
         }
         semaphore.signal()

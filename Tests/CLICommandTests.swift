@@ -223,3 +223,122 @@ final class CLIWakeModeParsingTests: XCTestCase {
         XCTAssertEqual(Set(modes).count, modes.count, "two invocations selected the same mode")
     }
 }
+
+/// `parseOn` reads its arguments in one left-to-right pass. Before it did,
+/// every option ran its own `contains` scan, so nothing tracked which tokens
+/// had already been spoken for and a single token could play two roles at
+/// once.
+final class CLIOnTokenisingTests: XCTestCase {
+    private let valueTakingOptions = ["--for", "--until", "--while-app", "--while-process"]
+
+    /// The bug in its original shape: `on --while-app --display-may-sleep`
+    /// started a session watching a bundle id of "--display-may-sleep" *and*
+    /// selected `.system`, from the same argument. Refused now — no value a
+    /// human means to pass here starts with a hyphen.
+    func testAFlagCannotDoubleAsAMissingOptionsValue() {
+        for option in valueTakingOptions {
+            for flag in WakeMode.selectingFlags {
+                guard case .failure = parseCLIArguments(["on", option, flag]) else {
+                    return XCTFail("'\(option) \(flag)' must be refused, not read as \(option)'s value")
+                }
+            }
+        }
+    }
+
+    /// The same gap at the end of the line, where there is no next token at
+    /// all: the option used to be silently ignored and an indefinite session
+    /// started instead of the timed one that was asked for.
+    func testAnOptionWithNoValueIsRefused() {
+        for option in valueTakingOptions {
+            guard case .failure = parseCLIArguments(["on", option]) else {
+                return XCTFail("'\(option)' with no value must be refused")
+            }
+        }
+    }
+
+    /// A typo used to be accepted in silence, and silence here reads as "you
+    /// got what you asked for" while the session runs in the stronger default
+    /// mode the user was trying to move away from.
+    func testAnUnknownOptionIsRefused() {
+        guard case .failure = parseCLIArguments(["on", "--keep-dispaly-awake"]) else {
+            return XCTFail("a misspelled flag must be refused rather than silently ignored")
+        }
+        guard case .failure = parseCLIArguments(["on", "--for", "2h", "--frobnicate"]) else {
+            return XCTFail("an unknown option must be refused even alongside valid ones")
+        }
+    }
+
+    /// The pass must not have made order significant: a wake-mode flag before
+    /// an option is the same invocation as one after it.
+    func testOptionsAndWakeModeFlagsCombineInEitherOrder() {
+        for args in [["--keep-display-awake", "--while-app", "com.apple.dt.Xcode"],
+                     ["--while-app", "com.apple.dt.Xcode", "--keep-display-awake"]] {
+            guard case .success(.on(let kind, _, let wakeMode)) = parseCLIArguments(["on"] + args) else {
+                return XCTFail("expected .on for \(args)")
+            }
+            XCTAssertEqual(kind, .whileAppRunning(bundleID: "com.apple.dt.Xcode"))
+            XCTAssertEqual(wakeMode, .systemAndDisplay)
+        }
+    }
+}
+
+/// The wake-mode flag names, and the two strings the CLI prints about a mode.
+/// Both strings are about the one fact the flag names leave out — that
+/// choosing a display behaviour *gives up* the lid-closed guarantee — so both
+/// are pinned against `requiresSleepDisabled`, which is that guarantee.
+final class WakeModeCLISurfaceTests: XCTestCase {
+    /// The flags are the user-facing surface: renaming one silently breaks
+    /// every script and every documented invocation, so the literals are
+    /// pinned here rather than left to be re-derived from the parser.
+    func testTheFlagNamesArePinnedAndTheDefaultHasNone() {
+        XCTAssertNil(WakeMode.clamshell.selectingFlag,
+                     "the default mode is selected by absence — giving it a flag would make it optional")
+        XCTAssertEqual(WakeMode.system.selectingFlag, "--display-may-sleep")
+        XCTAssertEqual(WakeMode.systemAndDisplay.selectingFlag, "--keep-display-awake")
+    }
+
+    func testEveryFlagSelectsTheModeItNames() {
+        for mode in WakeMode.allCases {
+            guard let flag = mode.selectingFlag else { continue }
+            XCTAssertEqual(WakeMode.selectedBy(flag: flag), mode)
+            guard case .success(.on(_, _, let parsed)) = parseCLIArguments(["on", flag]) else {
+                return XCTFail("'on \(flag)' should parse")
+            }
+            XCTAssertEqual(parsed, mode)
+        }
+    }
+
+    /// The note `keepy-uppy on` prints to stderr. A mode that takes the
+    /// lid-closed guarantee away must say so, naming the flag actually typed;
+    /// the mode that keeps it has nothing to warn about and must stay quiet,
+    /// or the note becomes noise on every single invocation.
+    func testExactlyTheModesThatGiveUpTheLidGuaranteeCarryACaveat() {
+        for mode in WakeMode.allCases {
+            guard let caveat = mode.lidCloseCaveat else {
+                XCTAssertTrue(mode.requiresSleepDisabled,
+                              "\(mode.rawValue) gives up the lid-closed guarantee and says nothing about it")
+                continue
+            }
+            XCTAssertFalse(mode.requiresSleepDisabled,
+                           "\(mode.rawValue) keeps the lid-closed guarantee; warning about it would be false")
+            XCTAssertTrue(caveat.contains(mode.selectingFlag ?? ""),
+                          "the note must name the flag the user actually typed: \(caveat)")
+            XCTAssertTrue(caveat.contains("lid closed"), "the note must say what is being given up: \(caveat)")
+        }
+    }
+
+    /// The `keepy-uppy sessions` row. `status` answers a boolean that is true
+    /// for every mode, so this listing is the only place the difference
+    /// between a lid-safe session and one that is not can be seen.
+    func testASessionRowSaysWhereItsModeStandsOnTheLid() {
+        for mode in WakeMode.allCases {
+            let text = mode.sessionListDescription
+            XCTAssertTrue(text.hasPrefix(mode.rawValue),
+                          "the row should lead with the mode's own name, as the README and spec call it: \(text)")
+            XCTAssertEqual(text.contains("survives a lid close"), mode.requiresSleepDisabled,
+                           "\(mode.rawValue)'s row disagrees with whether it actually survives a lid close")
+            XCTAssertEqual(text.contains("no lid close"), !mode.requiresSleepDisabled,
+                           "\(mode.rawValue)'s row disagrees with whether it actually survives a lid close")
+        }
+    }
+}
