@@ -3,3 +3,8 @@ build/
 xcuserdata/
 DerivedData/
 .superpowers/
+
+# Generated from project.yml by xcodegen; every build path regenerates it.
+# Tracking it meant the committed copy silently drifted from the source of
+# truth — three times, most recently building none of SessionCompletionTests.
+*.xcodeproj/
