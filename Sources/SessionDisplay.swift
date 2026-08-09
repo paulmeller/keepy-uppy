@@ -26,8 +26,19 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While an external display is connected"
     case .whileOnACPower:
         return "While on AC power"
-    case .whileCPUBusy:
-        return "While the CPU is busy"
+    case .whileCPUBusy(let threshold):
+        // The threshold is named because it is now the user's to pick
+        // (`keepy-uppy on --while-cpu-busy 30`). "While the CPU is busy" was
+        // written when nothing could choose one, and it renders two sessions
+        // with different thresholds as the same row, in the one surface whose
+        // job is to say why this Mac is awake.
+        //
+        // A percentage rather than the stored fraction, matching what was typed
+        // — `Int` interpolation carries no locale, so there is no separator to
+        // vary. Rounded rather than truncated so a threshold that arrived from
+        // somewhere other than the CLI still reads as the nearest whole
+        // percentage rather than one below it.
+        return "While the CPU is at least \(Int((threshold * 100).rounded()))% busy"
     case .whileProcessRunning(let processName):
         return "While \(processName) is running"
     }

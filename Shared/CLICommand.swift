@@ -178,18 +178,56 @@ private struct ExclusiveChoice<Value> {
     }
 }
 
-/// Every option `on` accepts that takes a value. Named once, because the
-/// tokenising loop below needs both "is this a known option" and "what does it
-/// mean" and they must not be able to disagree.
+/// Every option `on` accepts that selects an **end condition** — when the
+/// session stops. Named once, because the tokenising loop below needs both "is
+/// this a known option" and "what does it mean" and they must not be able to
+/// disagree.
+///
+/// Three of these were added long after the `SessionKind` cases they select.
+/// `.whileExternalDisplay`, `.whileOnACPower` and `.whileCPUBusy` were kinds
+/// the daemon evaluated, the agent watched and no client could construct,
+/// because this list and `SessionKind` are separate enums with nothing welding
+/// them together — adding a case there compiled fine with no flag here. That is
+/// what `SessionKind.Family` and the bijection test over it now catch; read
+/// `Family`'s doc comment before adding a tenth kind.
+///
+/// Not all of them take a value: `--while-display` and `--while-ac-power` name
+/// a condition with nothing to parameterise. That does not make them wake-mode
+/// flags — those are `on`'s other, independent axis. They are end conditions,
+/// they share the `ExclusiveChoice` below, and `on --for 2h --while-display` is
+/// the same contradiction `on --for 2h --until 17:00` already is.
 private enum OnOption: String, CaseIterable {
     case duration = "--for"
     case untilTime = "--until"
     case whileApp = "--while-app"
     case whileProcess = "--while-process"
+    case whileDisplay = "--while-display"
+    case whileACPower = "--while-ac-power"
+    case whileCPUBusy = "--while-cpu-busy"
+
+    /// How this option reads in `onUsage`, value placeholder and all.
+    ///
+    /// Exhaustive, and the usage line is built from `allCases`, so a flag
+    /// cannot be added and left out of it. The rejection a user gets for a typo
+    /// carries that line, and it is the only list of `on`'s options the CLI ever
+    /// prints — a flag missing from it is a flag nobody finds, which is a milder
+    /// version of the very problem the three new ones fix.
+    var usageFragment: String {
+        switch self {
+        case .duration: return "\(rawValue) 2h"
+        case .untilTime: return "\(rawValue) 17:00"
+        case .whileApp: return "\(rawValue) <bundle-id>"
+        case .whileProcess: return "\(rawValue) <name>"
+        case .whileDisplay, .whileACPower: return rawValue
+        case .whileCPUBusy:
+            return "\(rawValue) \(cpuBusyPercentageRange.lowerBound)-\(cpuBusyPercentageRange.upperBound)"
+        }
+    }
 }
 
-private let onUsage = "usage: keepy-uppy on [--for 2h | --until 17:00 | --while-app <bundle-id> "
-    + "| --while-process <name>] [" + WakeMode.selectingFlags.joined(separator: " | ") + "]"
+private let onUsage = "usage: keepy-uppy on ["
+    + OnOption.allCases.map(\.usageFragment).joined(separator: " | ")
+    + "] [" + WakeMode.selectingFlags.joined(separator: " | ") + "]"
 
 /// One left-to-right pass over the arguments, rather than one `contains` scan
 /// per option.
@@ -249,6 +287,15 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
         case .whileProcess:
             switch scanner.value(for: token) {
             case .success(let raw): kind = .whileProcessRunning(processName: raw)
+            case .failure(let error): return .failure(error)
+            }
+        case .whileDisplay:
+            kind = .whileExternalDisplay
+        case .whileACPower:
+            kind = .whileOnACPower
+        case .whileCPUBusy:
+            switch scanner.value(for: token).flatMap(parseCPUBusyPercentage) {
+            case .success(let threshold): kind = .whileCPUBusy(threshold: threshold)
             case .failure(let error): return .failure(error)
             }
         case nil:
@@ -476,6 +523,38 @@ func parseDuration(_ string: String) -> Result<TimeInterval, CLIParseError> {
     case "h": return .success(value * 3600)
     default: return .failure(CLIParseError(message: "invalid duration unit in '\(string)' — use s, m, or h"))
     }
+}
+
+/// The whole percentages `--while-cpu-busy` accepts.
+///
+/// Both ends are excluded because each names a session that cannot do what its
+/// author meant, and `CPUBusyWindow` is where to see why: it ends a session once
+/// load has stayed **below** the threshold for two minutes, and the sampled
+/// fraction is clamped to 0...1. So `0` is a session that can never end — load
+/// cannot drop below zero — and `100` is one that ends two minutes after
+/// anything short of a pegged CPU. Neither is a rule anybody sits down to write.
+let cpuBusyPercentageRange = 1...99
+
+/// Accepts a whole percentage — `30` — and returns the fraction
+/// `SessionKind.whileCPUBusy` stores.
+///
+/// A percentage rather than the fraction itself, because a shell prompt is
+/// where "30% busy" is the natural thing to type, and because the two readings
+/// of `--while-cpu-busy 0.3` differ by a factor of a hundred with nothing to
+/// tell them apart afterwards. `0.3` therefore is not quietly taken as 30%: it
+/// means 0.3%, a threshold the CPU can never fall below, i.e. a session that
+/// never ends, and nothing about having typed it would ever say so. Refusing a
+/// value that can only produce a session that cannot work is the same call
+/// `TriggerCondition.processNameProblem` makes about a path in a process field
+/// — name it at the keyboard, where it is still one keystroke to fix.
+func parseCPUBusyPercentage(_ string: String) -> Result<Double, CLIParseError> {
+    guard let percentage = Int(string), cpuBusyPercentageRange.contains(percentage) else {
+        return .failure(CLIParseError(
+            message: "invalid --while-cpu-busy threshold '\(string)' — use a whole percentage from "
+                + "\(cpuBusyPercentageRange.lowerBound) to \(cpuBusyPercentageRange.upperBound), "
+                + "e.g. 30 for 30% busy"))
+    }
+    return .success(Double(percentage) / 100)
 }
 
 /// Accepts "HH:MM" in the local timezone, rolling to tomorrow if that

@@ -42,6 +42,20 @@ final class CLICommandParsingTests: XCTestCase {
         XCTAssertEqual(kind, .whileProcessRunning(processName: "claude"))
     }
 
+    func testOnWhileExternalDisplay() {
+        guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on", "--while-display"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertEqual(kind, .whileExternalDisplay)
+    }
+
+    func testOnWhileOnACPower() {
+        guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on", "--while-ac-power"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertEqual(kind, .whileOnACPower)
+    }
+
     func testOnRejectsMultipleEndConditions() {
         guard case .failure = parseCLIArguments(["on", "--for", "2h", "--while-app", "x"]) else {
             return XCTFail("expected failure — only one end condition allowed")
@@ -51,6 +65,20 @@ final class CLICommandParsingTests: XCTestCase {
     func testOnRejectsWhileAppCombinedWithWhileProcess() {
         guard case .failure = parseCLIArguments(["on", "--while-app", "x", "--while-process", "claude"]) else {
             return XCTFail("expected failure — only one end condition allowed")
+        }
+    }
+
+    /// The three flags added last join the same exclusive group, including the
+    /// two that take no value — a valueless flag is still an end condition, and
+    /// a session has exactly one.
+    func testOnRejectsTheValuelessEndConditionsCombinedWithAnother() {
+        for args in [["--for", "2h", "--while-display"],
+                     ["--while-ac-power", "--while-cpu-busy", "30"],
+                     ["--while-display", "--while-ac-power"],
+                     ["--while-display", "--while-display"]] {
+            guard case .failure = parseCLIArguments(["on"] + args) else {
+                return XCTFail("'on \(args.joined(separator: " "))' must be refused — one end condition")
+            }
         }
     }
 
@@ -224,12 +252,83 @@ final class CLIWakeModeParsingTests: XCTestCase {
     }
 }
 
+/// `on`'s *first* axis — when the session ends — held the same hole the wake
+/// mode axis did, one level up and three cases wide: `.whileExternalDisplay`,
+/// `.whileOnACPower` and `.whileCPUBusy` were kinds the daemon evaluated and no
+/// client could ask for. Nothing linked `CLICommand`'s flag list to
+/// `SessionKind`, so each of them compiled, shipped and did nothing.
+final class CLISessionKindReachabilityTests: XCTestCase {
+    /// The `WakeMode` reachability test, one level up. A kind the daemon can hold
+    /// and no client can ask for is dead code that looks like a feature — three of
+    /// them accumulated unnoticed. `Family` is `CaseIterable`, so this fails the day
+    /// a tenth kind is added with no way to select it.
+    func testEverySessionKindIsReachableFromTheCommandLine() {
+        let invocations: [[String]] = [
+            [], ["--for", "2h"], ["--until", "17:00"],
+            ["--while-app", "com.apple.dt.Xcode"], ["--while-process", "claude"],
+            ["--while-display"], ["--while-ac-power"], ["--while-cpu-busy", "30"],
+        ]
+        let reachable = Set(invocations.compactMap { flags -> SessionKind.Family? in
+            guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on"] + flags) else { return nil }
+            return kind.family
+        })
+        // `.lease` is the one deliberate exclusion: it is created by the XPC
+        // lease/renew path, not by `on`, and there is no flag that should make one.
+        XCTAssertEqual(reachable, Set(SessionKind.Family.allCases).subtracting([.lease]))
+    }
+
+    func testCPUBusyThresholdIsParsedAsAPercentage() {
+        guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on", "--while-cpu-busy", "30"]) else {
+            return XCTFail("expected a session kind")
+        }
+        XCTAssertEqual(kind, .whileCPUBusy(threshold: 0.30))
+    }
+
+    /// `"0.3"` is in this list on purpose: the flag takes a **percentage**
+    /// (`30`), not a fraction, so `0.3` means 0.3% — a threshold the CPU can
+    /// never fall below, i.e. a session that never ends. `0` and `100` are the
+    /// two ends of the same argument: `CPUBusyWindow` ends a session once load
+    /// stays *below* the threshold, so `0` can never end and `100` ends after
+    /// two minutes of anything short of a pegged CPU.
+    func testCPUBusyRejectsAThresholdOutsideItsRange() {
+        for bad in ["0", "100", "-5", "banana", "0.3"] {
+            guard case .failure = parseCLIArguments(["on", "--while-cpu-busy", bad]) else {
+                return XCTFail("'--while-cpu-busy \(bad)' must be refused")
+            }
+        }
+    }
+
+    /// The two ends that must still be accepted, so the rejection above is a
+    /// bound rather than a moat.
+    func testCPUBusyAcceptsBothEndsOfItsRange() {
+        for (percentage, threshold) in [("1", 0.01), ("99", 0.99)] {
+            guard case .success(.on(let kind, _, _)) =
+                    parseCLIArguments(["on", "--while-cpu-busy", percentage]) else {
+                return XCTFail("'--while-cpu-busy \(percentage)' must be accepted")
+            }
+            XCTAssertEqual(kind, .whileCPUBusy(threshold: threshold))
+        }
+    }
+
+    /// A rejected threshold has to say what to type instead — "0.3" is the case
+    /// where the user believes they gave a perfectly good number.
+    func testARejectedThresholdNamesTheValueAndTheRange() {
+        guard case .failure(let error) = parseCLIArguments(["on", "--while-cpu-busy", "0.3"]) else {
+            return XCTFail("expected failure")
+        }
+        XCTAssertTrue(error.message.contains("0.3"), "the message must quote what was typed: \(error.message)")
+        XCTAssertTrue(error.message.contains("1 to 99"),
+                      "the message must give the range that would work: \(error.message)")
+    }
+}
+
 /// `parseOn` reads its arguments in one left-to-right pass. Before it did,
 /// every option ran its own `contains` scan, so nothing tracked which tokens
 /// had already been spoken for and a single token could play two roles at
 /// once.
 final class CLIOnTokenisingTests: XCTestCase {
-    private let valueTakingOptions = ["--for", "--until", "--while-app", "--while-process"]
+    private let valueTakingOptions = ["--for", "--until", "--while-app", "--while-process",
+                                      "--while-cpu-busy"]
 
     /// The bug in its original shape: `on --while-app --display-may-sleep`
     /// started a session watching a bundle id of "--display-may-sleep" *and*
@@ -428,6 +527,19 @@ final class CLIRejectionMessageTests: XCTestCase {
         let message = rejection(["on", "--for", "2h", "--until", "17:00"])
         XCTAssertTrue(message.contains("--for") && message.contains("--until"),
                       "a genuine conflict should name the conflicting options: \(message)")
+    }
+
+    /// A flag that works but is not in the usage line is only half-added. That
+    /// line is the only list of `on`'s options the CLI ever prints, so a flag
+    /// missing from it is one nobody finds — a milder version of the kind
+    /// nobody could ask for.
+    func testTheUsageLineAdvertisesEveryOptionOnAccepts() {
+        let message = rejection(["on", "--frobnicate"])
+        for flag in ["--for", "--until", "--while-app", "--while-process",
+                     "--while-display", "--while-ac-power", "--while-cpu-busy"]
+                    + WakeMode.selectingFlags {
+            XCTAssertTrue(message.contains(flag), "'on''s usage line does not mention \(flag): \(message)")
+        }
     }
 
     /// An unknown option is only actionable if the user can see which

@@ -20,6 +20,56 @@ enum SessionKind: Equatable, Codable {
     /// bind that session's lifetime to the condition."
     case whileProcessRunning(processName: String)
 
+    /// A kind's identity without its associated value, so that `CaseIterable`
+    /// guarantees are available to anything that has to cover every kind: the
+    /// CLI-reachability test, and `wireDescription`'s stable external names.
+    ///
+    /// It exists because `SessionKind` cannot be `CaseIterable` (four of its
+    /// cases carry values) and nothing therefore linked the set of kinds to the
+    /// set of ways to *ask* for one. Three kinds —
+    /// `.whileExternalDisplay`, `.whileOnACPower` and `.whileCPUBusy` — were
+    /// evaluated by the daemon and the agent, encoded, decoded, described on the
+    /// wire, and constructible by no client at all: `CLICommand`'s flag list is
+    /// a separate enum, so adding a case here compiled cleanly with no flag to
+    /// select it. Exactly the shape of the `WakeMode` reachability hole Plan 4
+    /// closed, and of the `TriggerConditionKind` one Plan 5 closed, one level up.
+    ///
+    /// `Tests/CLICommandTests.swift` asserts a bijection between
+    /// `Family.allCases` (minus `.lease`, which the XPC lease path creates and
+    /// no flag should) and the kinds `keepy-uppy on` can produce, so a tenth
+    /// kind with no way to select it fails a test instead of lurking.
+    ///
+    /// Raw values are exactly the wire stems `wireDescription` already emits and
+    /// `Tests/SessionCompletionTests.swift` already pins, so deriving that
+    /// property from this enum is verified by tests that predate it.
+    enum Family: String, CaseIterable {
+        case indefinite, duration
+        case untilTime = "until-time"
+        case lease
+        case whileAppRunning = "while-app-running"
+        case whileExternalDisplay = "while-external-display"
+        case whileOnACPower = "while-on-ac-power"
+        case whileCPUBusy = "while-cpu-busy"
+        case whileProcessRunning = "while-process-running"
+    }
+
+    /// This kind's family, dropping its associated value. Exhaustive, so a new
+    /// case cannot be added without giving it one — which is what makes
+    /// `Family.allCases` a trustworthy list of every kind there is.
+    var family: Family {
+        switch self {
+        case .indefinite: return .indefinite
+        case .duration: return .duration
+        case .untilTime: return .untilTime
+        case .lease: return .lease
+        case .whileAppRunning: return .whileAppRunning
+        case .whileExternalDisplay: return .whileExternalDisplay
+        case .whileOnACPower: return .whileOnACPower
+        case .whileCPUBusy: return .whileCPUBusy
+        case .whileProcessRunning: return .whileProcessRunning
+        }
+    }
+
     /// Kinds the daemon can evaluate alone. Everything else needs the agent,
     /// and so cannot outlive it (spec §5).
     var isDaemonEvaluable: Bool {
@@ -45,22 +95,26 @@ enum SessionKind: Equatable, Codable {
     /// instead of breaking somebody's webhook consumer in production.
     ///
     /// The shape is `name` or `name:value`, lowercase kebab-case, where the
-    /// value is everything after the *first* colon. Only the two kinds whose
-    /// associated value identifies *what was being watched* carry one; a
-    /// deadline is deliberately omitted (the event already carries `endedAt`)
-    /// and so is `.whileCPUBusy`'s threshold, so that no `Double` formatting
-    /// — and therefore no locale — can ever reach the wire.
+    /// value is everything after the *first* colon. The name is `Family`'s raw
+    /// value rather than a second copy of the same nine literals — one list, so
+    /// a kind cannot be named one thing here and another there. Only the two
+    /// kinds whose associated value identifies *what was being watched* carry a
+    /// value; a deadline is deliberately omitted (the event already carries
+    /// `endedAt`) and so is `.whileCPUBusy`'s threshold, so that no `Double`
+    /// formatting — and therefore no locale — can ever reach the wire.
+    ///
+    /// Still an exhaustive `switch` rather than a `default`, for the reason
+    /// `TriggerConditionKind.bindsSessionLifetime` is one: whether a new kind
+    /// puts something after the colon is a decision its author has to meet, and
+    /// a `default` would answer "no" on their behalf, silently, in the one place
+    /// whose output leaves the machine.
     var wireDescription: String {
         switch self {
-        case .indefinite: return "indefinite"
-        case .duration: return "duration"
-        case .untilTime: return "until-time"
-        case .lease: return "lease"
-        case .whileAppRunning(let bundleID): return "while-app-running:\(bundleID)"
-        case .whileExternalDisplay: return "while-external-display"
-        case .whileOnACPower: return "while-on-ac-power"
-        case .whileCPUBusy: return "while-cpu-busy"
-        case .whileProcessRunning(let processName): return "while-process-running:\(processName)"
+        case .whileAppRunning(let bundleID): return "\(family.rawValue):\(bundleID)"
+        case .whileProcessRunning(let processName): return "\(family.rawValue):\(processName)"
+        case .indefinite, .duration, .untilTime, .lease, .whileExternalDisplay,
+             .whileOnACPower, .whileCPUBusy:
+            return family.rawValue
         }
     }
 

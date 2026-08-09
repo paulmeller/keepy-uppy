@@ -32,6 +32,32 @@ final class SessionDisplayTests: XCTestCase {
         XCTAssertEqual(remainingTimeText(for: session(.whileExternalDisplay), now: t0), "While an external display is connected")
     }
 
+    func testWhileOnACPowerShowsItsCondition() {
+        XCTAssertEqual(remainingTimeText(for: session(.whileOnACPower), now: t0), "While on AC power")
+    }
+
+    /// The row has to name the threshold, because the threshold is now the
+    /// user's to pick: two `--while-cpu-busy` sessions with different numbers
+    /// would otherwise be one indistinguishable row repeated, in the one place
+    /// the menu explains why the Mac is awake.
+    func testWhileCPUBusyNamesTheThresholdItWasGiven() {
+        XCTAssertEqual(remainingTimeText(for: session(.whileCPUBusy(threshold: 0.30)), now: t0),
+                       "While the CPU is at least 30% busy")
+        XCTAssertEqual(remainingTimeText(for: session(.whileCPUBusy(threshold: 0.05)), now: t0),
+                       "While the CPU is at least 5% busy")
+    }
+
+    /// The units, end to end. `SessionKind` stores a fraction and the flag takes
+    /// a percentage, so the two sides can disagree by a factor of a hundred
+    /// while each looks right on its own — `--while-cpu-busy 30` rendering as
+    /// "3000% busy" is what that mistake looks like from the menu.
+    func testTheThresholdTypedOnTheCommandLineIsTheThresholdShown() {
+        guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on", "--while-cpu-busy", "30"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertEqual(remainingTimeText(for: session(kind), now: t0), "While the CPU is at least 30% busy")
+    }
+
     func testWhileProcessRunningShowsTheProcessCondition() {
         let s = session(.whileProcessRunning(processName: "claude"))
         XCTAssertEqual(remainingTimeText(for: s, now: t0), "While claude is running")

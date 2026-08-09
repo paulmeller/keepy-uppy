@@ -83,11 +83,22 @@ keepy-uppy on --for 2h
 keepy-uppy on --until 17:00
 keepy-uppy on --while-app com.apple.dt.Xcode # until Xcode quits
 keepy-uppy on --while-process claude         # until the process exits
+keepy-uppy on --while-display                # until the external screen is unplugged
+keepy-uppy on --while-ac-power               # until the charger comes out
+keepy-uppy on --while-cpu-busy 30            # until the CPU drops under 30% for 2 min
 keepy-uppy off                               # stop yours
 keepy-uppy off --all                         # stop everything
 keepy-uppy status --json                     # {"keepingAwake": true}
 keepy-uppy sessions
 ```
+
+The last three end when something stops being true, so they are refused up
+front when it already isn't: `--while-ac-power` wants the charger in when you
+start, and `--while-display` and `--while-cpu-busy` want the per-user agent
+running, since a daemon with no login session can see neither a screen nor a
+CPU. `--while-cpu-busy` takes a whole percentage from 1 to 99, and needs two
+solid minutes below it before it gives up — a lull between test runs won't end
+your session.
 
 `on` also takes one flag saying *how* awake, and it combines with any of the
 above:
@@ -210,8 +221,9 @@ machine in a bag.
 
 The build on [Releases](../../releases) is **v0.1.0**, cut before wake modes
 existed — no `--display-may-sleep`, no `--keep-display-awake`, no picker in
-Settings. Those are on `main` and haven't been notarized into a release yet, so
-build it yourself if you want them now.
+Settings, and none of `--while-display`, `--while-ac-power` or
+`--while-cpu-busy`. Those are on `main` and haven't been notarized into a
+release yet, so build it yourself if you want them now.
 
 If something misbehaves, an issue with the daemon log is genuinely useful:
 
