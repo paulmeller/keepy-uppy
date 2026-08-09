@@ -185,3 +185,50 @@ func backgroundServicesFootnote(_ state: OnboardingService.State) -> String {
         return "Keepy Uppy can't keep this Mac awake until these are enabled."
     }
 }
+
+// MARK: - Menu bar
+
+/// The menu's first line: what is happening, in one glance, with no jargon.
+///
+/// It is a *label*, never a button. The previous menu made each session row
+/// itself the stop button, with the verb buried at the end of
+/// "Indefinite — Started manually — Stop" — so the one interactive thing in
+/// the list read as a status line, and the two facts in front of the verb were
+/// noise. Status and action are separate things now.
+func menuStatusLine(mine: [Session], others: [Session], now: Date) -> String {
+    let all = mine.count + others.count
+    guard all > 0 else { return "Not keeping awake" }
+    if all == 1, let only = (mine + others).first {
+        return "Keeping awake — \(remainingTimeText(for: only, now: now).lowercased())"
+    }
+    if others.isEmpty { return "Keeping awake — \(all) sessions" }
+    if mine.isEmpty { return "Keeping awake — \(all) sessions, none yours" }
+    return "Keeping awake — \(all) sessions, \(mine.count) yours"
+}
+
+/// Verb first, so the row is visibly a thing you can do. With exactly one
+/// session of your own there is nothing to disambiguate, so it says the plain
+/// thing rather than quoting a description back at you.
+func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> String {
+    guard !isOnlyOneOfMine else { return "Stop keeping awake" }
+    return "Stop “\(remainingTimeText(for: session, now: now).lowercased())”"
+}
+
+/// Origin earns a mention only when it is surprising. "Started manually" on a
+/// session you started by hand is noise; "started automatically" on one that
+/// appeared by itself is the whole story.
+func menuAutomaticSuffix(for session: Session) -> String {
+    session.origin == .trigger ? " (started automatically)" : ""
+}
+
+/// Sessions belonging to the CLI, the agent, or another user. They are shown
+/// — the menu's job is to answer "why is my Mac awake", whoever caused it —
+/// but this app cannot stop them, and a button that silently does nothing is
+/// worse than a line of text.
+func menuForeignSessionLabel(for session: Session, now: Date) -> String {
+    "\(remainingTimeText(for: session, now: now)) — started elsewhere"
+}
+
+func menuStartLabel(_ kind: DefaultSessionKind) -> String {
+    "Keep awake \(kind.durationPhrase)"
+}

@@ -154,3 +154,78 @@ final class EffectiveBatteryCutoffTests: XCTestCase {
         XCTAssertEqual(config.effectiveBatteryCutoff(lidClosed: true), 10)
     }
 }
+
+/// The menu is the only surface most people ever see, and its previous
+/// wording — "Indefinite — Started manually — Stop" — hid the verb behind two
+/// pieces of trivia on a row that was secretly a button. These pin the shape
+/// that replaced it.
+final class MenuCopyTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+    private let mineID = ClientID(rawValue: "app-501")
+    private let theirsID = ClientID(rawValue: "cli-501")
+
+    private func session(_ kind: SessionKind, owner: ClientID, origin: SessionOrigin = .manual) -> Session {
+        Session(id: UUID(), kind: kind, owner: owner, persistence: .clientBound,
+                origin: origin, startedAt: t0)
+    }
+
+    func testIdleSaysSoPlainly() {
+        XCTAssertEqual(menuStatusLine(mine: [], others: [], now: t0), "Not keeping awake")
+    }
+
+    func testOneSessionNamesWhatItIsRatherThanCountingIt() {
+        let line = menuStatusLine(mine: [session(.indefinite, owner: mineID)], others: [], now: t0)
+        XCTAssertEqual(line, "Keeping awake — indefinite")
+    }
+
+    func testStatusDistinguishesSessionsYouCannotStop() {
+        let line = menuStatusLine(mine: [session(.indefinite, owner: mineID)],
+                                  others: [session(.indefinite, owner: theirsID)], now: t0)
+        XCTAssertTrue(line.contains("2 sessions"))
+        XCTAssertTrue(line.contains("1 yours"), "the menu must say how many are actually yours: \(line)")
+
+        let noneMine = menuStatusLine(mine: [], others: [session(.indefinite, owner: theirsID),
+                                                        session(.indefinite, owner: theirsID)], now: t0)
+        XCTAssertTrue(noneMine.contains("none yours"), noneMine)
+    }
+
+    func testTheStopLabelLeadsWithTheVerb() {
+        for label in [menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfMine: true, now: t0),
+                      menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfMine: false, now: t0)] {
+            XCTAssertTrue(label.hasPrefix("Stop"), "\(label) must read as an action, not a status")
+        }
+    }
+
+    func testASingleSessionNeedsNoDescriptionQuotedBackAtYou() {
+        XCTAssertEqual(
+            menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfMine: true, now: t0),
+            "Stop keeping awake")
+    }
+
+    func testSeveralSessionsAreDistinguishableFromEachOther() {
+        let timed = session(.duration(until: t0.addingTimeInterval(3600)), owner: mineID)
+        let label = menuStopLabel(for: timed, isOnlyOneOfMine: false, now: t0)
+        XCTAssertNotEqual(label, "Stop keeping awake")
+        XCTAssertTrue(label.contains("1h"), label)
+    }
+
+    func testOriginIsMentionedOnlyWhenItIsSurprising() {
+        // "Started manually" on a session you started by hand is noise; the
+        // automatic case is the one worth a word.
+        XCTAssertEqual(menuAutomaticSuffix(for: session(.indefinite, owner: mineID, origin: .manual)), "")
+        XCTAssertTrue(menuAutomaticSuffix(for: session(.indefinite, owner: mineID, origin: .trigger))
+            .contains("automatically"))
+    }
+
+    func testForeignSessionsSayWhyTheyCannotBeStopped() {
+        let label = menuForeignSessionLabel(for: session(.indefinite, owner: theirsID), now: t0)
+        XCTAssertFalse(label.hasPrefix("Stop"), "not a button — this app cannot stop it: \(label)")
+        XCTAssertTrue(label.contains("elsewhere"), label)
+    }
+
+    func testStartLabelsReadAsInstructionsNotNouns() {
+        XCTAssertEqual(menuStartLabel(.indefinite), "Keep awake indefinitely")
+        XCTAssertEqual(menuStartLabel(.oneHour), "Keep awake for 1 hour")
+        XCTAssertEqual(menuStartLabel(.eightHours), "Keep awake for 8 hours")
+    }
+}

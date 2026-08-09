@@ -20,56 +20,71 @@ struct MenuContent: View {
         DefaultSessionKind(rawValue: defaultKindRaw) ?? .indefinite
     }
 
+    /// The identity the daemon stamps on sessions this app starts, derived the
+    /// same way the daemon derives it — from the app's role and this user's
+    /// uid. Sessions with any other owner belong to the CLI, the agent, or
+    /// another user, and this app cannot stop them.
+    private var myClientID: ClientID {
+        ClientRole.app.clientID(forUserID: UInt32(getuid()))
+    }
+
+    private var mine: [Session] { daemon.sessions.filter { $0.owner == myClientID } }
+    private var others: [Session] { daemon.sessions.filter { $0.owner != myClientID } }
+
     var body: some View {
+        let now = Date()
+
+        // Status, then actions — deliberately not the same line. Previously
+        // each session row *was* the stop button, labelled
+        // "Indefinite — Started manually — Stop", which read as a status line
+        // and hid its own verb behind two pieces of trivia.
         if !daemon.isConnected {
             Text("Not connected to Keepy Uppy daemon")
-        } else if daemon.sessions.isEmpty {
-            Text("Not keeping awake")
         } else {
-            ForEach(daemon.sessions) { session in
+            Text(menuStatusLine(mine: mine, others: others, now: now))
+        }
+
+        if daemon.isConnected && !daemon.sessions.isEmpty {
+            Divider()
+
+            ForEach(mine) { session in
                 Button {
                     Task { await daemon.stopSession(session.id) }
                 } label: {
-                    Text("\(remainingTimeText(for: session, now: Date())) — \(originText(for: session)) — Stop")
+                    Text(menuStopLabel(for: session, isOnlyOneOfMine: mine.count == 1, now: now)
+                         + menuAutomaticSuffix(for: session))
                 }
+            }
+
+            // Only worth offering once there is more than one to sweep; with a
+            // single session it would just duplicate the line above it, which
+            // is how the old menu ended up with two different stop buttons.
+            if mine.count > 1 {
+                Button("Stop all mine") {
+                    Task { await daemon.stopAllSessions(all: false) }
+                }
+            }
+
+            // Shown, never clickable. `stopAllSessions(all: false)` scopes to
+            // this client by design (`SessionIsolation`), so offering to stop
+            // these would be a button that silently does nothing — the same
+            // failure the old "Stop All" label had.
+            ForEach(others) { session in
+                Text(menuForeignSessionLabel(for: session, now: now))
             }
         }
 
         Divider()
 
-        // The stored default goes first, above a divider, with the other
-        // choices below it. Until the final whole-branch review (Item 3) this
-        // submenu iterated `allCases` unconditionally and never read
-        // `defaultKindRaw` at all, so Settings' "Default Session" picker was
-        // entirely inert — deliberately kept to the smallest change that
-        // makes the stored preference observably do something.
-        Menu("Start…") {
-            Button(defaultKind.label) {
-                Task { await daemon.startSession(kind: defaultKind.sessionKind(now: Date())) }
-            }
-
-            Divider()
-
-            ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
-                Button(kind.label) {
-                    Task { await daemon.startSession(kind: kind.sessionKind(now: Date())) }
-                }
-            }
+        // Flat, not a submenu. Starting a session is the most common thing
+        // anyone does here, and it used to take three interactions: open the
+        // menu, hover "Start…", wait, then pick. The stored default leads.
+        Button(menuStartLabel(defaultKind)) {
+            Task { await daemon.startSession(kind: defaultKind.sessionKind(now: Date())) }
         }
-
-        if !daemon.sessions.isEmpty {
-            // NOT "Stop All": `stopAllSessions(all: false)` stops only this
-            // app's own sessions (`SessionIsolation.sessionsToStop`), while
-            // the list above deliberately shows every client's sessions so
-            // the user can see why their Mac is awake. Labelling that "Stop
-            // All" meant a CLI-started session stayed visibly running after
-            // the click, looking like a silent failure. Passing `all: true`
-            // would be the wrong fix — it is exactly the cross-client
-            // isolation this project built `SessionIsolation` to prevent —
-            // so the label is what changes (final whole-branch review,
-            // Item 4).
-            Button("Stop My Sessions") {
-                Task { await daemon.stopAllSessions(all: false) }
+        ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
+            Button(menuStartLabel(kind)) {
+                Task { await daemon.startSession(kind: kind.sessionKind(now: Date())) }
             }
         }
 
@@ -97,7 +112,6 @@ struct MenuContent: View {
         }
     }
 }
-
 
 /// `SettingsLink` opens the scene but cannot also activate the app, and
 /// `SettingsView.onAppear` only fires the first time — so with the window
