@@ -110,6 +110,22 @@ protocol ProcessRunningObserving {
     func isRunning(processName: String) -> ConditionReading
 }
 
+/// Whether a volume of a given name is mounted right now.
+///
+/// Matched on the **name Finder shows**, not on the mount path, and that is a
+/// correctness decision rather than a convenience: the same disk mounts at
+/// `/Volumes/Backup 1` when something else already holds `/Volumes/Backup`,
+/// so a rule written against a path silently stops matching the day it is
+/// plugged in second.
+///
+/// Conformers are expected to live for exactly one evidence-loop tick, for
+/// `ProcessRunningObserving`'s reason: one enumeration answers every rule and
+/// every session on that tick, and a cache whose lifetime is the tick cannot
+/// go stale.
+protocol MountedVolumeObserving {
+    func isMounted(volumeName: String) -> ConditionReading
+}
+
 /// Lives here with the other three rather than in
 /// Agent/ConditionObservers.swift (where it used to sit, on the grounds that
 /// nothing outside the agent evaluates CPU-busy conditions) so that the whole
@@ -180,6 +196,7 @@ struct ObserverSet {
     var display: DisplayObserving
     var processRunning: ProcessRunningObserving
     var frontmostApp: FrontmostAppObserving
+    var mountedVolume: MountedVolumeObserving
     var acPower: ConditionReading
     var cpuBusy: CPUBusyReading
 }

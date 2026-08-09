@@ -177,6 +177,8 @@ final class SessionCompletionTests: XCTestCase {
         XCTAssertEqual(SessionKind.whileCPUBusy(threshold: 0.25).wireDescription, "while-cpu-busy")
         XCTAssertEqual(SessionKind.whileProcessRunning(processName: "claude").wireDescription,
                        "while-process-running:claude")
+        XCTAssertEqual(SessionKind.whileVolumeMounted(name: "Backup").wireDescription,
+                       "while-volume-mounted:Backup")
     }
 
     /// Every kind must have a name, and no two may share one — otherwise a
@@ -187,6 +189,7 @@ final class SessionCompletionTests: XCTestCase {
             .indefinite, .duration(until: t0), .untilTime(t0), .lease(expires: t0),
             .whileAppRunning(bundleID: "a"), .whileExternalDisplay, .whileOnACPower,
             .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "b"),
+            .whileVolumeMounted(name: "c"),
         ]
         let names = all.map(\.wireDescription)
         XCTAssertEqual(Set(names).count, all.count)

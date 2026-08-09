@@ -403,6 +403,81 @@ struct SysctlProcessTableReader: ProcessTableReading {
     }()
 }
 
+// MARK: - Mounted volumes
+
+/// The result of one enumeration of the mounted volumes: every name a
+/// `.volumeMounted` rule could match, or an explicit admission that the list
+/// could not be read. The same shape, and the same reason, as
+/// `ProcessTableReadResult`.
+enum MountedVolumeReading: Equatable {
+    case names(Set<String>)
+    case unavailable
+}
+
+/// Reading the volume list, split out from matching against it so the
+/// matching (and its memoization) is testable with no real disk, and so one
+/// enumeration serves every rule and every session on a tick.
+protocol MountedVolumeReader {
+    func read() -> MountedVolumeReading
+}
+
+/// `FileManager.mountedVolumeURLs` plus one `volumeName` lookup per volume.
+///
+/// **`.skipHiddenVolumes` is load-bearing, not tidiness.** Without it this
+/// machine reports twelve volumes — `VM`, `Preboot`, `Update`, `xART`,
+/// `iSCPreboot`, `Hardware`, two simulator runtimes, a cryptex — none of
+/// which a user has ever seen in Finder, and any of which a rule could then
+/// name. With it, the same read reports two: `Macintosh HD` and whatever is
+/// actually plugged in. Measured, both ways, with a test image mounted. It
+/// also keeps the Add sheet's picker and this observer looking at one list,
+/// so the sheet cannot offer a volume the observer will never match.
+///
+/// **An empty array is `.unavailable`, and that is deliberate.** `/` is
+/// always mounted and is never hidden, so "no volumes at all" is not a Mac
+/// with nothing plugged in — it is an enumeration that failed. Reporting it
+/// as `.names([])` would read as a confident "your backup drive is gone" and
+/// would end every live `.whileVolumeMounted` session at once. This is the
+/// line a later reader will want to "simplify"; it is the same argument as
+/// `SystemAppRunningObserver`'s empty-list guard.
+struct MountedVolumeURLsReader: MountedVolumeReader {
+    func read() -> MountedVolumeReading {
+        guard let urls = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: [.volumeNameKey], options: [.skipHiddenVolumes])
+        else { return .unavailable }
+        guard !urls.isEmpty else { return .unavailable }
+        // A single volume that will not answer for its own name is a
+        // per-volume shortfall, not a failure to read the list — exactly as a
+        // process that exits mid-enumeration still contributes its `p_comm`.
+        return .names(Set(urls.compactMap {
+            (try? $0.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
+        }))
+    }
+}
+
+/// Answers `.volumeMounted` questions from a single volume enumeration.
+///
+/// Memoized for the same reason, and with the same safety-by-construction, as
+/// `SystemProcessRunningObserver`: there is no way to clear the cache because
+/// `EvidenceLoopRunner` builds a new observer every tick, so the cache's
+/// lifetime *is* the tick.
+final class SystemMountedVolumeObserver: MountedVolumeObserving {
+    private let reader: MountedVolumeReader
+    private var thisTick: MountedVolumeReading?
+
+    init(reader: MountedVolumeReader = MountedVolumeURLsReader()) {
+        self.reader = reader
+    }
+
+    func isMounted(volumeName: String) -> ConditionReading {
+        let result = thisTick ?? reader.read()
+        thisTick = result
+        switch result {
+        case .names(let names): return ConditionReading(names.contains(volumeName))
+        case .unavailable: return .undetermined
+        }
+    }
+}
+
 /// Answers `.processRunning` questions from a single process-table read.
 ///
 /// The table is ~530 entries for one uid and costs a few milliseconds to

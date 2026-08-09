@@ -204,6 +204,7 @@ private enum OnOption: String, CaseIterable {
     case whileDisplay = "--while-display"
     case whileACPower = "--while-ac-power"
     case whileCPUBusy = "--while-cpu-busy"
+    case whileVolume = "--while-volume"
 
     /// How this option reads in `onUsage`, value placeholder and all.
     ///
@@ -218,6 +219,9 @@ private enum OnOption: String, CaseIterable {
         case .untilTime: return "\(rawValue) 17:00"
         case .whileApp: return "\(rawValue) <bundle-id>"
         case .whileProcess: return "\(rawValue) <name>"
+        // The name Finder shows, not a mount path — see
+        // `MountedVolumeObserving` for why a path cannot be matched on.
+        case .whileVolume: return "\(rawValue) <volume-name>"
         case .whileDisplay, .whileACPower: return rawValue
         case .whileCPUBusy:
             return "\(rawValue) \(cpuBusyPercentageRange.lowerBound)-\(cpuBusyPercentageRange.upperBound)"
@@ -287,6 +291,11 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
         case .whileProcess:
             switch scanner.value(for: token) {
             case .success(let raw): kind = .whileProcessRunning(processName: raw)
+            case .failure(let error): return .failure(error)
+            }
+        case .whileVolume:
+            switch scanner.value(for: token) {
+            case .success(let raw): kind = .whileVolumeMounted(name: raw)
             case .failure(let error): return .failure(error)
             }
         case .whileDisplay:

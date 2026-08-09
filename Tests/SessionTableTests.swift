@@ -244,6 +244,10 @@ final class SessionKindEvaluationTests: XCTestCase {
         // can see the process table, so a `.whileProcessRunning` session that
         // outlived the agent would be a session nothing could ever end.
         XCTAssertFalse(SessionKind.whileProcessRunning(processName: "claude").isDaemonEvaluable)
+        // Same reasoning again: only the agent enumerates mounted volumes, so
+        // a `.whileVolumeMounted` session outliving the agent would be one
+        // nothing could ever end.
+        XCTAssertFalse(SessionKind.whileVolumeMounted(name: "Backup").isDaemonEvaluable)
     }
 
     /// `.whileProcessRunning` was added to `SessionKind` and to
@@ -257,6 +261,7 @@ final class SessionKindEvaluationTests: XCTestCase {
             .indefinite, .duration(until: t0), .untilTime(t0), .lease(expires: t0), .whileOnACPower,
             .whileAppRunning(bundleID: "com.apple.dt.Xcode"), .whileExternalDisplay,
             .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "claude"),
+            .whileVolumeMounted(name: "Backup"),
         ]
         for kind in allKinds {
             let daemonCanEvaluateItAlone: Bool
@@ -265,11 +270,12 @@ final class SessionKindEvaluationTests: XCTestCase {
                 daemonCanEvaluateItAlone = true   // pure clock arithmetic
             case .whileOnACPower:
                 daemonCanEvaluateItAlone = true   // the daemon reads IOKit power itself
-            case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning:
+            case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
+                 .whileVolumeMounted:
                 daemonCanEvaluateItAlone = false  // needs the agent's observers
             }
             XCTAssertEqual(kind.isDaemonEvaluable, daemonCanEvaluateItAlone, "\(kind)")
         }
-        XCTAssertEqual(allKinds.count, 9, "a case was added to SessionKind but not to allKinds")
+        XCTAssertEqual(allKinds.count, 10, "a case was added to SessionKind but not to allKinds")
     }
 }

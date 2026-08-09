@@ -41,6 +41,8 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While the CPU is at least \(Int((threshold * 100).rounded()))% busy"
     case .whileProcessRunning(let processName):
         return "While \(processName) is running"
+    case .whileVolumeMounted(let name):
+        return "While \(name) is mounted"
     }
 }
 
@@ -91,6 +93,7 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
     case .acPowerConnected: return "Power is connected"
     case .processRunning: return "A process is running"
     case .appFrontmost: return "An app comes to the front"
+    case .volumeMounted: return "A volume is mounted"
     }
 }
 
@@ -106,9 +109,10 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
 /// truth, because `sessionKind(firing:now:)` starts the bound kind and
 /// `sessionsToEnd` really does end it.
 ///
-/// `.processRunning` is the only such condition today. Which one says "while" is
-/// pinned against `bindsSessionLifetime` in `SessionDisplayTests`, not against a
-/// list of case names, so a fifth condition cannot pick the wrong voice quietly.
+/// `.processRunning` and `.volumeMounted` are the two such conditions today.
+/// Which ones say "while" is pinned against `bindsSessionLifetime` in
+/// `SessionDisplayTests`, not against a list of case names, so a seventh
+/// condition cannot pick the wrong voice quietly.
 func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     switch condition {
     case .appLaunched(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) launches"
@@ -116,6 +120,7 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     case .acPowerConnected: return "When power is connected"
     case .processRunning(let processName): return "While \(processName) is running"
     case .appFrontmost(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) comes to the front"
+    case .volumeMounted(let name): return "While \(name) is mounted"
     }
 }
 
@@ -145,6 +150,8 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
         return nil
     case .processRunning(let processName):
         return "Keeps this Mac awake until \(processName) exits"
+    case .volumeMounted(let name):
+        return "Keeps this Mac awake until \(name) is unmounted"
     }
 }
 
@@ -163,6 +170,9 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
     case .processRunning(let processName):
         let subject = processName.isEmpty ? "the process" : processName
         return "Ends automatically when \(subject) exits — no duration to pick."
+    case .volumeMounted(let name):
+        let subject = name.isEmpty ? "the volume" : name
+        return "Ends automatically when \(subject) is unmounted — no duration to pick."
     }
 }
 

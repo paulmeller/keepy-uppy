@@ -63,6 +63,11 @@ final class SessionDisplayTests: XCTestCase {
         XCTAssertEqual(remainingTimeText(for: s, now: t0), "While claude is running")
     }
 
+    func testWhileVolumeMountedShowsTheVolumeCondition() {
+        let s = session(.whileVolumeMounted(name: "Time Machine"))
+        XCTAssertEqual(remainingTimeText(for: s, now: t0), "While Time Machine is mounted")
+    }
+
     func testOriginTextDistinguishesManualAndTrigger() {
         XCTAssertEqual(originText(for: session(.indefinite, origin: .manual)), "Started manually")
         XCTAssertEqual(originText(for: session(.indefinite, origin: .trigger)), "Started automatically")
@@ -291,6 +296,18 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionKindLabel(.acPowerConnected), "Power is connected")
         XCTAssertEqual(triggerConditionKindLabel(.processRunning), "A process is running")
         XCTAssertEqual(triggerConditionKindLabel(.appFrontmost), "An app comes to the front")
+        XCTAssertEqual(triggerConditionKindLabel(.volumeMounted), "A volume is mounted")
+    }
+
+    /// The volume condition binds, so it is entitled to "while" — and its
+    /// bound copy has to name the *unmount*, because that is the event that
+    /// will end the session.
+    func testTheVolumeConditionSaysWhatWillEndTheSession() {
+        XCTAssertEqual(triggerConditionTitle(.volumeMounted(name: "Backup")), "While Backup is mounted")
+        XCTAssertEqual(triggerBoundEffectSubtitle(.volumeMounted(name: "Backup")),
+                       "Keeps this Mac awake until Backup is unmounted")
+        XCTAssertEqual(triggerBindingFootnote(.volumeMounted(name: "")),
+                       "Ends automatically when the volume is unmounted — no duration to pick.")
     }
 
     /// The two app conditions sit next to each other in one picker, so their

@@ -19,6 +19,11 @@ enum SessionKind: Equatable, Codable {
     /// intentional exception to "a trigger starts a session, it doesn't
     /// bind that session's lifetime to the condition."
     case whileProcessRunning(processName: String)
+    /// Ends when the named volume is unmounted. The second condition-bound
+    /// kind, and the same shape as `.whileExternalDisplay`: "keep this Mac
+    /// awake while the backup drive is plugged in" is a *while* on its face,
+    /// and a mounted volume is a stable fact rather than one that flickers.
+    case whileVolumeMounted(name: String)
 
     /// A kind's identity without its associated value, so that `CaseIterable`
     /// guarantees are available to anything that has to cover every kind: the
@@ -51,6 +56,7 @@ enum SessionKind: Equatable, Codable {
         case whileOnACPower = "while-on-ac-power"
         case whileCPUBusy = "while-cpu-busy"
         case whileProcessRunning = "while-process-running"
+        case whileVolumeMounted = "while-volume-mounted"
     }
 
     /// This kind's family, dropping its associated value. Exhaustive, so a new
@@ -67,6 +73,7 @@ enum SessionKind: Equatable, Codable {
         case .whileOnACPower: return .whileOnACPower
         case .whileCPUBusy: return .whileCPUBusy
         case .whileProcessRunning: return .whileProcessRunning
+        case .whileVolumeMounted: return .whileVolumeMounted
         }
     }
 
@@ -75,7 +82,8 @@ enum SessionKind: Equatable, Codable {
     var isDaemonEvaluable: Bool {
         switch self {
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower: return true
-        case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning: return false
+        case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
+             .whileVolumeMounted: return false
         }
     }
 
@@ -96,9 +104,9 @@ enum SessionKind: Equatable, Codable {
     ///
     /// The shape is `name` or `name:value`, lowercase kebab-case, where the
     /// value is everything after the *first* colon. The name is `Family`'s raw
-    /// value rather than a second copy of the same nine literals — one list, so
-    /// a kind cannot be named one thing here and another there. Only the two
-    /// kinds whose associated value identifies *what was being watched* carry a
+    /// value rather than a second copy of the same ten literals — one list, so
+    /// a kind cannot be named one thing here and another there. Only the kinds
+    /// whose associated value identifies *what was being watched* carry a
     /// value; a deadline is deliberately omitted (the event already carries
     /// `endedAt`) and so is `.whileCPUBusy`'s threshold, so that no `Double`
     /// formatting — and therefore no locale — can ever reach the wire.
@@ -112,6 +120,7 @@ enum SessionKind: Equatable, Codable {
         switch self {
         case .whileAppRunning(let bundleID): return "\(family.rawValue):\(bundleID)"
         case .whileProcessRunning(let processName): return "\(family.rawValue):\(processName)"
+        case .whileVolumeMounted(let name): return "\(family.rawValue):\(name)"
         case .indefinite, .duration, .untilTime, .lease, .whileExternalDisplay,
              .whileOnACPower, .whileCPUBusy:
             return family.rawValue
@@ -127,7 +136,7 @@ enum SessionKind: Equatable, Codable {
         case .duration(let until), .untilTime(let until), .lease(let until):
             return until
         case .indefinite, .whileAppRunning, .whileExternalDisplay,
-             .whileOnACPower, .whileCPUBusy, .whileProcessRunning:
+             .whileOnACPower, .whileCPUBusy, .whileProcessRunning, .whileVolumeMounted:
             return nil
         }
     }

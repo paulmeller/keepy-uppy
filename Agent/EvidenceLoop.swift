@@ -123,6 +123,10 @@ func sessionsToEnd(
             if evidence.recordAndCheckEnd(session.id, observers.processRunning.isRunning(processName: processName)) {
                 ended.append(session.id)
             }
+        case .whileVolumeMounted(let name):
+            if evidence.recordAndCheckEnd(session.id, observers.mountedVolume.isMounted(volumeName: name)) {
+                ended.append(session.id)
+            }
         case .whileCPUBusy(let threshold):
             if evidence.recordAndCheckCPUEnd(session.id, threshold: threshold,
                                              busy: observers.cpuBusy, now: now) {

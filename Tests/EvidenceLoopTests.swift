@@ -31,6 +31,11 @@ final class EvidenceLoopTests: XCTestCase {
     struct FakeFrontmostApp: FrontmostAppObserving {
         func isFrontmost(bundleID: String) -> ConditionReading { .undetermined }
     }
+    struct FakeMountedVolume: MountedVolumeObserving {
+        let reading: ConditionReading
+        init(_ reading: ConditionReading) { self.reading = reading }
+        func isMounted(volumeName: String) -> ConditionReading { reading }
+    }
 
     private func session(_ kind: SessionKind) -> Session {
         Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"),
@@ -50,6 +55,7 @@ final class EvidenceLoopTests: XCTestCase {
                       app: ConditionReading = .present,
                       display: ConditionReading = .present,
                       process: ConditionReading = .present,
+                      volume: ConditionReading = .present,
                       busy: CPUBusyReading = .undetermined,
                       at now: Date? = nil) -> [UUID] {
         sessionsToEnd(sessions,
@@ -61,6 +67,7 @@ final class EvidenceLoopTests: XCTestCase {
                                              display: FakeDisplay(display),
                                              processRunning: FakeProcessRunning(process),
                                              frontmostApp: FakeFrontmostApp(),
+                                             mountedVolume: FakeMountedVolume(volume),
                                              acPower: .undetermined,
                                              cpuBusy: busy),
                       evidence: &evidence, now: now ?? t0)
@@ -118,6 +125,32 @@ final class EvidenceLoopTests: XCTestCase {
         // the session ends normally.
         XCTAssertTrue(tick([s], evidence: &evidence, process: .absent).isEmpty, "first negative debounces")
         XCTAssertEqual(tick([s], evidence: &evidence, process: .absent), [s.id])
+    }
+
+    /// The `sessionsToEnd` half of the mounted-volume contract, and the one
+    /// that can lose work: `FileManager.mountedVolumeURLs` answering `nil`, or
+    /// answering with nothing at all, says the enumeration failed — `/` is
+    /// always mounted — and a Mac copying to a backup drive must not be put to
+    /// sleep because the volume list could not be read for a while.
+    func testAVolumeReadThatFailedNeverEndsASession() {
+        let s = session(.whileVolumeMounted(name: "Backup"))
+        var evidence = SessionEvidence()
+        for tickNumber in 1...50 {
+            XCTAssertTrue(tick([s], evidence: &evidence, volume: .undetermined).isEmpty,
+                          "tick \(tickNumber): an unreadable volume list is not an unmounted drive")
+        }
+        // ...and once the read succeeds and the drive really is gone, the
+        // session ends normally, on the usual two consecutive negatives.
+        XCTAssertTrue(tick([s], evidence: &evidence, volume: .absent).isEmpty, "first negative debounces")
+        XCTAssertEqual(tick([s], evidence: &evidence, volume: .absent), [s.id])
+    }
+
+    func testAMountedVolumeSessionSurvivesWhileItIsStillMounted() {
+        let s = session(.whileVolumeMounted(name: "Backup"))
+        var evidence = SessionEvidence()
+        for _ in 1...5 {
+            XCTAssertTrue(tick([s], evidence: &evidence, volume: .present).isEmpty)
+        }
     }
 
     // MARK: - Debounce
@@ -209,7 +242,7 @@ final class EvidenceLoopTests: XCTestCase {
         var evidence = SessionEvidence()
         for _ in 1...5 {
             XCTAssertTrue(tick([s], evidence: &evidence, app: .absent, display: .absent,
-                               process: .absent, busy: .busy(fraction: 0)).isEmpty,
+                               process: .absent, volume: .absent, busy: .busy(fraction: 0)).isEmpty,
                           "the agent must never report on sessions it doesn't own evaluation of")
         }
     }

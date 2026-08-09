@@ -32,6 +32,10 @@ final class EvidenceLoopRunner {
     /// property read rather than a table enumeration. There is nothing whose
     /// lifetime has to be the tick.
     private let frontmostApp: FrontmostAppObserving
+    /// A factory, like `makeProcessRunning` and for its reason: one volume
+    /// enumeration answers every rule and session on a tick, and the cache
+    /// that makes that true must not outlive the tick that filled it.
+    private let makeMountedVolume: () -> MountedVolumeObserving
     private var evidence = SessionEvidence()
     private var timer: Timer?
     /// Snapshot bookkeeping for the session-completion action, including the
@@ -47,13 +51,15 @@ final class EvidenceLoopRunner {
          display: DisplayObserving = SystemDisplayObserver(),
          processRunning: @escaping () -> ProcessRunningObserving = { SystemProcessRunningObserver() },
          cpuObserver: CPUBusyObserving = SystemCPUBusyObserver(),
-         frontmostApp: FrontmostAppObserving = SystemFrontmostAppObserver()) {
+         frontmostApp: FrontmostAppObserving = SystemFrontmostAppObserver(),
+         mountedVolume: @escaping () -> MountedVolumeObserving = { SystemMountedVolumeObserver() }) {
         self.connection = connection
         self.appRunning = appRunning
         self.display = display
         self.makeProcessRunning = processRunning
         self.cpuObserver = cpuObserver
         self.frontmostApp = frontmostApp
+        self.makeMountedVolume = mountedVolume
     }
 
     /// The timer fires every 5s and spawns a `Task` per fire, but `tick()` is
@@ -103,6 +109,7 @@ final class EvidenceLoopRunner {
         // answer for. Before this, the ~530-entry table was enumerated once
         // per session AND once per rule, every 5 seconds.
         let processRunning = makeProcessRunning()
+        let mountedVolume = makeMountedVolume()
         // One bundle, built once, passed to both — which is what keeps that
         // guarantee true: a second `ObserverSet` here would be a second
         // process-table enumeration, and a second CPU sample, whose delta
@@ -116,6 +123,7 @@ final class EvidenceLoopRunner {
                                     display: display,
                                     processRunning: processRunning,
                                     frontmostApp: frontmostApp,
+                                    mountedVolume: mountedVolume,
                                     acPower: PowerControl.batteryState().source.acPowerReading,
                                     cpuBusy: cpuObserver.currentBusy())
 

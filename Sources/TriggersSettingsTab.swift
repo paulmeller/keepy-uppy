@@ -275,6 +275,16 @@ private struct AddTriggerSheet: View {
     @State private var bundleID = ""
     @State private var appName = ""
     @State private var processName = ""
+    @State private var volumeName = ""
+    /// What is mounted *now*, read once when the sheet is built. It is a
+    /// convenience for filling the field in, never a constraint on it — the
+    /// rule may name a drive that is not plugged in, which is most of the
+    /// reason to write one. `.unavailable` becomes an empty list and a
+    /// disabled menu rather than an error: the field still works.
+    @State private var mountedVolumeNames: [String] = {
+        guard case .names(let names) = MountedVolumeURLsReader().read() else { return [] }
+        return names.sorted()
+    }()
     @State private var sessionKind: DefaultSessionKind = .indefinite
     @State private var pickerError: String?
 
@@ -355,6 +365,29 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
+                if inputField == .volume {
+                    LabeledContent("Volume") {
+                        HStack {
+                            TextField("Backup", text: $volumeName)
+                                .textFieldStyle(.roundedBorder)
+                            // The `chooseApp()` bargain, in the shape a volume
+                            // allows: pick from what is actually mounted, but
+                            // leave the field editable, because the whole point
+                            // of this trigger is a drive that is *not* plugged
+                            // in yet.
+                            Menu("Mounted…") {
+                                ForEach(mountedVolumeNames, id: \.self) { name in
+                                    Button(name) { volumeName = name }
+                                }
+                            }
+                            .fixedSize()
+                            .disabled(mountedVolumeNames.isEmpty)
+                        }
+                    }
+                    Text("Use the name as it appears in Finder. A mount path (/Volumes/Backup) can't be used: the same disk mounts at a different path when another volume already has that name.")
+                        .settingsFootnote()
+                }
+
                 // A condition that binds its session's lifetime has no duration
                 // to pick — `sessionKind(firing:now:)` would discard whatever
                 // was chosen — so the picker is replaced by the sentence saying
@@ -401,7 +434,7 @@ private struct AddTriggerSheet: View {
     /// is one: a new condition must *state* which field it wants. A chain of
     /// equality tests answers "none" on its author's behalf, silently, and the
     /// result is a sheet whose Add button is enabled with nothing filled in.
-    private enum InputField { case app, process, none }
+    private enum InputField { case app, process, volume, none }
 
     private var inputField: InputField {
         switch conditionKind {
@@ -410,6 +443,7 @@ private struct AddTriggerSheet: View {
         // subject, not a different one.
         case .appLaunched, .appFrontmost: return .app
         case .processRunning: return .process
+        case .volumeMounted: return .volume
         case .externalDisplayConnected, .acPowerConnected: return .none
         }
     }
@@ -419,6 +453,7 @@ private struct AddTriggerSheet: View {
         case .appLaunched, .appFrontmost: return !bundleID.isEmpty
         case .processRunning:
             return !processName.isEmpty && TriggerCondition.processNameProblem(processName) == nil
+        case .volumeMounted: return !volumeName.isEmpty
         case .externalDisplayConnected, .acPowerConnected: return true
         }
     }
@@ -430,6 +465,7 @@ private struct AddTriggerSheet: View {
         case .acPowerConnected: return .acPowerConnected
         case .processRunning: return .processRunning(processName: processName)
         case .appFrontmost: return .appFrontmost(bundleID: bundleID)
+        case .volumeMounted: return .volumeMounted(name: volumeName)
         }
     }
 

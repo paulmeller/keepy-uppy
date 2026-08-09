@@ -48,6 +48,14 @@ final class TriggerRuleTests: XCTestCase {
         }
     }
 
+    struct FakeMountedVolume: MountedVolumeObserving {
+        let mounted: Set<String>
+        var reading: ConditionReading? = nil
+        func isMounted(volumeName: String) -> ConditionReading {
+            reading ?? ConditionReading(mounted.contains(volumeName))
+        }
+    }
+
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
     }
@@ -65,6 +73,7 @@ final class TriggerRuleTests: XCTestCase {
                       display: FakeDisplay = FakeDisplay(external: false),
                       process: FakeProcessRunning = FakeProcessRunning(running: []),
                       frontmost: FakeFrontmostApp = FakeFrontmostApp(frontmost: nil),
+                      volume: FakeMountedVolume = FakeMountedVolume(mounted: []),
                       acPower: ConditionReading = .absent) -> [TriggerRule] {
         triggersToFire(rules, activeSessions: activeSessions,
                        // No trigger condition consults the CPU sample, so this
@@ -72,7 +81,8 @@ final class TriggerRuleTests: XCTestCase {
                        // cannot fire anything if one ever starts to.
                        observers: ObserverSet(appRunning: app, display: display,
                                               processRunning: process, frontmostApp: frontmost,
-                                              acPower: acPower, cpuBusy: .undetermined))
+                                              mountedVolume: volume, acPower: acPower,
+                                              cpuBusy: .undetermined))
     }
 
     func testDisabledRuleNeverFires() {
@@ -133,6 +143,36 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertTrue(fire([r], frontmost: FakeFrontmostApp(frontmost: "com.apple.dt.Xcode",
                                                             reading: .undetermined)).isEmpty,
                       "the app really is in front, but the observer could not tell — so it must not fire")
+    }
+
+    func testVolumeMountedFiresWhenTheVolumeIsMounted() {
+        let r = rule(.volumeMounted(name: "Backup"))
+        XCTAssertEqual(fire([r], volume: FakeMountedVolume(mounted: ["Backup"])).map(\.id), [r.id])
+    }
+
+    func testVolumeMountedDoesNotFireForADifferentVolume() {
+        let r = rule(.volumeMounted(name: "Backup"))
+        XCTAssertTrue(fire([r], volume: FakeMountedVolume(mounted: ["Macintosh HD", "Archive"])).isEmpty)
+    }
+
+    /// The `triggersToFire` half of the same contract
+    /// `testAVolumeReadThatFailedNeverEndsASession` pins for `sessionsToEnd`:
+    /// a volume list that could not be enumerated is not a mounted drive
+    /// either.
+    func testVolumeMountedUndeterminedNeverFires() {
+        let r = rule(.volumeMounted(name: "Backup"))
+        XCTAssertTrue(fire([r], volume: FakeMountedVolume(mounted: ["Backup"],
+                                                          reading: .undetermined)).isEmpty,
+                      "the volume really is mounted, but the read failed — so it must not fire")
+    }
+
+    /// The motivating case, end to end through the one table that decides it:
+    /// a volume rule starts a session that lasts exactly as long as the drive
+    /// is mounted, whatever duration is stored on the rule.
+    func testVolumeMountedBindsItsSessionToTheVolume() {
+        XCTAssertTrue(TriggerConditionKind.volumeMounted.bindsSessionLifetime)
+        let r = rule(.volumeMounted(name: "Backup"), kind: .fourHours)
+        XCTAssertEqual(sessionKind(firing: r, now: Date()), .whileVolumeMounted(name: "Backup"))
     }
 
     /// The most important test in this file: a trigger already represented
@@ -249,6 +289,7 @@ final class TriggerRuleTests: XCTestCase {
                     display: FakeDisplay(external: false, reading: .present),
                     processRunning: FakeProcessRunning(running: [], reading: .present),
                     frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .present),
+                    mountedVolume: FakeMountedVolume(mounted: [], reading: .present),
                     acPower: .present,
                     // No trigger condition consults the CPU sample today;
                     // `.busy(fraction: 1)` is that reading's analogue of
@@ -262,6 +303,7 @@ final class TriggerRuleTests: XCTestCase {
                     display: FakeDisplay(external: false, reading: .undetermined),
                     processRunning: FakeProcessRunning(running: [], reading: .undetermined),
                     frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .undetermined),
+                    mountedVolume: FakeMountedVolume(mounted: [], reading: .undetermined),
                     acPower: .undetermined,
                     cpuBusy: .undetermined)
     }

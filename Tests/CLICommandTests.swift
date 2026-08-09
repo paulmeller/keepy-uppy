@@ -267,6 +267,7 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             [], ["--for", "2h"], ["--until", "17:00"],
             ["--while-app", "com.apple.dt.Xcode"], ["--while-process", "claude"],
             ["--while-display"], ["--while-ac-power"], ["--while-cpu-busy", "30"],
+            ["--while-volume", "Backup"],
         ]
         let reachable = Set(invocations.compactMap { flags -> SessionKind.Family? in
             guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on"] + flags) else { return nil }
@@ -275,6 +276,16 @@ final class CLISessionKindReachabilityTests: XCTestCase {
         // `.lease` is the one deliberate exclusion: it is created by the XPC
         // lease/renew path, not by `on`, and there is no flag that should make one.
         XCTAssertEqual(reachable, Set(SessionKind.Family.allCases).subtracting([.lease]))
+    }
+
+    /// A volume name is taken verbatim, spaces and all: Finder names contain
+    /// them ("Time Machine", "Backup 1") and this is matched exactly.
+    func testVolumeNameIsTakenVerbatim() {
+        guard case .success(.on(let kind, _, _)) =
+                parseCLIArguments(["on", "--while-volume", "Time Machine"]) else {
+            return XCTFail("expected a session kind")
+        }
+        XCTAssertEqual(kind, .whileVolumeMounted(name: "Time Machine"))
     }
 
     func testCPUBusyThresholdIsParsedAsAPercentage() {

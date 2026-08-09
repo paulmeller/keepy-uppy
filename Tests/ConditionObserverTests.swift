@@ -418,6 +418,103 @@ final class SystemFrontmostAppObserverTests: XCTestCase {
     }
 }
 
+/// The matching and the memoization, against a scripted reader so the
+/// `.undetermined` path can be asserted exactly rather than waited for.
+final class MountedVolumeObserverContractTests: XCTestCase {
+    private final class CountingReader: MountedVolumeReader {
+        let result: MountedVolumeReading
+        private(set) var reads = 0
+        init(_ result: MountedVolumeReading) { self.result = result }
+        func read() -> MountedVolumeReading {
+            reads += 1
+            return result
+        }
+    }
+
+    /// The whole safety contract for this observer, in one line: an
+    /// enumeration that failed is not an unmounted drive.
+    func testAFailedEnumerationIsUndeterminedRatherThanUnmounted() {
+        let observer = SystemMountedVolumeObserver(reader: CountingReader(.unavailable))
+        XCTAssertEqual(observer.isMounted(volumeName: "Backup"), .undetermined,
+                       "a volume list that could not be read says nothing about Backup")
+    }
+
+    func testASuccessfulEnumerationDistinguishesPresentFromAbsent() {
+        let observer = SystemMountedVolumeObserver(
+            reader: CountingReader(.names(["Macintosh HD", "Backup"])))
+        XCTAssertEqual(observer.isMounted(volumeName: "Backup"), .present)
+        XCTAssertEqual(observer.isMounted(volumeName: "Archive"), .absent)
+    }
+
+    /// Names are matched exactly, including case and spaces — the string is
+    /// what Finder shows, and "backup" is not "Backup".
+    func testNamesAreMatchedExactly() {
+        let observer = SystemMountedVolumeObserver(reader: CountingReader(.names(["Time Machine"])))
+        XCTAssertEqual(observer.isMounted(volumeName: "Time Machine"), .present)
+        XCTAssertEqual(observer.isMounted(volumeName: "time machine"), .absent)
+        XCTAssertEqual(observer.isMounted(volumeName: "TimeMachine"), .absent)
+    }
+
+    func testOneObserverEnumeratesAtMostOncePerTick() {
+        let reader = CountingReader(.names(["Backup"]))
+        let observer = SystemMountedVolumeObserver(reader: reader)
+        for _ in 1...20 {
+            _ = observer.isMounted(volumeName: "Backup")
+            _ = observer.isMounted(volumeName: "Archive")
+        }
+        XCTAssertEqual(reader.reads, 1)
+    }
+
+    /// ...and the cache cannot go stale, because it does not outlive the
+    /// observer, and `EvidenceLoopRunner` builds a new one every tick.
+    func testANewObserverEnumeratesAgain() {
+        let reader = CountingReader(.names(["Backup"]))
+        _ = SystemMountedVolumeObserver(reader: reader).isMounted(volumeName: "Backup")
+        _ = SystemMountedVolumeObserver(reader: reader).isMounted(volumeName: "Backup")
+        XCTAssertEqual(reader.reads, 2)
+    }
+}
+
+/// The live reader, against the volumes this Mac actually has mounted.
+final class MountedVolumeURLsReaderTests: XCTestCase {
+    private func names() throws -> Set<String> {
+        guard case .names(let names) = MountedVolumeURLsReader().read() else {
+            throw XCTSkip("the volume list could not be read at all, which is the .unavailable case")
+        }
+        return names
+    }
+
+    /// The read succeeds and contains the boot volume. `/` is always mounted
+    /// and is never hidden, which is the fact the `.unavailable`-on-empty
+    /// guard rests on — if this ever stops being true, that guard is wrong and
+    /// this test is where it shows up.
+    func testItContainsTheVolumeMountedAtTheRoot() throws {
+        let root = try XCTUnwrap(
+            (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]))?.volumeName,
+            "the root volume must have a name")
+        XCTAssertTrue(try names().contains(root), "expected the boot volume (\"\(root)\") to be listed")
+    }
+
+    /// The reader must not offer the hidden system volumes — `VM`, `Preboot`,
+    /// `Update`, `xART` and friends — as things a rule can name. They are not
+    /// in Finder, so a user cannot mean them, and they would give the Add
+    /// sheet's picker a list of nine rows nobody recognises.
+    func testItDoesNotListTheHiddenSystemVolumes() throws {
+        let listed = try names()
+        for hidden in ["VM", "Preboot", "Update", "xART", "iSCPreboot"] {
+            XCTAssertFalse(listed.contains(hidden), "\(hidden) is a hidden system volume")
+        }
+    }
+
+    /// A successful read that found nothing matching is a confident negative,
+    /// not a failure — the distinction the whole tri-state exists for.
+    func testANameNothingCouldBeMountedUnderReadsAbsent() {
+        XCTAssertEqual(
+            SystemMountedVolumeObserver().isMounted(volumeName: "keepy-uppy-\(UUID().uuidString)"),
+            .absent)
+    }
+}
+
 /// The memoization and failure behaviour, against a fake table reader so they
 /// can be asserted exactly rather than inferred.
 final class ProcessRunningObserverContractTests: XCTestCase {
