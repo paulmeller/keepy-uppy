@@ -609,6 +609,69 @@ final class PowerPlanHolderTests: XCTestCase {
         XCTAssertTrue(holder.apply(plan), "both axes established: the only shape of success")
     }
 
+    /// The same conjunction, in the one plan shape where it is genuinely
+    /// contested — and the only shape a session produces today.
+    ///
+    /// A **pure clamshell** plan is the hard case because `SleepDisabled` alone
+    /// already prevents every sleep path, idle included, so the system
+    /// assertion the plan also asks for looks redundant. Carving that out —
+    /// "the setting landed, so call it success" — passes every other test in
+    /// this file, which is exactly why this one exists.
+    ///
+    /// The carve-out is refused deliberately. `PowerPlan.reduce` holds the
+    /// system assertion for a clamshell session as *defence in depth*: the
+    /// clamshell mechanism is undeclared, root-only SPI that can fail, and when
+    /// it does, the assertion is both the remaining protection against idle
+    /// sleep and the only thing that shows a user in `pmset -g assertions` why
+    /// their Mac is awake. A clamshell session's promise is about the whole
+    /// machine, so the daemon does not accept credit from one mechanism for the
+    /// other's failure: if the plan asked for it and it is not held, the start
+    /// is denied and the caller retries in five seconds.
+    func testAClamshellPlanFailsWhenOnlyItsRedundantLookingSystemAssertionFails() {
+        backend.failing = [.preventIdleSystemSleep]
+
+        XCTAssertFalse(holder.apply(PowerPlan.reduce([.clamshell])),
+                       "the plan asked for the system assertion and did not get it")
+        XCTAssertEqual(sleepSetting.lastWrite, true,
+                       "…and the mechanism that survives a lid close did land, which is not success")
+        XCTAssertTrue(holder.heldTypes.isEmpty, "the refused create leaves nothing held")
+
+        backend.failing = []
+        XCTAssertTrue(holder.apply(PowerPlan.reduce([.clamshell])),
+                      "both axes established on the retry")
+    }
+
+    /// The other direction of the same write, which is **not** an apply
+    /// failure.
+    ///
+    /// A refused write of `false` leaves the global setting on, so the Mac
+    /// stays awake for longer than asked — never less. That is the same
+    /// over-application a failed release is already forgiven for, and the same
+    /// direction that cannot lose a user's work. Failing the apply over it
+    /// would let one machine whose undeclared SPI refuses writes deny *every*
+    /// session, including `.system` and `.systemAndDisplay` plans, which ask
+    /// nothing of that axis — `sleepDisabled: false` is precisely what they
+    /// want.
+    ///
+    /// This is also what makes `DaemonRuntime.applyLocked`'s claim true: a
+    /// `false` from the holder can only ever mean under-application, which is
+    /// why `startSession` may destroy a session over one.
+    func testARefusedClearOfTheGlobalSettingIsNotAnApplyFailure() {
+        sleepSetting.shouldFail = true
+
+        XCTAssertTrue(holder.apply(PowerPlan.reduce([.system])),
+                      "a plan wanting sleepDisabled: false is not failed by a refused write")
+        XCTAssertTrue(holder.apply(.sleepAllowed),
+                      "…and neither is converging all the way back to nothing")
+        XCTAssertEqual(sleepSetting.writes, [false, false],
+                       "the write is still attempted every time, refused or not")
+
+        // The same backend refusing the same call is a failure when the plan
+        // wants the setting *on*: that direction under-applies.
+        XCTAssertFalse(holder.apply(PowerPlan.reduce([.clamshell])),
+                       "a refused write of true leaves a clamshell promise unkept")
+    }
+
     /// End to end at the level the daemon will use: a session table's worth of
     /// modes goes in, the right assertions *and* the right clamshell setting
     /// come out, and the last session leaving puts both back.

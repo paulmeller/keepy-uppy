@@ -409,14 +409,24 @@ final class PowerPlanHolder {
     /// nothing the second time.
     ///
     /// Returns `false` if any wanted assertion could not be created, or if the
-    /// clamshell setting could not be written. A failed create simply leaves
-    /// that type unheld, so the next apply retries it.
+    /// clamshell setting could not be *turned on* when the plan wanted it on. A
+    /// failed create simply leaves that type unheld, so the next apply retries
+    /// it.
     ///
-    /// **The `Bool` reflects create and sleep-setting-write failures only.** A
-    /// failed *release* still returns `true`: the id is dropped regardless (see
-    /// the release loop), so there is nothing left to retry, and the residual
-    /// error leaves the Mac awake for longer than asked rather than sleeping
-    /// sooner — the direction that cannot lose a user's work. A caller must not
+    /// **`false` means under-application, and only ever that** — on both axes,
+    /// by construction. Every failure in the weakening direction returns `true`
+    /// instead:
+    ///
+    /// - a failed *release* (the id is dropped regardless — see the release
+    ///   loop — so there is nothing left to retry), and
+    /// - a failed write of `sleepDisabled: false` (the setting stays on, so the
+    ///   next apply rewrites it and `DaemonRuntime.start`'s converge-to-safe
+    ///   catches whatever outlives this process).
+    ///
+    /// Both leave the Mac awake for longer than asked rather than sleeping
+    /// sooner — the direction that cannot lose a user's work. That is what
+    /// makes `false` safe for `DaemonRuntime.startSession` to destroy a session
+    /// over; it cannot mean "too awake". The price is that a caller must not
     /// read `true` as "nothing is held that shouldn't be".
     ///
     /// Ordering: creates, then the setting write, then releases. Every
@@ -444,7 +454,23 @@ final class PowerPlanHolder {
         }
 
         if !sleepSetting.setSleepDisabled(plan.sleepDisabled) {
-            succeeded = false
+            // Only a refused *set* is a failure; a refused *clear* is not.
+            //
+            // Same reasoning as the failed release below, on the other axis:
+            // when the plan wants `false` and the write does not land, the
+            // setting stays on and the Mac stays awake longer than asked —
+            // over-application, the direction that cannot lose a user's work.
+            // Reporting that as a failed apply would deny a start over a
+            // mechanism the plan asked nothing of, which matters the moment a
+            // non-clamshell session exists: a `.system` plan wants
+            // `sleepDisabled: false`, so on a machine where the undeclared SPI
+            // refuses writes outright, failing here would refuse *every*
+            // session rather than only the ones that depend on this axis.
+            //
+            // Both directions are still logged. A refused clear is a real and
+            // surprising condition — it means something we cannot see is
+            // holding the global setting on — it is just not a broken promise.
+            if plan.sleepDisabled { succeeded = false }
             powerLogger.error("SleepDisabled could not be set to \(plan.sleepDisabled)")
         }
 

@@ -545,15 +545,23 @@ final class DaemonRuntime {
     ///    daemon must never be in — believing a session is live while the Mac
     ///    is free to sleep.
     ///
-    /// 2. **A `false` from the holder always means under-application, never
-    ///    over-application.** A failed *release* deliberately still returns
-    ///    `true` (the id is dropped regardless, so there is nothing left to
-    ///    retry, and the residue leaves the Mac awake longer than asked). The
-    ///    only ways to see `false` are a create that did not happen and a
-    ///    setting write that did not land — both "we hold less than we
+    /// 2. **A `false` from the holder means under-application, and the holder
+    ///    guarantees that by construction.** It is not a property of the two
+    ///    mechanisms — either write can fail in either direction — it is a
+    ///    property `PowerPlanHolder.apply` establishes deliberately, by
+    ///    returning `true` for every failure in the *weakening* direction on
+    ///    both axes: a failed release (the id is dropped regardless, so there
+    ///    is nothing left to retry) and a failed write of `sleepDisabled:
+    ///    false` (the setting stays on, and the next apply rewrites it). Both
+    ///    residues leave the Mac awake longer than asked. So the only ways to
+    ///    see `false` are a create that did not happen and a `sleepDisabled:
+    ///    true` write that did not land — both "we hold less than we
     ///    promised". That one-directionality is what makes `false` safe for
     ///    `startSession` to *destroy a session* over: the failure can never
-    ///    have been "too awake".
+    ///    have been "too awake". Anything that later reports a
+    ///    release-or-clear failure through this `Bool` breaks the invariant
+    ///    this gate rests on, and would start destroying sessions over a Mac
+    ///    that is merely awake for too long.
     ///
     /// 3. **Self-healing is real but too slow to soften the gate with.** The
     ///    holder retries whatever it is not holding, and rewrites the setting,
