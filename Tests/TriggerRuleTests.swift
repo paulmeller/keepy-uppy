@@ -349,6 +349,203 @@ final class TriggerRuleTests: XCTestCase {
                        .duration(until: fire.addingTimeInterval(4 * 3600)))
     }
 
+    // MARK: - One rule this build cannot read must not delete the rest
+    //
+    // `load()` decoded `[TriggerRule]` in a single `try?`, so one element this
+    // build could not decode returned `[]` — every trigger the user configured
+    // gone from the UI, with the file still on disk and the next edit
+    // overwriting it for good. Plan 5 multiplies the exposure by six: a user who
+    // runs a build with the new conditions and then runs an older one for any
+    // reason (a downgrade, a second Mac, a stale copy in /Applications) hits it
+    // with everything they have.
+
+    /// The JSON `TriggerStore` really writes for a rule, as a dictionary, so a
+    /// test can splice a hand-built element in among genuine ones rather than
+    /// hand-writing all three and hoping they match the encoder.
+    private func storedElement(_ rule: TriggerRule) -> [String: Any] {
+        guard let data = try? JSONEncoder().encode(rule),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return object
+    }
+
+    /// A rule written by a build that has a condition this one has never heard
+    /// of — exactly what a downgrade sees. `wifiNetwork` is one of the six Plan
+    /// 5 adds; today's `TriggerCondition` decoder has no case for it and throws,
+    /// which is the whole scenario.
+    private var futureRule: [String: Any] {
+        ["id": "7F0C6C9E-3C6E-4A3C-9E52-2F5B1E0A77D1",
+         "condition": ["wifiNetwork": ["ssid": "Studio", "band": 5, "hidden": false]],
+         "defaultKind": "eightHours",
+         "enabled": true]
+    }
+
+    private func writeStoredPayload(_ elements: [Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: elements) else {
+            return XCTFail("could not build the payload")
+        }
+        PreferencesSuite.defaults.set(data, forKey: TriggerStore.key)
+    }
+
+    private func storedPayload() -> [Any] {
+        guard let data = PreferencesSuite.defaults.data(forKey: TriggerStore.key),
+              let elements = try? JSONSerialization.jsonObject(with: data) as? [Any]
+        else { return [] }
+        return elements
+    }
+
+    /// The whole point: an unknown rule costs you that rule, not the file.
+    func testAnUndecodableRuleDoesNotTakeTheOthersWithIt() {
+        let good = rule(.acPowerConnected, kind: .oneHour)
+        let alsoGood = rule(.externalDisplayConnected, kind: .fourHours, enabled: false)
+        writeStoredPayload([storedElement(good), futureRule, storedElement(alsoGood)])
+
+        let loaded = TriggerStore.load()
+        XCTAssertEqual(loaded.count, 2, "one unreadable element must cost one rule, not all of them")
+        XCTAssertTrue(loaded.contains(good))
+        XCTAssertTrue(loaded.contains(alsoGood))
+    }
+
+    /// ...and saving afterwards must not be the thing that deletes it. A load
+    /// that silently drops a rule, followed by any UI edit, writes the loss back
+    /// to disk — which is the point at which it stops being recoverable by
+    /// running the newer build again.
+    func testSavingAfterASkippedRulePreservesTheUnreadableOne() {
+        let good = rule(.acPowerConnected, kind: .oneHour)
+        writeStoredPayload([storedElement(good), futureRule])
+
+        // Exactly what the Settings UI does: load, change something, save.
+        var rules = TriggerStore.load()
+        // Not `rules[0]` directly: when this test is failing, the load has
+        // usually returned nothing, and an out-of-range subscript traps the
+        // whole test *process* — which takes the rest of the suite with it and
+        // reports a crash instead of the one line that explains the fault.
+        guard rules.count == 1 else {
+            return XCTFail("the readable rule did not survive the load: \(rules.count) came back")
+        }
+        rules[0].enabled = false
+        TriggerStore.save(rules)
+
+        XCTAssertEqual(storedPayload().count, 2, "the rule this build cannot read was dropped by save()")
+        let survivor = storedPayload().compactMap { $0 as? [String: Any] }
+            .first { ($0["condition"] as? [String: Any])?["wifiNetwork"] != nil }
+        XCTAssertNotNil(survivor, "the unreadable element is gone from the file")
+        XCTAssertEqual(survivor?["id"] as? String, futureRule["id"] as? String)
+        XCTAssertEqual(TriggerStore.load().first?.enabled, false, "the edit itself must still land")
+    }
+
+    /// The preserved element must come back to the newer build *unchanged* —
+    /// preserving it as something subtly different is a slower version of the
+    /// same data loss. Nested objects, a whole number that must not become
+    /// `5.0`, a bool, a string and a null all survive the round trip.
+    func testAPreservedRuleIsWrittenBackByteForByte() {
+        writeStoredPayload([futureRule])
+        TriggerStore.save(TriggerStore.load())
+
+        guard let survivor = storedPayload().first as? [String: Any] else {
+            return XCTFail("the unreadable element is gone")
+        }
+        XCTAssertEqual(NSDictionary(dictionary: survivor), NSDictionary(dictionary: futureRule))
+    }
+
+    /// The `NSDictionary` comparison above cannot see this one: `NSNumber`
+    /// compares by value, so `5` and `5.0` are equal to it. 2^53+1 is the first
+    /// integer a `Double` cannot hold — a preserver that kept every number as a
+    /// `Double` would write it back as 2^53, silently, and the round trip would
+    /// still look like a success.
+    func testAPreservedRuleKeepsANumberNoDoubleCanHold() {
+        let exact = 9_007_199_254_740_993
+        var exotic = futureRule
+        exotic["condition"] = ["wifiNetwork": ["ssid": "Studio", "lastSeen": exact]]
+        writeStoredPayload([exotic])
+
+        TriggerStore.save(TriggerStore.load())
+
+        let survivor = storedPayload().first as? [String: Any]
+        let condition = survivor?["condition"] as? [String: Any]
+        let network = condition?["wifiNetwork"] as? [String: Any]
+        XCTAssertEqual(network?["lastSeen"] as? Int, exact)
+    }
+
+    /// The structural half, and the reason `save()` re-reads the file rather
+    /// than trusting something a previous `load()` remembered: a process that
+    /// never called `load()` at all still cannot destroy the rule. There is no
+    /// ordering to get wrong and no state to go stale.
+    func testSavingWithoutEverLoadingStillKeepsTheUnreadableRule() {
+        writeStoredPayload([futureRule])
+        TriggerStore.save([rule(.acPowerConnected, kind: .oneHour)])
+
+        XCTAssertEqual(storedPayload().count, 2)
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1)
+    }
+
+    /// Removing every rule the user can actually see is still not permission to
+    /// delete the one they cannot.
+    func testDeletingEveryVisibleRuleStillKeepsTheUnreadableOne() {
+        writeStoredPayload([storedElement(rule(.acPowerConnected)), futureRule])
+        TriggerStore.save([])
+
+        XCTAssertEqual(storedPayload().count, 1)
+        XCTAssertTrue(TriggerStore.load().isEmpty)
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1)
+    }
+
+    /// A readable rule must be written exactly once — the merge appends what was
+    /// skipped, it does not append everything it read.
+    func testASaveDoesNotDuplicateTheRulesItCanRead() {
+        let good = rule(.acPowerConnected, kind: .oneHour)
+        writeStoredPayload([storedElement(good), futureRule])
+        TriggerStore.save(TriggerStore.load())
+        TriggerStore.save(TriggerStore.load())
+
+        XCTAssertEqual(storedPayload().count, 2)
+        XCTAssertEqual(TriggerStore.load(), [good])
+    }
+
+    /// Skipping is for elements, not for the file. Data that is not an array of
+    /// anything is not a rule store, and there is nothing in it to keep.
+    func testCompletelyCorruptDataStillLoadsAsEmpty() {
+        PreferencesSuite.defaults.set(Data([0xFF, 0x00, 0x13, 0x37]), forKey: TriggerStore.key)
+        XCTAssertTrue(TriggerStore.load().isEmpty)
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0,
+                       "nothing was skipped — the payload was never a rule array")
+
+        PreferencesSuite.defaults.set(Data("{\"rules\":[]}".utf8), forKey: TriggerStore.key)
+        XCTAssertTrue(TriggerStore.load().isEmpty)
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0)
+    }
+
+    /// No stored value at all is the first-run case, not a skip.
+    func testNoStoredRulesLoadsAsEmptyWithNothingSkipped() {
+        XCTAssertTrue(TriggerStore.load().isEmpty)
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0)
+    }
+
+    /// An element that is the right shape but decodes to nothing this build can
+    /// use — a `defaultKind` from the future, say — is skipped and kept for the
+    /// same reason a new condition is. The skip is not condition-specific.
+    func testAnyUndecodableFieldSkipsJustThatRule() {
+        let good = rule(.acPowerConnected)
+        var futureDuration = storedElement(good)
+        futureDuration["id"] = "0BE0F0B2-4B26-4C0E-8F0B-2E5C1A9D3E77"
+        futureDuration["defaultKind"] = "twelveHours"
+        writeStoredPayload([storedElement(good), futureDuration])
+
+        XCTAssertEqual(TriggerStore.load(), [good])
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1)
+    }
+
+    /// What the UI needs to be able to say "one of your triggers was made by a
+    /// newer version and isn't shown here" — a rule that is silently invisible
+    /// is a milder failure than one that is silently deleted, but the user
+    /// should still not have to discover it.
+    func testTheSkippedCountIsAvailableToTheUI() {
+        writeStoredPayload([storedElement(rule(.acPowerConnected)), futureRule, futureRule])
+        let stored = TriggerStore.loadStored()
+        XCTAssertEqual(stored.compactMap(\.rule).count, 1)
+        XCTAssertEqual(stored.unreadableCount, 2)
+    }
+
     // MARK: - sessionKind(firing:now:)
 
     /// The one deliberate exception: a `.processRunning` rule always starts

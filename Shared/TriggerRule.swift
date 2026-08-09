@@ -1,4 +1,10 @@
 import Foundation
+import os
+
+/// `Shared/` compiles into all four targets and so cannot reach the daemon's
+/// `helperLogger`, exactly as `powerLogger` explains. One line, on the one path
+/// that rewrites a file holding rules this build cannot read.
+let triggerLogger = Logger(subsystem: "au.com.workwireless.keepy-uppy", category: "triggers")
 
 enum TriggerCondition: Codable, Equatable {
     case appLaunched(bundleID: String)
@@ -157,6 +163,115 @@ struct TriggerRule: Codable, Equatable, Identifiable {
     var enabled: Bool
 }
 
+/// Just enough of JSON's data model to hold a value verbatim and hand it back
+/// unchanged.
+///
+/// It exists for one job: letting `TriggerStore` keep a rule that some *other*
+/// build wrote and this one cannot decode. Nothing here interprets the value —
+/// the point is precisely that this build has no idea what it means.
+///
+/// The `Int` case is not decoration. Holding every number as a `Double` writes
+/// an identifier past 2^53 back as a *different* identifier, and leaves whole
+/// numbers at the mercy of whatever the encoder does with `5.0`. A preservation
+/// that quietly alters what it preserved is a slower version of the loss this
+/// whole file is about.
+enum JSONValue: Codable, Equatable {
+    case null
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null; return }
+        // Bool before Int, Int before Double. `JSONDecoder` is strict enough to
+        // refuse `true` as an `Int` and `1` as a `Bool` on its own, but the
+        // order says which reading wins rather than leaving it to that.
+        if let value = try? container.decode(Bool.self) { self = .bool(value); return }
+        if let value = try? container.decode(Int.self) { self = .int(value); return }
+        if let value = try? container.decode(Double.self) { self = .double(value); return }
+        if let value = try? container.decode(String.self) { self = .string(value); return }
+        if let value = try? container.decode([JSONValue].self) { self = .array(value); return }
+        if let value = try? container.decode([String: JSONValue].self) { self = .object(value); return }
+        throw DecodingError.dataCorruptedError(
+            in: container, debugDescription: "not a value JSON can express")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
+}
+
+/// One element of the stored trigger array: a rule this build understands, or
+/// the untouched JSON of one it does not.
+///
+/// This type is the fix. `load()` used to decode `[TriggerRule]` inside a single
+/// `try?`, so one element with a `condition` this build had never heard of threw
+/// — and the `guard` turned that into `[]`, i.e. "you have no triggers". The
+/// file was still on disk and still complete at that point; what made the loss
+/// permanent was the next `save()`, which wrote the empty list over it. Plan 5
+/// adds six conditions, so the version of this that matters is not exotic: run
+/// the new build, then run an older one for any reason, and every rule you have
+/// disappears from the pane at once.
+///
+/// Decoding cannot throw here, and that is deliberate — `init(from:)` falls back
+/// to `JSONValue`, which holds any JSON at all. An element-wise loop that lets a
+/// failure escape has to advance the unkeyed container past the element it just
+/// refused, and `UnkeyedDecodingContainer` only advances on success: the obvious
+/// `while !container.isAtEnd { if let rule = try? container.decode(...) }` spins
+/// forever on the first bad element. A wrapper that always succeeds is how the
+/// container keeps moving.
+enum StoredTriggerRule: Codable, Equatable {
+    case readable(TriggerRule)
+    /// Written by another build, and kept exactly as it arrived. Not
+    /// necessarily an unknown *condition* — any field this build cannot decode
+    /// lands here, which is the right rule: the store's job is to preserve what
+    /// it cannot use, not to guess why it cannot use it.
+    case unreadable(JSONValue)
+
+    var rule: TriggerRule? {
+        switch self {
+        case .readable(let rule): return rule
+        case .unreadable: return nil
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        if let rule = try? TriggerRule(from: decoder) {
+            self = .readable(rule)
+            return
+        }
+        self = .unreadable(try JSONValue(from: decoder))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .readable(let rule): try rule.encode(to: encoder)
+        case .unreadable(let json): try json.encode(to: encoder)
+        }
+    }
+}
+
+extension Array where Element == StoredTriggerRule {
+    /// How many stored rules this build could not decode. The number the
+    /// Triggers pane needs in order to say so out loud — a rule that is
+    /// invisible and inert is a far milder failure than one that is deleted,
+    /// but it is not one the user should have to discover for themselves.
+    var unreadableCount: Int { lazy.filter { $0.rule == nil }.count }
+}
+
 /// Off by default (spec §8): an app that starts keeping the Mac awake
 /// unasked is a bug, not a feature. Shared with the future UI (plan 3),
 /// which is the only thing that will ever populate this beyond the
@@ -168,19 +283,66 @@ struct TriggerRule: Codable, Equatable, Identifiable {
 /// documented; the suite name was hardcoded separately here until the final
 /// whole-branch review (Item 5) consolidated it.
 enum TriggerStore {
-    private static let key = "triggerRules"
+    /// Internal rather than private so `TriggerRuleTests` can plant a payload
+    /// under the exact key the store reads. A second copy of the literal in the
+    /// tests could drift from this one, and a test that writes somewhere the
+    /// store never looks proves nothing.
+    static let key = "triggerRules"
 
     private static var defaults: UserDefaults { PreferencesSuite.defaults }
 
-    static func load() -> [TriggerRule] {
+    /// The rules this build can act on. Anything else on disk is still on disk;
+    /// it is simply not something this build can evaluate or display.
+    ///
+    /// Deliberately silent about what it skipped: `EvidenceLoopRunner` calls
+    /// this every 5s tick, so a log line here would be a log line every 5s
+    /// forever. `loadStored()` is where a caller that wants to *tell* somebody
+    /// looks, and `save()` is where the one bounded log line lives.
+    static func load() -> [TriggerRule] { loadStored().compactMap(\.rule) }
+
+    /// The stored array as it actually is, element by element.
+    ///
+    /// The outer `try?` still returns `[]`, and that is a different judgement,
+    /// not an oversight: an element that will not decode is somebody's rule from
+    /// another build, whereas a payload that is not an array of *anything* is
+    /// not a rule store at all, and there is nothing in it worth carrying
+    /// forward.
+    static func loadStored() -> [StoredTriggerRule] {
         guard let data = defaults.data(forKey: key),
-              let rules = try? JSONDecoder().decode([TriggerRule].self, from: data)
+              let stored = try? JSONDecoder().decode([StoredTriggerRule].self, from: data)
         else { return [] }
-        return rules
+        return stored
     }
 
+    /// Writes `rules`, and re-emits every element this build could not read.
+    ///
+    /// The preserved elements are re-read from disk here rather than remembered
+    /// from a previous `load()`, which is the whole design. A remembered set is
+    /// state that a caller can fail to carry: a `save()` on a code path that
+    /// never loaded, or that loaded before the other build wrote, would silently
+    /// destroy the rules — the same shape as `Session`'s three defaulted fields,
+    /// where the compiler is happy and the value quietly becomes somebody else's
+    /// idea of harmless. Going and fetching them means no call site can omit
+    /// them, because no call site passes them. `save(_:)` therefore keeps its
+    /// `[TriggerRule]` signature and its two callers are unchanged.
+    ///
+    /// Preserved elements are appended after `rules`. Their original positions
+    /// are not recoverable in any meaningful sense — the caller may have
+    /// reordered, added to or deleted from the list it is handing back — and
+    /// rule order carries no behaviour, only display order in the pane that
+    /// cannot show these anyway.
+    ///
+    /// The read-then-write is not atomic. Only the Settings UI ever writes this
+    /// key, from the main thread, so there is no second writer to race; the
+    /// agent and daemon only ever read.
     static func save(_ rules: [TriggerRule]) {
-        guard let data = try? JSONEncoder().encode(rules) else { return }
+        let preserved = loadStored().filter { $0.rule == nil }
+        guard let data = try? JSONEncoder().encode(rules.map(StoredTriggerRule.readable) + preserved)
+        else { return }
+        if !preserved.isEmpty {
+            triggerLogger.notice(
+                "kept \(preserved.count, privacy: .public) trigger rule(s) this build cannot decode")
+        }
         defaults.set(data, forKey: key)
     }
 }

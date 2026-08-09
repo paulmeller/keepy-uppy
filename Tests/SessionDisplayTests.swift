@@ -212,6 +212,33 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionKindLabel(.processRunning), "A process is running")
     }
 
+    /// Nothing to report is reported as nothing: the pane must not carry a
+    /// permanent line about a situation almost no one is in.
+    func testNoUnreadableRulesMeansNoNotice() {
+        XCTAssertNil(unreadableTriggerNotice(count: 0))
+    }
+
+    /// The two facts that stop a user acting on a missing trigger: it was kept,
+    /// and it is not running here. A notice that only said "hidden" would leave
+    /// them recreating a rule that already exists — a duplicate the newer build
+    /// then shows twice.
+    func testTheUnreadableNoticeSaysBothKeptAndNotRunning() {
+        for count in [1, 2, 7] {
+            guard let notice = unreadableTriggerNotice(count: count) else {
+                return XCTFail("\(count) unreadable rules must produce a notice")
+            }
+            XCTAssertTrue(notice.contains("kept"), notice)
+            XCTAssertTrue(notice.contains("won't run"), notice)
+        }
+    }
+
+    /// "1 triggers were created" in a pane about data the user is worried about
+    /// reads as a bug, which is the last impression this line should give.
+    func testTheUnreadableNoticeCountsGrammatically() {
+        XCTAssertEqual(unreadableTriggerNotice(count: 1)?.hasPrefix("1 trigger was"), true)
+        XCTAssertEqual(unreadableTriggerNotice(count: 3)?.hasPrefix("3 triggers were"), true)
+    }
+
     /// The Add sheet's footnote names the process before one has been typed,
     /// where the row subtitle never has to — the sheet renders it while the
     /// field is still empty.

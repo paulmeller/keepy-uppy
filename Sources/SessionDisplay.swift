@@ -153,6 +153,29 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
     }
 }
 
+/// What the Triggers pane says when the store holds rules this build cannot
+/// decode, or `nil` when it holds none.
+///
+/// `TriggerStore` keeps such a rule and writes it back untouched, so nothing is
+/// lost — but it cannot be shown in the list, cannot be edited, and will not
+/// fire while this build is the one running. Without this line the user sees a
+/// pane that is missing a trigger they wrote, or, if every rule they have came
+/// from the newer build, the "No Triggers" empty state telling them they have
+/// none. Preserving the rule silently would fix the data loss and leave the
+/// alarming part intact.
+///
+/// It says *kept* explicitly. The obvious reading of a missing trigger is that
+/// something deleted it, and the second-obvious response is to recreate it —
+/// which on the older build means writing a duplicate that the newer one will
+/// then show twice.
+func unreadableTriggerNotice(count: Int) -> String? {
+    guard count > 0 else { return nil }
+    if count == 1 {
+        return "1 trigger was created by a newer version of Keepy Uppy. It can't be shown here and won't run on this version, but it has been kept — no need to recreate it."
+    }
+    return "\(count) triggers were created by a newer version of Keepy Uppy. They can't be shown here and won't run on this version, but they have been kept — no need to recreate them."
+}
+
 extension DefaultSessionKind {
     /// Reads as a continuation of a sentence, which `label` ("Indefinitely",
     /// "For 1 Hour") does not once dropped mid-phrase.

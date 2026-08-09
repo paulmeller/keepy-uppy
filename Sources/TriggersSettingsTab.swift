@@ -3,6 +3,12 @@ import UniformTypeIdentifiers
 
 struct TriggersSettingsTab: View {
     @State private var rules = TriggerStore.load()
+    /// Rules the store is holding on to that this build cannot decode — written
+    /// by a newer version, kept verbatim by `TriggerStore.save`, and impossible
+    /// to render here because nothing in this build knows what they say. Read
+    /// once, like `rules`: only this pane writes the store, so the count cannot
+    /// change underneath it.
+    @State private var unreadableRuleCount = TriggerStore.loadStored().unreadableCount
     @State private var isAddingRule = false
     @State private var selection: TriggerRule.ID?
     @State private var completionConfig = SessionCompletionStore.load()
@@ -17,6 +23,18 @@ struct TriggersSettingsTab: View {
                 emptyState
             } else {
                 ruleList
+            }
+
+            // Below the list and above its editing footer, so it reads as a
+            // statement about what the list is not showing. It matters most in
+            // the `rules.isEmpty` branch, where the empty state otherwise says
+            // "No Triggers" to somebody who has several.
+            if let notice = unreadableTriggerNotice(count: unreadableRuleCount) {
+                Text(notice)
+                    .settingsFootnote()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
             }
 
             Divider()
