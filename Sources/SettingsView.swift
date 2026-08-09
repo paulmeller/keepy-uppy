@@ -42,6 +42,12 @@ struct GeneralSettingsTab: View {
     @State private var launchAtLoginEnabled = LoginItemService.status() == .enabled
     @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
+    @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
+    private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
+
+    private var defaultWakeMode: WakeMode {
+        DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
+    }
 
     var body: some View {
         Form {
@@ -64,6 +70,33 @@ struct GeneralSettingsTab: View {
             } footer: {
                 Text("Listed first in the menu's Start menu, so the session you use most is one click away.")
                     .settingsFootnote()
+            }
+
+            // Directly under "Default session", and not in Safety, because the
+            // two answer the same question about the same thing: what the
+            // menu's "Keep awake…" rows will start. One says when it ends, the
+            // other how it holds the Mac awake. Safety is about limits the
+            // daemon imposes on sessions it did not start, including the CLI's
+            // — this governs only sessions started here, so it would be the
+            // odd one out there.
+            //
+            // Its own Section rather than a second row of the one above so the
+            // footer can change with the selection, which is the arrangement
+            // Safety's thermal picker already uses: three short phrases can
+            // distinguish the options but cannot explain what they cost.
+            Section {
+                Picker("Keeps this Mac awake", selection: $defaultWakeModeRaw) {
+                    ForEach(wakeModeSettingsOrder, id: \.self) { mode in
+                        Text(wakeModeSettingsTitle(mode)).tag(mode.rawValue)
+                    }
+                }
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(wakeModeSettingsExplanation(defaultWakeMode))
+                        .settingsFootnote()
+                    Text(wakeModeSettingsScopeNote)
+                        .settingsFootnote()
+                }
             }
 
             Section {

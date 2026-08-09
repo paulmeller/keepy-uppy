@@ -209,9 +209,17 @@ func menuStatusLine(mine: [Session], others: [Session], now: Date) -> String {
 /// Verb first, so the row is visibly a thing you can do. With exactly one
 /// session of your own there is nothing to disambiguate, so it says the plain
 /// thing rather than quoting a description back at you.
+///
+/// The wake-mode tag is appended *here*, not composed by the view, for the
+/// same structural reason `Session.renewed(until:)` lives next to the stored
+/// properties: a row that has to remember to concatenate a suffix is a row
+/// that will one day forget, and a forgotten mode tag is invisible — it looks
+/// exactly like a lid-safe session. `menuAutomaticSuffix` stays separate
+/// because it is genuinely optional trim; this is not.
 func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> String {
-    guard !isOnlyOneOfMine else { return "Stop keeping awake" }
-    return "Stop “\(remainingTimeText(for: session, now: now).lowercased())”"
+    let tag = menuWakeModeSuffix(session.wakeMode)
+    guard !isOnlyOneOfMine else { return "Stop keeping awake" + tag }
+    return "Stop “\(remainingTimeText(for: session, now: now).lowercased())”" + tag
 }
 
 /// Origin earns a mention only when it is surprising. "Started manually" on a
@@ -227,8 +235,149 @@ func menuAutomaticSuffix(for session: Session) -> String {
 /// worse than a line of text.
 func menuForeignSessionLabel(for session: Session, now: Date) -> String {
     "\(remainingTimeText(for: session, now: now)) — started elsewhere"
+        + menuWakeModeSuffix(session.wakeMode)
 }
 
-func menuStartLabel(_ kind: DefaultSessionKind) -> String {
-    "Keep awake \(kind.durationPhrase)"
+/// The stored default is what these rows will actually start, so a default
+/// that is not `.clamshell` is named on the button that acts on it — the same
+/// argument that put the CLI's caveat on stderr at the moment the flag is
+/// typed, rather than in a README. It costs nothing in the overwhelmingly
+/// common case, where the tag is empty.
+func menuStartLabel(_ kind: DefaultSessionKind, wakeMode: WakeMode) -> String {
+    "Keep awake \(kind.durationPhrase)" + menuWakeModeSuffix(wakeMode)
 }
+
+// MARK: - Wake mode
+
+/// How a session's `WakeMode` reads in a menu row — `nil` for the mode that
+/// needs no explanation.
+///
+/// **Annotate the exception, not the rule.** `.clamshell` is the default, the
+/// strongest mode, and what every session started by this app, by a trigger,
+/// or by an unflagged `keepy-uppy on` is. A badge on all of those would be a
+/// badge on nearly every row of a menu that was rebuilt this week precisely
+/// because each row carried too much.
+///
+/// What the tag says is the **lid**, not the display, and that is not a
+/// stylistic choice. `.clamshell` and `.system` are *identical* in what they
+/// do to the screen — neither takes `preventIdleDisplaySleep`
+/// (`PowerPlan.reduce`) — so a tag reading "display may sleep" on a `.system`
+/// session would imply a difference from the default that does not exist. The
+/// only thing `.system` gives up relative to the default is surviving a lid
+/// close, and `.systemAndDisplay` gives up the same thing and additionally
+/// holds the screen on.
+///
+/// It is a statement about **this session**, never about the machine: the
+/// daemon unions every live session's mode, so a concurrent `.clamshell`
+/// session keeps the Mac awake lid-shut regardless. The machine-wide fact has
+/// its own line — `menuLidCaveat(for:)` — computed from the union.
+func menuWakeModeTag(_ mode: WakeMode) -> String? {
+    switch mode {
+    case .clamshell: return nil
+    case .system: return "lid open only"
+    case .systemAndDisplay: return "screen on, lid open only"
+    }
+}
+
+/// `menuWakeModeTag` as something a row can concatenate unconditionally.
+func menuWakeModeSuffix(_ mode: WakeMode) -> String {
+    guard let tag = menuWakeModeTag(mode) else { return "" }
+    return " (\(tag))"
+}
+
+/// The one machine-wide claim the menu is allowed to make, and the one surface
+/// that can honestly make it.
+///
+/// `keepy-uppy on` knows only the session it is starting, so its caveat had to
+/// be scoped to that session or be false whenever a second session was live.
+/// The menu holds the **whole** list — every client's, every user's — so it can
+/// answer the question that actually matters ("if I shut the lid now, does this
+/// stop?") by running the daemon's own reduction over the same input the daemon
+/// uses. Deriving it from `PowerPlan.reduce` rather than from any one session,
+/// or from a hand-written "are they all non-clamshell" test, is what keeps the
+/// menu and the mechanism from drifting.
+///
+/// `nil` when nothing is being kept awake (there is no guarantee to qualify)
+/// and when the plan does hold the lid (the expected case, which says nothing).
+func menuLidCaveat(for sessions: [Session]) -> String? {
+    guard !sessions.isEmpty else { return nil }
+    guard !PowerPlan.reduce(sessions.map(\.wakeMode)).sleepDisabled else { return nil }
+    return "Closing the lid will still let this Mac sleep."
+}
+
+// MARK: - The stored default wake mode
+
+/// The preference Settings writes and the menu reads, arranged exactly like
+/// `DefaultSessionKind`'s: a raw value in `PreferencesSuite`, read back with a
+/// fallback rather than a failure.
+///
+/// It is named here, once, for the reason `PreferencesSuite` itself is: two
+/// files that never call each other agree on a string, and a typo in either is
+/// not a compile error and not a crash — it is a Settings pane that appears to
+/// work while the menu goes on reading the old value. `DefaultSessionKind`'s
+/// key is still a literal in both files; that is the shape this deliberately
+/// does not copy.
+///
+/// The fallback is `.clamshell` on exactly the CLI's reasoning: absence must
+/// mean the strongest mode, because every other choice silently weakens the
+/// sessions of everyone who never opened Settings.
+enum DefaultWakeModePreference {
+    static let key = "defaultWakeMode"
+
+    /// Used both as the `@AppStorage` starting value and as the landing place
+    /// for a value this build does not recognise.
+    static let fallback = WakeMode.clamshell
+    static var defaultRawValue: String { fallback.rawValue }
+
+    static func mode(rawValue: String) -> WakeMode {
+        WakeMode(rawValue: rawValue) ?? fallback
+    }
+}
+
+/// The order the Settings picker offers the modes in — default first, as the
+/// menu's start list also leads with the stored default. `WakeMode.allCases`
+/// is declaration order, which puts the default last; pinning the display
+/// order here rather than reordering the enum keeps a presentation decision
+/// out of `Shared/`, where the daemon and CLI compile.
+let wakeModeSettingsOrder: [WakeMode] = [.clamshell, .system, .systemAndDisplay]
+
+/// The picker row. Named for what the user gets, not for the mechanism: the
+/// raw values are camelCase wire strings, and "assertion" and "SleepDisabled"
+/// are implementation vocabulary that mean nothing in a Settings window.
+func wakeModeSettingsTitle(_ mode: WakeMode) -> String {
+    switch mode {
+    case .clamshell: return "Even with the lid closed"
+    case .system: return "Only with the lid open"
+    case .systemAndDisplay: return "Only with the lid open, screen on"
+    }
+}
+
+/// The section footer, which changes with the selection — the same shape as
+/// `thermalSensitivityExplanation`, for the same reason: a picker of three
+/// short phrases can distinguish the options but cannot explain their
+/// consequences.
+///
+/// Note which direction each sentence points. "Keeps this Mac awake even after
+/// you shut the lid" is a *positive* claim about a `.clamshell` session and is
+/// unconditionally true, because the daemon's union can only ever strengthen
+/// it. "This Mac will sleep" would be a *negative* claim, and negatives are
+/// union-sensitive — false the moment any other client holds a clamshell
+/// session. So every negative below is scoped to "a session in this mode",
+/// exactly as `WakeMode.lidCloseCaveat` is in the CLI.
+func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
+    switch mode {
+    case .clamshell:
+        return "The default, and the only mode that survives a lid close: a session in this mode keeps this Mac awake after you shut the lid. The screen is still free to sleep on its own — a closed lid turns it off anyway."
+    case .system:
+        return "Holds off idle sleep while the lid is open and leaves the screen free to sleep, which is usually what a long unattended job wants. A session in this mode does not survive a lid close; only the default does."
+    case .systemAndDisplay:
+        return "Keeps the screen lit as well as holding off idle sleep, for a dashboard or a progress window you want to be able to glance at. A session in this mode does not survive a lid close; only the default does."
+    }
+}
+
+/// Whose sessions this actually governs. Three of the four clients ignore it:
+/// `keepy-uppy on` chooses per invocation with a flag, and a trigger-started
+/// session is built by `Agent/EvidenceLoopRunner.swift` with no `wakeMode:` at
+/// all, so it is `.clamshell` whatever is stored here. Said as the positive
+/// fact about triggers, which stays true under the union.
+let wakeModeSettingsScopeNote = "Sessions you start from the menu use this. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."

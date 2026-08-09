@@ -12,12 +12,23 @@ struct MenuContent: View {
     @ObservedObject var daemon: DaemonConnection
     @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
+    @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
+    private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
 
     /// Settings' General tab writes the raw value; an unrecognised one (an
     /// enum case removed in a later version, say) falls back rather than
     /// dropping the quick-start entry entirely.
     private var defaultKind: DefaultSessionKind {
         DefaultSessionKind(rawValue: defaultKindRaw) ?? .indefinite
+    }
+
+    /// Same arrangement, one file further out: the fallback is named in
+    /// `DefaultWakeModePreference` rather than repeated here, because unlike
+    /// the kind above — where a wrong fallback shows the wrong duration and is
+    /// obvious — a wrong wake-mode fallback silently starts weaker sessions
+    /// than the user asked for, and looks identical in every surface.
+    private var defaultWakeMode: WakeMode {
+        DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
     }
 
     /// The identity the daemon stamps on sessions this app starts, derived the
@@ -42,6 +53,16 @@ struct MenuContent: View {
             Text("Not connected to Keepy Uppy daemon")
         } else {
             Text(menuStatusLine(mine: mine, others: others, now: now))
+
+            // The status region's second line, and the only place the menu
+            // speaks about the machine rather than about a session. It is
+            // computed from the union of every live session's mode, which is
+            // why it can be stated flatly here while the CLI's equivalent has
+            // to be hedged down to the one session it knows about. Absent
+            // whenever the lid is held — the expected case says nothing.
+            if let caveat = menuLidCaveat(for: daemon.sessions) {
+                Text(caveat)
+            }
         }
 
         if daemon.isConnected && !daemon.sessions.isEmpty {
@@ -79,12 +100,23 @@ struct MenuContent: View {
         // Flat, not a submenu. Starting a session is the most common thing
         // anyone does here, and it used to take three interactions: open the
         // menu, hover "Start…", wait, then pick. The stored default leads.
-        Button(menuStartLabel(defaultKind)) {
-            Task { await daemon.startSession(kind: defaultKind.sessionKind(now: Date())) }
+        //
+        // Still one row per duration, deliberately: the stored wake mode
+        // applies to all of them, so this stays a list of *when it ends* and
+        // does not become a 4×3 grid. Changing how it keeps the Mac awake is a
+        // Settings decision made once, not a per-start choice.
+        Button(menuStartLabel(defaultKind, wakeMode: defaultWakeMode)) {
+            Task {
+                await daemon.startSession(kind: defaultKind.sessionKind(now: Date()),
+                                          wakeMode: defaultWakeMode)
+            }
         }
         ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
-            Button(menuStartLabel(kind)) {
-                Task { await daemon.startSession(kind: kind.sessionKind(now: Date())) }
+            Button(menuStartLabel(kind, wakeMode: defaultWakeMode)) {
+                Task {
+                    await daemon.startSession(kind: kind.sessionKind(now: Date()),
+                                              wakeMode: defaultWakeMode)
+                }
             }
         }
 

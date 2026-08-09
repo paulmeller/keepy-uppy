@@ -51,7 +51,7 @@ final class DaemonConnectionFailurePathTests: XCTestCase {
         let daemon = DaemonConnection()
         daemon.start()
         await expectCompletion("startSession() returned") {
-            _ = await daemon.startSession(kind: .indefinite)
+            _ = await daemon.startSession(kind: .indefinite, wakeMode: .clamshell)
         }
     }
 
@@ -67,6 +67,48 @@ final class DaemonConnectionFailurePathTests: XCTestCase {
         await expectCompletion("stopAllSessions() returned") {
             await daemon.stopAllSessions(all: false)
         }
+    }
+}
+
+/// What the app actually asks the daemon for.
+///
+/// The XPC round trip itself is not testable here (nothing registers the
+/// privileged daemon, and the ad-hoc-signed test host is refused by a real one
+/// at the code-signing gate), but the *payload* is — and the payload is where
+/// this app's one remaining silent-default trap lived. `Session` has exactly
+/// three fields with memberwise defaults; dropping any of them from a
+/// construction site compiles, passes, and is invisible in every surface the
+/// product has. It has happened three times in this repo.
+final class DaemonConnectionRequestTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    /// The regression this closes literally: `startSession` built its `Session`
+    /// without `wakeMode:`, so Settings and the menu could offer a choice that
+    /// was thrown away one line before it reached the wire.
+    func testTheRequestCarriesEveryWakeModeItIsGiven() {
+        for mode in WakeMode.allCases {
+            let request = DaemonConnection.requestedSession(
+                kind: .indefinite, wakeMode: mode, persistence: .clientBound,
+                origin: .manual, now: t0)
+            XCTAssertEqual(request.wakeMode, mode,
+                           "the app asked for \(mode.rawValue) and sent \(request.wakeMode.rawValue)")
+        }
+    }
+
+    /// A whole-struct comparison rather than a field list, for the same reason
+    /// `SessionEngineTests`' renewal test is one: a field added later is
+    /// covered without anyone remembering to add it here.
+    func testTheRequestIsExactlyTheClientChosenFieldsAndNothingElse() {
+        let request = DaemonConnection.requestedSession(
+            kind: .duration(until: t0.addingTimeInterval(3600)), wakeMode: .systemAndDisplay,
+            persistence: .detached, origin: .trigger, now: t0)
+        // `id`, `owner`, `ownerUID` and `startedAt` are all overwritten by the
+        // daemon, so the request's own values for them are not the contract —
+        // everything else is.
+        XCTAssertEqual(request, Session(id: request.id, kind: .duration(until: t0.addingTimeInterval(3600)),
+                                        owner: request.owner, ownerUID: request.ownerUID,
+                                        persistence: .detached, origin: .trigger, startedAt: t0,
+                                        triggerID: nil, wakeMode: .systemAndDisplay))
     }
 }
 

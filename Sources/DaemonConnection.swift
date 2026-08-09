@@ -149,11 +149,41 @@ final class DaemonConnection: ObservableObject {
         sessions = list
     }
 
+    /// The `Session` this app asks the daemon to start — the *request*, whose
+    /// `id`, `owner`, `ownerUID` and `startedAt` the daemon overwrites
+    /// server-side (`Session.authorized(id:owner:ownerUID:startedAt:)`), and
+    /// whose remaining fields are the actual ask.
+    ///
+    /// It is a separate, testable function rather than four lines inside
+    /// `startSession` for one reason: `wakeMode` is one of exactly three
+    /// `Session` fields with a memberwise default, so omitting it from a
+    /// construction site is not a compile error — it silently substitutes
+    /// `.clamshell`. That omission *was* here, which is why every session this
+    /// app started ignored the mode entirely, and the identical omission has
+    /// now been made and fixed twice more on two other lines
+    /// (`SessionEngine`'s lease renewal, `HelperService`'s trust split). Both
+    /// of those were closed by pairing one copy with one whole-struct test;
+    /// this is the third and last construction site in the app, closed the same
+    /// way by `DaemonConnectionRequestTests`.
+    nonisolated static func requestedSession(
+        kind: SessionKind, wakeMode: WakeMode,
+        persistence: SessionPersistence, origin: SessionOrigin, now: Date = Date()
+    ) -> Session {
+        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "app"),
+                persistence: persistence, origin: origin, startedAt: now,
+                wakeMode: wakeMode)
+    }
+
+    /// `wakeMode` has **no default**, unlike `persistence` and `origin`, and
+    /// that asymmetry is deliberate: the two defaulted fields are visible in
+    /// the UI if they are wrong, whereas a session that quietly stopped being
+    /// lid-safe looks exactly like one that still is.
     @discardableResult
-    func startSession(kind: SessionKind, persistence: SessionPersistence = .clientBound,
+    func startSession(kind: SessionKind, wakeMode: WakeMode,
+                      persistence: SessionPersistence = .clientBound,
                       origin: SessionOrigin = .manual) async -> Bool {
-        let session = Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "app"),
-                              persistence: persistence, origin: origin, startedAt: Date())
+        let session = Self.requestedSession(kind: kind, wakeMode: wakeMode,
+                                            persistence: persistence, origin: origin)
         guard let data = try? JSONEncoder().encode(session) else { return false }
         let ok: Bool? = await call { proxy, reply in
             proxy.startSession(data) { sessionID, error in

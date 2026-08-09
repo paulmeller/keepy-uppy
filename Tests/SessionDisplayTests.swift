@@ -224,8 +224,278 @@ final class MenuCopyTests: XCTestCase {
     }
 
     func testStartLabelsReadAsInstructionsNotNouns() {
-        XCTAssertEqual(menuStartLabel(.indefinite), "Keep awake indefinitely")
-        XCTAssertEqual(menuStartLabel(.oneHour), "Keep awake for 1 hour")
-        XCTAssertEqual(menuStartLabel(.eightHours), "Keep awake for 8 hours")
+        // In the default mode — the only one that existed when these were
+        // written — the label is exactly what it always was. That is the
+        // "annotate the exception, not the rule" claim, stated as an equality
+        // rather than a substring so a tag leaking onto the common case fails
+        // here.
+        XCTAssertEqual(menuStartLabel(.indefinite, wakeMode: .clamshell), "Keep awake indefinitely")
+        XCTAssertEqual(menuStartLabel(.oneHour, wakeMode: .clamshell), "Keep awake for 1 hour")
+        XCTAssertEqual(menuStartLabel(.eightHours, wakeMode: .clamshell), "Keep awake for 8 hours")
+    }
+}
+
+/// Plan 4 Task 5: the menu and Settings surface of `WakeMode`.
+///
+/// The CLI's equivalents (`WakeMode.sessionListDescription`, `.lidCloseCaveat`
+/// in `Shared/CLICommand.swift`, pinned by `WakeModeCLISurfaceTests`) say the
+/// same things in a different register — a terminal can afford a full sentence
+/// per row, a menu cannot — so these are deliberately separate strings with
+/// their own tests rather than one string stretched over two surfaces.
+///
+/// Every assertion below is pinned against `requiresSleepDisabled` or against
+/// `PowerPlan.reduce`, never against a hard-coded list of modes, so a fourth
+/// `WakeMode` cannot be added without this file forcing a decision about it.
+final class WakeModeMenuCopyTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+    private let mineID = ClientID(rawValue: "app-501")
+    private let theirsID = ClientID(rawValue: "cli-501")
+
+    private func session(_ mode: WakeMode, owner: ClientID? = nil,
+                         kind: SessionKind = .indefinite) -> Session {
+        Session(id: UUID(), kind: kind, owner: owner ?? mineID, persistence: .clientBound,
+                origin: .manual, startedAt: t0, wakeMode: mode)
+    }
+
+    // MARK: - The per-session tag
+
+    /// The whole design decision, as a test: `.clamshell` is the default, the
+    /// strongest mode, and what almost every session in existence is. Tagging
+    /// it would put a badge on every row of a menu that was redesigned this
+    /// week *because* it had too much on each row.
+    func testExactlyTheNonDefaultModesAreTagged() {
+        for mode in WakeMode.allCases {
+            XCTAssertEqual(menuWakeModeTag(mode) == nil, mode.requiresSleepDisabled,
+                           "\(mode.rawValue): the mode that survives a lid close is the rule and goes "
+                           + "untagged; every other mode is the exception and must be visible")
+        }
+    }
+
+    /// The two tagged modes differ from each other only in what the *display*
+    /// does — `.clamshell` and `.system` are identical on that axis, since
+    /// neither holds `preventIdleDisplaySleep` (`PowerPlan.reduce`). So the
+    /// fact a tag has to carry is the lid, not the screen: a tag reading only
+    /// "display may sleep" would imply a difference from the default that does
+    /// not exist.
+    func testEveryTagNamesTheLidBecauseThatIsWhatTheseModesActuallyGiveUp() {
+        for mode in WakeMode.allCases {
+            guard let tag = menuWakeModeTag(mode) else { continue }
+            XCTAssertTrue(tag.contains("lid"),
+                          "\(mode.rawValue)'s tag must name the axis it differs on: \(tag)")
+        }
+    }
+
+    func testOnlyTheScreenHoldingModeMentionsTheScreen() {
+        for mode in WakeMode.allCases {
+            guard let tag = menuWakeModeTag(mode) else { continue }
+            XCTAssertEqual(tag.contains("screen"), mode.holdsDisplayAwake,
+                           "\(mode.rawValue)'s tag disagrees with whether it holds the display awake: \(tag)")
+        }
+    }
+
+    /// A row describes one session. The daemon unions every live session's mode
+    /// (`PowerPlan.reduce`), so a concurrent `.clamshell` session really does
+    /// keep the machine awake lid-shut no matter what this row's session asked
+    /// for — the exact bug the Task 4 stderr caveat shipped with. A tag that
+    /// said "this Mac will sleep" would be false precisely when two sessions
+    /// are running, which is when someone is most likely to be reading it.
+    func testNoTagMakesAClaimAboutTheWholeMac() {
+        for mode in WakeMode.allCases {
+            guard let tag = menuWakeModeTag(mode) else { continue }
+            XCTAssertFalse(tag.lowercased().contains("mac"),
+                           "a per-session tag cannot assert a machine-wide fact: \(tag)")
+            XCTAssertFalse(tag.lowercased().contains("will sleep"),
+                           "a per-session tag cannot assert a machine-wide fact: \(tag)")
+        }
+    }
+
+    // MARK: - Where the tag actually appears
+
+    func testTheStopButtonCarriesItsSessionSMode() {
+        let plain = menuStopLabel(for: session(.clamshell), isOnlyOneOfMine: true, now: t0)
+        XCTAssertEqual(plain, "Stop keeping awake", "the default mode adds nothing")
+
+        let tagged = menuStopLabel(for: session(.system), isOnlyOneOfMine: true, now: t0)
+        XCTAssertTrue(tagged.hasPrefix("Stop keeping awake"), tagged)
+        XCTAssertTrue(tagged.contains("lid"),
+                      "a session of your own can be non-default now that Settings can choose: \(tagged)")
+    }
+
+    func testAForeignSessionCarriesItsModeToo() {
+        let plain = menuForeignSessionLabel(for: session(.clamshell, owner: theirsID), now: t0)
+        XCTAssertFalse(plain.contains("lid"), "the default mode adds nothing: \(plain)")
+
+        let tagged = menuForeignSessionLabel(for: session(.systemAndDisplay, owner: theirsID), now: t0)
+        XCTAssertTrue(tagged.contains("elsewhere"), tagged)
+        XCTAssertTrue(tagged.contains("lid"),
+                      "a CLI `--display-may-sleep` session must not read like a lid-safe one: \(tagged)")
+    }
+
+    /// The start rows are the point of use for the stored default, and the
+    /// place someone who set it months ago will next meet it. Same reasoning as
+    /// the CLI's stderr note: warn where the mistake is being made.
+    func testTheStartRowsSayWhatTheStoredDefaultWillActuallyStart() {
+        for kind in DefaultSessionKind.allCases {
+            XCTAssertEqual(menuStartLabel(kind, wakeMode: .clamshell),
+                           "Keep awake \(kind.durationPhrase)",
+                           "the common case gains nothing")
+            let tagged = menuStartLabel(kind, wakeMode: .system)
+            XCTAssertTrue(tagged.hasPrefix("Keep awake"), "still verb-first: \(tagged)")
+            XCTAssertTrue(tagged.contains("lid"), tagged)
+        }
+    }
+
+    // MARK: - The one machine-wide statement
+
+    /// The menu is the only surface that holds the *whole* session list, so it
+    /// is the only one that can state the union fact the CLI's per-session
+    /// caveat had to work around. It is derived from `PowerPlan.reduce` — the
+    /// same reduction the daemon applies — rather than from any one session, so
+    /// it cannot drift from what the machine will actually do.
+    func testTheLidLineAppearsExactlyWhenNothingLiveHoldsTheLid() {
+        XCTAssertNil(menuLidCaveat(for: []), "nothing is being kept awake; there is nothing to qualify")
+        XCTAssertNil(menuLidCaveat(for: [session(.clamshell)]))
+        XCTAssertNotNil(menuLidCaveat(for: [session(.system)]))
+        XCTAssertNotNil(menuLidCaveat(for: [session(.systemAndDisplay)]))
+        XCTAssertNotNil(menuLidCaveat(for: [session(.system), session(.systemAndDisplay)]))
+    }
+
+    /// The case the Task 4 caveat got wrong, from the other direction: one
+    /// `.system` session and one `.clamshell` session means the Mac *does* stay
+    /// awake with the lid shut, so the line must not appear — even though a
+    /// session that gave the guarantee up is live and visibly tagged.
+    func testAConcurrentDefaultSessionSuppressesTheLidLine() {
+        let mixed = [session(.system, owner: mineID), session(.clamshell, owner: theirsID)]
+        XCTAssertNil(menuLidCaveat(for: mixed),
+                     "a live clamshell session keeps the machine awake lid-shut whoever owns it")
+        // …and the tagged row is still tagged, because it is a true statement
+        // about that session's own contribution, not about the machine.
+        XCTAssertTrue(menuStopLabel(for: mixed[0], isOnlyOneOfMine: true, now: t0).contains("lid"))
+    }
+
+    /// Exhaustive over every combination of up to three modes rather than the
+    /// handful of cases above: the line's presence is *defined* as the negation
+    /// of the plan's `sleepDisabled`, so this is the invariant, and the
+    /// examples are illustrations of it.
+    func testTheLidLineAgreesWithThePlanTheDaemonWillApply() {
+        var combinations: [[WakeMode]] = [[]]
+        for a in WakeMode.allCases {
+            combinations.append([a])
+            for b in WakeMode.allCases {
+                combinations.append([a, b])
+                for c in WakeMode.allCases { combinations.append([a, b, c]) }
+            }
+        }
+        for modes in combinations {
+            let sessions = modes.map { session($0) }
+            let planHoldsTheLid = PowerPlan.reduce(modes).sleepDisabled
+            let shown = menuLidCaveat(for: sessions) != nil
+            XCTAssertEqual(shown, !modes.isEmpty && !planHoldsTheLid,
+                           "\(modes.map(\.rawValue)) — the menu and the daemon disagree about the lid")
+        }
+    }
+
+    func testTheLidLineSaysWhatWillHappenNotWhichModeIsToBlame() {
+        guard let line = menuLidCaveat(for: [session(.system)]) else { return XCTFail("expected a line") }
+        XCTAssertTrue(line.lowercased().contains("lid"), line)
+        XCTAssertTrue(line.lowercased().contains("sleep"),
+                      "the consequence, not the vocabulary: \(line)")
+        XCTAssertFalse(line.contains(WakeMode.system.rawValue),
+                       "a wire name has no business in the menu: \(line)")
+    }
+}
+
+/// The stored default and the Settings pane that writes it. Mirrors
+/// `DefaultSessionKind`'s arrangement exactly — Settings writes a raw value,
+/// the menu reads it back through `PreferencesSuite.defaults`, and an
+/// unrecognised value falls back rather than dropping the control.
+final class DefaultWakeModePreferenceTests: XCTestCase {
+    func testAStoredModeRoundTrips() {
+        for mode in WakeMode.allCases {
+            XCTAssertEqual(DefaultWakeModePreference.mode(rawValue: mode.rawValue), mode)
+        }
+    }
+
+    /// An enum case removed in a later version, a hand-edited plist, a value
+    /// written by a future build — none of them may leave the menu unable to
+    /// start a session, and none may silently *weaken* what a session gets.
+    func testAnUnrecognisedStoredValueFallsBackRatherThanFailing() {
+        for stored in ["", "systemAndDisplayAndSomethingElse", "CLAMSHELL", "1"] {
+            XCTAssertEqual(DefaultWakeModePreference.mode(rawValue: stored),
+                           DefaultWakeModePreference.fallback,
+                           "unrecognised value \"\(stored)\" must fall back")
+        }
+    }
+
+    /// Derived, not asserted: the fallback — and the value `@AppStorage` starts
+    /// from before anyone has chosen — has to be the mode that survives a lid
+    /// close, for the same reason the CLI's default is selected by absence. Any
+    /// other choice silently weakens every session started by someone who never
+    /// opened Settings.
+    func testTheFallbackIsTheModeThatSurvivesALidClose() {
+        XCTAssertTrue(DefaultWakeModePreference.fallback.requiresSleepDisabled)
+        XCTAssertEqual(DefaultWakeModePreference.defaultRawValue,
+                       DefaultWakeModePreference.fallback.rawValue)
+    }
+
+    /// The key is the contract between two files that never call each other.
+    /// A typo in one is not a compile error and not a crash — it is a Settings
+    /// pane that appears to work while the menu keeps reading the old value.
+    func testTheKeyIsNamedOnceAndIsNotTheSessionKindKey() {
+        XCTAssertEqual(DefaultWakeModePreference.key, "defaultWakeMode")
+        XCTAssertNotEqual(DefaultWakeModePreference.key, "defaultSessionKind")
+    }
+
+    func testThePickerOffersEveryModeAndLeadsWithTheDefault() {
+        XCTAssertEqual(Set(wakeModeSettingsOrder), Set(WakeMode.allCases),
+                       "a mode missing from the picker is a mode nobody can choose")
+        XCTAssertEqual(wakeModeSettingsOrder.count, WakeMode.allCases.count, "no duplicates")
+        XCTAssertEqual(wakeModeSettingsOrder.first, DefaultWakeModePreference.fallback,
+                       "the default leads, as it does in the menu's start list")
+    }
+
+    func testEveryModeHasATitleAndAnExplanationRatherThanARestatedLabel() {
+        for mode in WakeMode.allCases {
+            XCTAssertFalse(wakeModeSettingsTitle(mode).isEmpty)
+            XCTAssertFalse(wakeModeSettingsTitle(mode).contains(mode.rawValue),
+                           "\(mode.rawValue) is a wire name, not a thing to show a user")
+            XCTAssertGreaterThan(wakeModeSettingsExplanation(mode).count, 40,
+                                 "\(mode.rawValue) needs a real explanation")
+            XCTAssertTrue(wakeModeSettingsExplanation(mode).lowercased().contains("lid"),
+                          "the lid is the axis these modes actually differ on")
+        }
+    }
+
+    /// The asymmetry that makes this copy safe to write at all: a *positive*
+    /// claim ("keeps this Mac awake with the lid shut") is unconditionally true
+    /// of a `.clamshell` session, because the union can only strengthen it. A
+    /// *negative* one ("this Mac will sleep") is union-sensitive and false the
+    /// moment any other client holds a clamshell session — so every negative
+    /// statement here is scoped to the session, exactly as the CLI's caveat is.
+    func testEveryNegativeLidStatementIsScopedToASessionAndNotToTheMac() {
+        for mode in WakeMode.allCases {
+            let explanation = wakeModeSettingsExplanation(mode)
+            XCTAssertEqual(explanation.contains("does not survive a lid close"),
+                           !mode.requiresSleepDisabled,
+                           "\(mode.rawValue)'s explanation disagrees with what it actually does")
+            guard explanation.contains("does not survive a lid close") else { continue }
+            XCTAssertTrue(explanation.contains("A session in this mode"),
+                          "a concurrent clamshell session keeps the machine awake lid-shut, so the "
+                          + "negative has to be about the session: \(explanation)")
+        }
+    }
+
+    /// The pane sets a default for one client among four. Someone reading it
+    /// must not conclude that a `keepy-uppy on` in a terminal, or a trigger
+    /// firing while they are away, will follow it — neither does.
+    func testTheScopeNoteSaysWhichSessionsThisActuallyGoverns() {
+        XCTAssertTrue(wakeModeSettingsScopeNote.contains("menu"), wakeModeSettingsScopeNote)
+        XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("command line"),
+                      wakeModeSettingsScopeNote)
+        // Trigger-started sessions are built by `Agent/EvidenceLoopRunner.swift`
+        // with no `wakeMode:` at all, so they are `.clamshell` whatever this
+        // preference says. Stated as the positive fact, which is the one that
+        // stays true under the union.
+        XCTAssertTrue(wakeModeSettingsScopeNote.contains("lid closed"), wakeModeSettingsScopeNote)
     }
 }
