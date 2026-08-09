@@ -105,6 +105,17 @@ final class HelperService: NSObject, HelperProtocol {
         reply(stopped, nil)
     }
 
+    /// Logged at the same level as `stopAllSessions`, and for the same reason:
+    /// it ends every client's sessions. The extra scalar is the one the caller
+    /// has to act on — `false` means this Mac is still held awake, and
+    /// `DaemonRemoval.next(after:)` turns that into a refusal to unregister.
+    func prepareForRemoval(reply: @escaping (Int, Bool) -> Void) {
+        connectionProven()
+        helperLogger.log("prepareForRemoval from \(self.clientID.rawValue)")
+        let outcome = runtime.prepareForRemoval()
+        reply(outcome.stopped, outcome.sleepRestored)
+    }
+
     func listSessions(reply: @escaping (Data?, String?) -> Void) {
         connectionProven()
         guard let data = try? JSONEncoder().encode(runtime.currentSessions()) else {

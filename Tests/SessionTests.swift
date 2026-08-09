@@ -148,6 +148,17 @@ final class SessionOverXPCTransportTests: XCTestCase {
             reply(session.wakeMode.rawValue, nil)
         }
 
+        /// The one other method here that is not a stub. `reset` acts on
+        /// *both* of these values — `DaemonRemoval.next(after:)` refuses to
+        /// unregister when the second is `false` — so both have to make it
+        /// across, and the test sets them to something no default could
+        /// accidentally match.
+        var removalReply: (stopped: Int, sleepRestored: Bool) = (0, true)
+
+        func prepareForRemoval(reply: @escaping (Int, Bool) -> Void) {
+            reply(removalReply.stopped, removalReply.sleepRestored)
+        }
+
         func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
         func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) { reply(0, "unused") }
         func listSessions(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
@@ -210,5 +221,51 @@ final class SessionOverXPCTransportTests: XCTestCase {
             XCTAssertEqual(echoed, mode.rawValue,
                            "wakeMode \(mode.rawValue) did not survive the XPC round trip")
         }
+    }
+
+    /// `reset`'s converge step crosses the same boundary, and unlike everything
+    /// else on this protocol its reply is two bare scalars rather than an
+    /// encoded payload — a shape `NSXPCInterface` adjudicates when the message
+    /// is sent, not when the file compiles. A wrong block signature therefore
+    /// shows up as an XPC error at the one moment nobody is watching: partway
+    /// through evicting the daemon.
+    ///
+    /// The values are chosen so no default could pass by accident — `false` is
+    /// the one that stops `reset` from unregistering, and it is not what
+    /// `EchoingHelper` starts with.
+    ///
+    /// Own listener and connection, deliberately: the trap called out on the
+    /// test above applies verbatim here (`NSXPCListener.delegate` is weak, so a
+    /// delegate created inline is deallocated before the first connection
+    /// arrives and every connection is silently refused).
+    func testTheRemovalReplyCarriesBothValuesOverARealXPCRoundTrip() {
+        let listener = NSXPCListener.anonymous()
+        let delegate = ListenerDelegate()
+        delegate.exported.removalReply = (stopped: 4, sleepRestored: false)
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+        connection.resume()
+        defer { connection.invalidate() }
+
+        let replied = expectation(description: "prepareForRemoval reply")
+        replied.assertForOverFulfill = false
+        var received: (Int, Bool)?
+        let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+            XCTFail("XPC error: \(error.localizedDescription)")
+            replied.fulfill()
+        } as? HelperProtocol
+        proxy?.prepareForRemoval { stopped, sleepRestored in
+            received = (stopped, sleepRestored)
+            replied.fulfill()
+        }
+        wait(for: [replied], timeout: 10)
+
+        XCTAssertEqual(received?.0, 4, "the session count did not survive the round trip")
+        XCTAssertEqual(received?.1, false,
+                       "the flag `reset` refuses to unregister on did not survive the round trip")
     }
 }

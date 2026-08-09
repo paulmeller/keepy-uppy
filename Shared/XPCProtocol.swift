@@ -87,6 +87,24 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     /// what let a scoping mismatch masquerade as a working `off`.
     func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void)
 
+    /// Ends every session daemon-wide **and** forces the sleep setting back
+    /// off, as the last thing this daemon is asked to do before a client
+    /// unregisters it (`keepy-uppy reset`). Replies with how many sessions were
+    /// ended, and whether this Mac can sleep again.
+    ///
+    /// It exists because unregistering evicts the only process that can clear
+    /// `SleepDisabled`, and that setting outlives both the process and the next
+    /// reboot — see `DaemonRemoval` for the ordering rule this reply feeds, and
+    /// for why a caller must not unregister when the second value is `false`.
+    ///
+    /// Deliberately not owner-scoped, and not a fourth isolation gap. It is
+    /// `stopAllSessions(all: true)` — already an explicit, logged escalation
+    /// open to every admitted client — plus the one write that makes the
+    /// escalation safe to follow with an eviction. Both act only in the
+    /// *weakening* direction: the most a caller can achieve with this is to let
+    /// this Mac sleep.
+    func prepareForRemoval(reply: @escaping (Int, Bool) -> Void)
+
     /// Replies with a JSON-encoded `[Session]` — every session daemon-wide,
     /// regardless of owner. This is intentional, not a fourth isolation gap:
     /// the UI must be able to show *why* the Mac is awake regardless of

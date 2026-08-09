@@ -259,6 +259,42 @@ final class DaemonRuntime {
         }
     }
 
+    /// `start()`'s converge-to-safe, run on the way **out**: end every session
+    /// and force sleep back on, because the caller is about to unregister this
+    /// daemon and nothing left on the machine would ever put the setting back.
+    /// `DaemonRemoval` states the ordering rule; this is the half of it only
+    /// root can perform.
+    ///
+    /// Three things about the shape, in the order a reader will ask them:
+    ///
+    /// - **The direct `setSleepDisabled(false)` is not redundant with the
+    ///   `applyLocked()` above it, and cannot be folded into it.** `apply`
+    ///   deliberately reports a refused *clear* as success: a setting that
+    ///   stays on leaves the Mac awake for longer than asked, which is the one
+    ///   direction that cannot lose a user's work, so it must never fail a
+    ///   start. That is precisely the fact this method exists to learn, so it
+    ///   makes the write itself, unconditionally, and reports what it got.
+    ///   Same division of labour as `start()`, for the same reason, read in
+    ///   the other direction.
+    /// - **The assertion axis needs nothing extra here.** `applyLocked`
+    ///   releases whatever the now-empty plan no longer wants, and `powerd`
+    ///   reaps the rest the moment this process dies. Only the persistent axis
+    ///   can outlive an eviction, so only it needs the belt-and-braces write.
+    /// - **This does not stop the daemon.** It stays up and keeps ticking, and
+    ///   would honour a session started a millisecond later; the caller's
+    ///   `SMAppService.unregister()` is what ends it. Closing that window would
+    ///   need a refuse-new-sessions shutdown state this daemon does not have,
+    ///   and the window is bounded by one synchronous call in the client.
+    func prepareForRemoval() -> (stopped: Int, sleepRestored: Bool) {
+        queue.sync {
+            let ended = sessions.apply(.stopAll, now: Date())
+            _ = applyLocked()
+            let restored = PowerControl.setSleepDisabled(false)
+            helperLogger.log("Prepare for removal: ended \(ended.count) session(s), forced sleep enabled, success=\(restored)")
+            return (ended.count, restored)
+        }
+    }
+
     /// Renews a lease session's deadline. Ownership-checked exactly like
     /// `stopSession`, for the same reason: a lease belongs to the client
     /// that started it.

@@ -4,6 +4,15 @@ import ServiceManagement
 let semaphore = DispatchSemaphore(value: 0)
 var exitCode: Int32 = 0
 
+/// The live connection, kept beyond `connect()` for `reset` alone.
+///
+/// Every other verb wants the shared error handler below: "the daemon did not
+/// answer" is conclusive and fatal for them. `reset` is the one verb for which
+/// it is neither — an unreachable daemon is the half-installed state `reset`
+/// exists to recover — so it needs a proxy carrying an error handler of its
+/// own, and building one needs the connection rather than the proxy.
+var daemonConnection: NSXPCConnection?
+
 func connect() -> HelperProtocol? {
     // The CLI-ONLY Mach service, never the app's. That is what makes the
     // daemon see this process as the CLI, and therefore what gives every
@@ -22,6 +31,7 @@ func connect() -> HelperProtocol? {
         connection.setCodeSigningRequirement(SigningRequirement.helperRequirement)
     }
     connection.resume()
+    daemonConnection = connection
     return connection.remoteObjectProxyWithErrorHandler { error in
         FileHandle.standardError.write("keepy-uppy: \(error.localizedDescription)\n".data(using: .utf8)!)
         // End the wait here rather than letting the 10s timeout deliver it.
@@ -206,12 +216,19 @@ case .setup:
     semaphore.signal()
 
 case .reset:
-    // Same shape as `.setup` above — synchronous SMAppService work, no XPC,
-    // so it signals the semaphore itself and falls through to the shared
-    // epilogue. `unregister()` is deliberately routed through SMAppService
-    // rather than documented as `sudo launchctl bootout`: smd performs the
-    // privileged eviction on the user's behalf, so a wedged daemon is
-    // recoverable without root.
+    // `unregister()` is deliberately routed through SMAppService rather than
+    // documented as `sudo launchctl bootout`: smd performs the privileged
+    // eviction on the user's behalf, so a wedged daemon is recoverable
+    // without root.
+    //
+    // Unlike `.setup` above, this is no longer purely synchronous work.
+    // Eviction removes the only process that can clear `SleepDisabled`, and
+    // that setting survives process death and reboot — so a `reset` run with a
+    // session live used to leave the Mac unable to sleep, permanently, with
+    // nothing left running to fix it. The daemon is therefore asked to put the
+    // machine back *first*, and `DaemonRemoval` decides whether the eviction
+    // may follow. See that type for the whole rule; this branch is only its
+    // plumbing.
     func unregisterAndReport(_ label: String, _ service: SMAppService) {
         do {
             try service.unregister()
@@ -229,11 +246,48 @@ case .reset:
         }
     }
 
-    unregisterAndReport("Daemon", SMAppService.daemon(plistName: helperPlistName))
-    unregisterAndReport("Agent", SMAppService.agent(plistName: agentPlistName))
-    print("Run 'keepy-uppy setup' to register again.")
+    func finish(_ outcome: DaemonRemoval.ConvergeOutcome) {
+        switch DaemonRemoval.next(after: outcome) {
+        case .refuse(let reason):
+            FileHandle.standardError.write("keepy-uppy: \(reason)\n".data(using: .utf8)!)
+            exitCode = 1
+        case .unregister:
+            switch outcome {
+            case .sleepRestored(let stopped) where stopped > 0:
+                print("Ended \(stopped) session(s) and restored sleep.")
+            case .unreachable:
+                // stderr, and not fatal: on a machine that was never set up
+                // this is the ordinary case, and `reset` still has real work
+                // to do. It is a note, not a failure, so the exit status is
+                // left to whether the unregisters below succeed.
+                FileHandle.standardError.write(
+                    "keepy-uppy: \(DaemonRemoval.unreachableNote)\n".data(using: .utf8)!)
+            case .sleepRestored, .sleepStillDisabled:
+                break
+            }
+            unregisterAndReport("Daemon", SMAppService.daemon(plistName: helperPlistName))
+            unregisterAndReport("Agent", SMAppService.agent(plistName: agentPlistName))
+            print("Run 'keepy-uppy setup' to register again.")
+        }
+        semaphore.signal()
+    }
 
-    semaphore.signal()
+    // A proxy of this branch's own, so an unreachable daemon lands in
+    // `finish(.unreachable)` rather than in the shared handler's exit path —
+    // which would abandon `reset` without unregistering anything, in exactly
+    // the situation it is most often run. Exactly one of the two closures
+    // runs: XPC delivers either the reply or the error, never both.
+    let removalProxy = daemonConnection?.remoteObjectProxyWithErrorHandler { _ in
+        finish(.unreachable)
+    } as? HelperProtocol
+
+    if let removalProxy {
+        removalProxy.prepareForRemoval { stopped, sleepRestored in
+            finish(sleepRestored ? .sleepRestored(stopped: stopped) : .sleepStillDisabled)
+        }
+    } else {
+        finish(.unreachable)
+    }
 }
 
 let waitResult = semaphore.wait(timeout: .now() + 10)
