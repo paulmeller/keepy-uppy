@@ -39,6 +39,10 @@ final class EvidenceLoopRunner {
     /// A factory too, for `makeMountedVolume`'s reason: one `getifaddrs` pass
     /// answers every rule and session on the tick that took it.
     private let makeNetworkAddress: () -> NetworkAddressObserving
+    /// A factory too, for `makeNetworkAddress`'s reason: one look at the
+    /// network-service list answers every rule and session on the tick that
+    /// took it.
+    private let makeVPN: () -> VPNObserving
     private var evidence = SessionEvidence()
     private var timer: Timer?
     /// Snapshot bookkeeping for the session-completion action, including the
@@ -56,7 +60,8 @@ final class EvidenceLoopRunner {
          cpuObserver: CPUBusyObserving = SystemCPUBusyObserver(),
          frontmostApp: FrontmostAppObserving = SystemFrontmostAppObserver(),
          mountedVolume: @escaping () -> MountedVolumeObserving = { SystemMountedVolumeObserver() },
-         networkAddress: @escaping () -> NetworkAddressObserving = { SystemNetworkAddressObserver() }) {
+         networkAddress: @escaping () -> NetworkAddressObserving = { SystemNetworkAddressObserver() },
+         vpn: @escaping () -> VPNObserving = { SystemVPNObserver() }) {
         self.connection = connection
         self.appRunning = appRunning
         self.display = display
@@ -65,6 +70,7 @@ final class EvidenceLoopRunner {
         self.frontmostApp = frontmostApp
         self.makeMountedVolume = mountedVolume
         self.makeNetworkAddress = networkAddress
+        self.makeVPN = vpn
     }
 
     /// The timer fires every 5s and spawns a `Task` per fire, but `tick()` is
@@ -116,6 +122,7 @@ final class EvidenceLoopRunner {
         let processRunning = makeProcessRunning()
         let mountedVolume = makeMountedVolume()
         let networkAddress = makeNetworkAddress()
+        let vpn = makeVPN()
         // One bundle, built once, passed to both — which is what keeps that
         // guarantee true: a second `ObserverSet` here would be a second
         // process-table enumeration, and a second CPU sample, whose delta
@@ -131,6 +138,7 @@ final class EvidenceLoopRunner {
                                     frontmostApp: frontmostApp,
                                     mountedVolume: mountedVolume,
                                     networkAddress: networkAddress,
+                                    vpn: vpn,
                                     acPower: PowerControl.batteryState().source.acPowerReading,
                                     cpuBusy: cpuObserver.currentBusy())
 

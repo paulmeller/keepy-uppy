@@ -28,6 +28,15 @@ enum SessionKind: Equatable, Codable {
     /// I am on my home network" — durable, and unlike the Wi-Fi trigger it
     /// needs no Location Services grant and works over Ethernet too.
     case whileOnSubnet(cidr: String)
+    /// Ends when no VPN is up any more. "Keep this Mac awake while the tunnel
+    /// is up" is durable in the way `.whileOnSubnet` is — a VPN does not
+    /// connect and drop between two ticks while a laptop sits on a desk — and
+    /// a VPN going down is a real event worth ending on.
+    ///
+    /// Carries no associated value on purpose: `VPNObserving` answers "is any
+    /// VPN up", because the request is never about a particular tunnel and
+    /// naming one would mean typing a service identifier nobody has seen.
+    case whileVPNActive
 
     /// A kind's identity without its associated value, so that `CaseIterable`
     /// guarantees are available to anything that has to cover every kind: the
@@ -62,6 +71,7 @@ enum SessionKind: Equatable, Codable {
         case whileProcessRunning = "while-process-running"
         case whileVolumeMounted = "while-volume-mounted"
         case whileOnSubnet = "while-on-subnet"
+        case whileVPNActive = "while-vpn-active"
     }
 
     /// This kind's family, dropping its associated value. Exhaustive, so a new
@@ -80,6 +90,7 @@ enum SessionKind: Equatable, Codable {
         case .whileProcessRunning: return .whileProcessRunning
         case .whileVolumeMounted: return .whileVolumeMounted
         case .whileOnSubnet: return .whileOnSubnet
+        case .whileVPNActive: return .whileVPNActive
         }
     }
 
@@ -89,7 +100,7 @@ enum SessionKind: Equatable, Codable {
         switch self {
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower: return true
         case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
-             .whileVolumeMounted, .whileOnSubnet: return false
+             .whileVolumeMounted, .whileOnSubnet, .whileVPNActive: return false
         }
     }
 
@@ -128,8 +139,11 @@ enum SessionKind: Equatable, Codable {
         case .whileProcessRunning(let processName): return "\(family.rawValue):\(processName)"
         case .whileVolumeMounted(let name): return "\(family.rawValue):\(name)"
         case .whileOnSubnet(let cidr): return "\(family.rawValue):\(cidr)"
+        // `.whileVPNActive` is here rather than above because it has no
+        // associated value to put after the colon: the condition is "any VPN",
+        // so there is nothing that identifies *which* tunnel was watched.
         case .indefinite, .duration, .untilTime, .lease, .whileExternalDisplay,
-             .whileOnACPower, .whileCPUBusy:
+             .whileOnACPower, .whileCPUBusy, .whileVPNActive:
             return family.rawValue
         }
     }
@@ -144,7 +158,7 @@ enum SessionKind: Equatable, Codable {
             return until
         case .indefinite, .whileAppRunning, .whileExternalDisplay,
              .whileOnACPower, .whileCPUBusy, .whileProcessRunning, .whileVolumeMounted,
-             .whileOnSubnet:
+             .whileOnSubnet, .whileVPNActive:
             return nil
         }
     }

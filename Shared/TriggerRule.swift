@@ -29,6 +29,10 @@ enum TriggerCondition: Codable, Equatable {
     /// home network", and the permission-free alternative to a Wi-Fi SSID
     /// trigger — see `NetworkAddressObserving`. Binds its session's lifetime.
     case onSubnet(cidr: String)
+    /// Some VPN is up. Deliberately unparameterised — see `VPNObserving` for
+    /// what counts as a VPN, why "a `utun` exists" is not it, and the one
+    /// class of tunnel this cannot see. Binds its session's lifetime.
+    case vpnActive
 
     /// Why a `.processRunning` name can never match anything, or `nil` if it
     /// can. Lives here rather than inside the Add-trigger sheet so it is
@@ -96,7 +100,7 @@ enum TriggerCondition: Codable, Equatable {
 /// user actually typed.
 enum TriggerConditionKind: String, CaseIterable, Identifiable {
     case appLaunched, externalDisplayConnected, acPowerConnected, processRunning
-    case appFrontmost, volumeMounted, onSubnet
+    case appFrontmost, volumeMounted, onSubnet, vpnActive
 
     var id: String { rawValue }
 
@@ -156,10 +160,16 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     ///   a mount: a Mac does not leave and rejoin a subnet between two ticks
     ///   while sitting on a desk. A brief roam is absorbed by the same two
     ///   consecutive negatives everything else gets.
+    /// * `.vpnActive` — **yes**, and for a stronger version of the same
+    ///   argument. "Keep this Mac awake while the tunnel is up" is the entire
+    ///   request; a VPN going down is a real event, not a flicker; and unlike
+    ///   an address, a VPN that reconnects mid-session is *reported* as down
+    ///   for at most the reconnection, which the two-consecutive-negatives
+    ///   debounce absorbs at 5s a tick.
     var bindsSessionLifetime: Bool {
         switch self {
         case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost: return false
-        case .processRunning, .volumeMounted, .onSubnet: return true
+        case .processRunning, .volumeMounted, .onSubnet, .vpnActive: return true
         }
     }
 
@@ -175,6 +185,7 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
         case .appFrontmost: return .appFrontmost(bundleID: "com.apple.dt.Xcode")
         case .volumeMounted: return .volumeMounted(name: "Backup")
         case .onSubnet: return .onSubnet(cidr: "192.168.1.0/24")
+        case .vpnActive: return .vpnActive
         }
     }
 }
@@ -190,6 +201,7 @@ extension TriggerCondition {
         case .appFrontmost: return .appFrontmost
         case .volumeMounted: return .volumeMounted
         case .onSubnet: return .onSubnet
+        case .vpnActive: return .vpnActive
         }
     }
 
@@ -214,6 +226,8 @@ extension TriggerCondition {
             return .whileVolumeMounted(name: name)
         case .onSubnet(let cidr):
             return .whileOnSubnet(cidr: cidr)
+        case .vpnActive:
+            return .whileVPNActive
         }
     }
 }
@@ -610,6 +624,8 @@ func triggersToFire(
             // belt to those braces rather than a path a user can reach.
             guard let subnet = IPv4Subnet(cidr: cidr) else { return false }
             return observers.networkAddress.isOnSubnet(subnet).isConfidentlyPresent
+        case .vpnActive:
+            return observers.vpn.isVPNActive().isConfidentlyPresent
         }
     }
 }
@@ -620,8 +636,8 @@ func triggersToFire(
 ///
 /// A condition that binds ignores `defaultKind` entirely. It is still stored on
 /// the rule (the Settings UI needs somewhere to persist it, and the schema
-/// didn't need to change), but for each of the three binding conditions —
-/// `.processRunning`, `.volumeMounted`, `.onSubnet` — ending the session when
+/// didn't need to change), but for each of the four binding conditions —
+/// `.processRunning`, `.volumeMounted`, `.onSubnet`, `.vpnActive` — ending the session when
 /// the thing being watched goes away, rather than after some picked duration,
 /// is the entire reason to use that trigger over a plain `--for`. The Add
 /// sheet hides the duration picker for exactly these conditions rather than

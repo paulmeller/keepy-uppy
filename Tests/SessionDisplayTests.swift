@@ -73,6 +73,11 @@ final class SessionDisplayTests: XCTestCase {
         XCTAssertEqual(remainingTimeText(for: s, now: t0), "While on 192.168.1.0/24")
     }
 
+    func testWhileVPNActiveShowsTheVPNCondition() {
+        let s = session(.whileVPNActive)
+        XCTAssertEqual(remainingTimeText(for: s, now: t0), "While a VPN is connected")
+    }
+
     func testOriginTextDistinguishesManualAndTrigger() {
         XCTAssertEqual(originText(for: session(.indefinite, origin: .manual)), "Started manually")
         XCTAssertEqual(originText(for: session(.indefinite, origin: .trigger)), "Started automatically")
@@ -303,6 +308,7 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionKindLabel(.appFrontmost), "An app comes to the front")
         XCTAssertEqual(triggerConditionKindLabel(.volumeMounted), "A volume is mounted")
         XCTAssertEqual(triggerConditionKindLabel(.onSubnet), "This Mac is on a network")
+        XCTAssertEqual(triggerConditionKindLabel(.vpnActive), "A VPN is connected")
     }
 
     /// The subnet condition binds too, so its copy has to name the leaving —
@@ -316,6 +322,34 @@ final class TriggerCopyTests: XCTestCase {
                        "Keeps this Mac awake until it leaves 192.168.1.0/24")
         XCTAssertEqual(triggerBindingFootnote(.onSubnet(cidr: "")),
                        "Ends automatically when this Mac leaves that network — no duration to pick.")
+    }
+
+    /// The VPN condition binds too, and unlike the other three it has no
+    /// associated value — so its copy is the same sentence everywhere and the
+    /// Add-sheet footnote has no empty-field variant to get wrong.
+    func testTheVPNConditionSaysWhatWillEndTheSession() {
+        XCTAssertEqual(triggerConditionTitle(.vpnActive), "While a VPN is connected")
+        XCTAssertEqual(triggerBoundEffectSubtitle(.vpnActive),
+                       "Keeps this Mac awake until the VPN disconnects")
+        XCTAssertEqual(triggerBindingFootnote(.vpnActive),
+                       "Ends automatically when the VPN disconnects — no duration to pick.")
+    }
+
+    /// The one limitation a user cannot see, said where the rule is written.
+    ///
+    /// The observer asks macOS which of its network services is a VPN, so a
+    /// tunnel that never registers one is invisible to it. Pinned on the two
+    /// halves that matter — that it says what *is* covered, and that it names
+    /// the command-line tools that are not — rather than on the exact wording,
+    /// so the sentence can be improved without a test rewrite, but cannot
+    /// quietly lose either half.
+    func testTheVPNLimitationIsStatedRatherThanSilent() {
+        let note = vpnDetectionLimitationNote
+        XCTAssertTrue(note.contains("System Settings"), note)
+        XCTAssertTrue(note.contains("won't be detected"), note)
+        for tool in ["wg-quick", "openvpn", "Tunnelblick"] {
+            XCTAssertTrue(note.contains(tool), "the note must name what is not covered: \(note)")
+        }
     }
 
     /// The volume condition binds, so it is entitled to "while" — and its

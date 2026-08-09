@@ -45,6 +45,8 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While \(name) is mounted"
     case .whileOnSubnet(let cidr):
         return "While on \(cidr)"
+    case .whileVPNActive:
+        return "While a VPN is connected"
     }
 }
 
@@ -97,8 +99,25 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
     case .appFrontmost: return "An app comes to the front"
     case .volumeMounted: return "A volume is mounted"
     case .onSubnet: return "This Mac is on a network"
+    case .vpnActive: return "A VPN is connected"
     }
 }
+
+/// The one thing this condition cannot see, said in the sheet where the rule is
+/// being written rather than in a document nobody reads.
+///
+/// The observer identifies a VPN by asking macOS which of its **network
+/// services** is a VPN — which is every VPN the system knows about, including
+/// every NetworkExtension client and anything set up in System Settings. A
+/// tunnel brought up by a command-line tool that never registers a service
+/// (`wg-quick`, a bare `openvpn`, Tunnelblick) leaves nothing behind but a
+/// `utun` interface, and matching on those is what makes the condition
+/// permanently true on every Mac — see `VPNObserving`.
+///
+/// A stated limitation is fine; a silent one is not, and this is the silent
+/// version's exact cost: a rule that looks correct, is correct, and never
+/// fires, with nothing anywhere to say why.
+let vpnDetectionLimitationNote = "Detects VPNs macOS knows about — anything you set up in System Settings, and apps like Tailscale, Cloudflare WARP or your work VPN client. A tunnel started from the command line (wg-quick, openvpn, Tunnelblick) isn't visible to macOS as a VPN and won't be detected."
 
 /// **A trigger starts a session; it does not bind that session's lifetime to
 /// the condition** — unless `TriggerCondition.boundSessionKind` says it does.
@@ -112,10 +131,10 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
 /// truth, because `sessionKind(firing:now:)` starts the bound kind and
 /// `sessionsToEnd` really does end it.
 ///
-/// `.processRunning`, `.volumeMounted` and `.onSubnet` are the three such
-/// conditions today.
+/// `.processRunning`, `.volumeMounted`, `.onSubnet` and `.vpnActive` are the
+/// four such conditions today.
 /// Which ones say "while" is pinned against `bindsSessionLifetime` in
-/// `SessionDisplayTests`, not against a list of case names, so a seventh
+/// `SessionDisplayTests`, not against a list of case names, so a ninth
 /// condition cannot pick the wrong voice quietly.
 func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     switch condition {
@@ -126,6 +145,7 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     case .appFrontmost(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) comes to the front"
     case .volumeMounted(let name): return "While \(name) is mounted"
     case .onSubnet(let cidr): return "While this Mac is on \(cidr)"
+    case .vpnActive: return "While a VPN is connected"
     }
 }
 
@@ -159,6 +179,8 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
         return "Keeps this Mac awake until \(name) is unmounted"
     case .onSubnet(let cidr):
         return "Keeps this Mac awake until it leaves \(cidr)"
+    case .vpnActive:
+        return "Keeps this Mac awake until the VPN disconnects"
     }
 }
 
@@ -183,6 +205,10 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
     case .onSubnet(let cidr):
         let subject = cidr.isEmpty ? "that network" : cidr
         return "Ends automatically when this Mac leaves \(subject) — no duration to pick."
+    case .vpnActive:
+        // No associated value, so nothing to fill in and no empty-field
+        // variant: the sentence is the same before and after saving.
+        return "Ends automatically when the VPN disconnects — no duration to pick."
     }
 }
 

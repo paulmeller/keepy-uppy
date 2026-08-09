@@ -9,7 +9,8 @@ import Foundation
 // (SystemAppRunningObserver, SystemFrontmostAppObserver,
 // SystemDisplayObserver, SystemProcessRunningObserver,
 // SystemMountedVolumeObserver, SystemNetworkAddressObserver,
-// SystemCPUBusyObserver) stays in Agent/ConditionObservers.swift.
+// SystemVPNObserver, SystemCPUBusyObserver) stays in
+// Agent/ConditionObservers.swift.
 
 /// One observation of a condition, including the answer a `Bool` return type
 /// could not express: "I could not tell."
@@ -145,6 +146,42 @@ protocol NetworkAddressObserving {
     func isOnSubnet(_ subnet: IPv4Subnet) -> ConditionReading
 }
 
+/// Whether **any** VPN is up right now.
+///
+/// Takes no parameter, unlike every other observer here, and that is the
+/// condition rather than an oversight: "keep this Mac awake while I am on the
+/// VPN" does not name a tunnel, and naming one would mean asking a user for a
+/// service identifier they have never seen.
+///
+/// ## What counts as a VPN, and why it is not "a `utun` exists"
+///
+/// The obvious read — a tunnel-named interface in `getifaddrs` — is a
+/// false-positive machine, and measured rather than assumed: this Mac carries
+/// **nine** `utun` interfaces, all `UP,POINTOPOINT,RUNNING`, of which exactly
+/// one is the VPN. The other eight are Continuity/Handoff-adjacent and exist
+/// on a Mac with no VPN configured at all. A trigger built on that heuristic
+/// is permanently true, which keeps a Mac awake forever with nothing to
+/// explain why — worse than not shipping the trigger.
+///
+/// macOS instead models a VPN as a **network service**, exactly like Wi-Fi or
+/// an Ethernet adapter, with a declared interface type and live state that
+/// appears when the tunnel comes up and goes when it goes. That is what
+/// `SCDynamicStoreVPNServiceReader` reads, and it is why this observer can
+/// tell a VPN from Apple's own tunnels. `.superpowers/sdd/plan5-vpn-research.md`
+/// records the whole comparison, including the two other candidate reads and
+/// the measurements that ruled them out.
+///
+/// ## The limitation, which is also in the Settings copy
+///
+/// A tunnel brought up by a command-line tool that never registers a network
+/// service — `wg-quick`, a bare `openvpn`, Tunnelblick — is **not** detected.
+/// Those create a `utun` and nothing else, so the only read that would catch
+/// them is the heuristic above. Stated in the Add-trigger sheet
+/// (`vpnDetectionLimitationNote`) rather than left for a user to discover.
+protocol VPNObserving {
+    func isVPNActive() -> ConditionReading
+}
+
 /// Lives here with the other three rather than in
 /// Agent/ConditionObservers.swift (where it used to sit, on the grounds that
 /// nothing outside the agent evaluates CPU-busy conditions) so that the whole
@@ -217,6 +254,7 @@ struct ObserverSet {
     var frontmostApp: FrontmostAppObserving
     var mountedVolume: MountedVolumeObserving
     var networkAddress: NetworkAddressObserving
+    var vpn: VPNObserving
     var acPower: ConditionReading
     var cpuBusy: CPUBusyReading
 }

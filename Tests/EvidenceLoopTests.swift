@@ -41,6 +41,11 @@ final class EvidenceLoopTests: XCTestCase {
         init(_ reading: ConditionReading) { self.reading = reading }
         func isMounted(volumeName: String) -> ConditionReading { reading }
     }
+    struct FakeVPN: VPNObserving {
+        let reading: ConditionReading
+        init(_ reading: ConditionReading) { self.reading = reading }
+        func isVPNActive() -> ConditionReading { reading }
+    }
 
     private func session(_ kind: SessionKind) -> Session {
         Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"),
@@ -62,6 +67,7 @@ final class EvidenceLoopTests: XCTestCase {
                       process: ConditionReading = .present,
                       volume: ConditionReading = .present,
                       network: ConditionReading = .present,
+                      vpn: ConditionReading = .present,
                       busy: CPUBusyReading = .undetermined,
                       at now: Date? = nil) -> [UUID] {
         sessionsToEnd(sessions,
@@ -75,6 +81,7 @@ final class EvidenceLoopTests: XCTestCase {
                                              frontmostApp: FakeFrontmostApp(),
                                              mountedVolume: FakeMountedVolume(volume),
                                              networkAddress: FakeNetworkAddress(network),
+                                             vpn: FakeVPN(vpn),
                                              acPower: .undetermined,
                                              cpuBusy: busy),
                       evidence: &evidence, now: now ?? t0)
@@ -187,6 +194,33 @@ final class EvidenceLoopTests: XCTestCase {
         }
     }
 
+    /// The most expensive one to get wrong in this direction: a VPN is what a
+    /// long remote build or a file copy is running *over*, so a read that
+    /// merely failed must never be taken for "the tunnel dropped". The
+    /// dynamic-store copy returning nil is the case this stands for.
+    func testAVPNReadThatFailedNeverEndsASession() {
+        let s = session(.whileVPNActive)
+        var evidence = SessionEvidence()
+        for tickNumber in 1...50 {
+            XCTAssertTrue(tick([s], evidence: &evidence, vpn: .undetermined).isEmpty,
+                          "tick \(tickNumber): a configuration read that failed is not a dropped tunnel")
+        }
+        XCTAssertTrue(tick([s], evidence: &evidence, vpn: .absent).isEmpty, "first negative debounces")
+        XCTAssertEqual(tick([s], evidence: &evidence, vpn: .absent), [s.id])
+    }
+
+    /// …and a reconnection between two ticks costs the session nothing,
+    /// because one confident negative is not enough. This is the concrete
+    /// reason `.vpnActive` was judged safe to bind a session's lifetime to.
+    func testAVPNThatDropsAndReconnectsInsideTheDebounceKeepsItsSession() {
+        let s = session(.whileVPNActive)
+        var evidence = SessionEvidence()
+        XCTAssertTrue(tick([s], evidence: &evidence, vpn: .absent).isEmpty)
+        XCTAssertTrue(tick([s], evidence: &evidence, vpn: .present).isEmpty)
+        XCTAssertTrue(tick([s], evidence: &evidence, vpn: .absent).isEmpty,
+                      "the run of negatives restarted when the tunnel came back")
+    }
+
     // MARK: - Debounce
 
     func testASingleConfidentNegativeDoesNotEndASession() {
@@ -277,7 +311,7 @@ final class EvidenceLoopTests: XCTestCase {
         for _ in 1...5 {
             XCTAssertTrue(tick([s], evidence: &evidence, app: .absent, display: .absent,
                                process: .absent, volume: .absent, network: .absent,
-                               busy: .busy(fraction: 0)).isEmpty,
+                               vpn: .absent, busy: .busy(fraction: 0)).isEmpty,
                           "the agent must never report on sessions it doesn't own evaluation of")
         }
     }

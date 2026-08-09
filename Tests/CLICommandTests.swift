@@ -56,6 +56,27 @@ final class CLICommandParsingTests: XCTestCase {
         XCTAssertEqual(kind, .whileOnACPower)
     }
 
+    /// `--while-vpn` takes no value, for the reason `--while-display` does not:
+    /// the condition is "any VPN", so there is nothing to name.
+    func testOnWhileVPN() {
+        guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on", "--while-vpn"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertEqual(kind, .whileVPNActive)
+    }
+
+    /// …and because it takes none, the token after it stays available to be
+    /// read as whatever it is. `on --while-vpn --keep-display-awake` is a VPN
+    /// session in the screen-on mode, not a VPN session watching a flag.
+    func testWhileVPNDoesNotSwallowTheNextToken() {
+        guard case .success(.on(let kind, _, let mode)) =
+                parseCLIArguments(["on", "--while-vpn", "--keep-display-awake"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertEqual(kind, .whileVPNActive)
+        XCTAssertEqual(mode, .systemAndDisplay)
+    }
+
     func testOnRejectsMultipleEndConditions() {
         guard case .failure = parseCLIArguments(["on", "--for", "2h", "--while-app", "x"]) else {
             return XCTFail("expected failure — only one end condition allowed")
@@ -75,7 +96,9 @@ final class CLICommandParsingTests: XCTestCase {
         for args in [["--for", "2h", "--while-display"],
                      ["--while-ac-power", "--while-cpu-busy", "30"],
                      ["--while-display", "--while-ac-power"],
-                     ["--while-display", "--while-display"]] {
+                     ["--while-display", "--while-display"],
+                     ["--while-vpn", "--while-subnet", "192.168.1.0/24"],
+                     ["--while-vpn", "--while-vpn"]] {
             guard case .failure = parseCLIArguments(["on"] + args) else {
                 return XCTFail("'on \(args.joined(separator: " "))' must be refused — one end condition")
             }
@@ -268,6 +291,7 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             ["--while-app", "com.apple.dt.Xcode"], ["--while-process", "claude"],
             ["--while-display"], ["--while-ac-power"], ["--while-cpu-busy", "30"],
             ["--while-volume", "Backup"], ["--while-subnet", "192.168.1.0/24"],
+            ["--while-vpn"],
         ]
         let reachable = Set(invocations.compactMap { flags -> SessionKind.Family? in
             guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on"] + flags) else { return nil }
@@ -574,8 +598,13 @@ final class CLIRejectionMessageTests: XCTestCase {
     /// nobody could ask for.
     func testTheUsageLineAdvertisesEveryOptionOnAccepts() {
         let message = rejection(["on", "--frobnicate"])
+        // Hand-written because `OnOption` is private to the parser. It had
+        // silently fallen two flags behind (`--while-volume`, `--while-subnet`)
+        // by the time `--while-vpn` arrived, which is the failure this test is
+        // about, one level up.
         for flag in ["--for", "--until", "--while-app", "--while-process",
-                     "--while-display", "--while-ac-power", "--while-cpu-busy"]
+                     "--while-display", "--while-ac-power", "--while-cpu-busy",
+                     "--while-volume", "--while-subnet", "--while-vpn"]
                     + WakeMode.selectingFlags {
             XCTAssertTrue(message.contains(flag), "'on''s usage line does not mention \(flag): \(message)")
         }

@@ -191,8 +191,8 @@ private struct ExclusiveChoice<Value> {
 /// what `SessionKind.Family` and the bijection test over it now catch; read
 /// `Family`'s doc comment before adding a tenth kind.
 ///
-/// Not all of them take a value: `--while-display` and `--while-ac-power` name
-/// a condition with nothing to parameterise. That does not make them wake-mode
+/// Not all of them take a value: `--while-display`, `--while-ac-power` and
+/// `--while-vpn` name a condition with nothing to parameterise. That does not make them wake-mode
 /// flags — those are `on`'s other, independent axis. They are end conditions,
 /// they share the `ExclusiveChoice` below, and `on --for 2h --while-display` is
 /// the same contradiction `on --for 2h --until 17:00` already is.
@@ -206,6 +206,7 @@ private enum OnOption: String, CaseIterable {
     case whileCPUBusy = "--while-cpu-busy"
     case whileVolume = "--while-volume"
     case whileSubnet = "--while-subnet"
+    case whileVPN = "--while-vpn"
 
     /// How this option reads in `onUsage`, value placeholder and all.
     ///
@@ -224,7 +225,10 @@ private enum OnOption: String, CaseIterable {
         // `MountedVolumeObserving` for why a path cannot be matched on.
         case .whileVolume: return "\(rawValue) <volume-name>"
         case .whileSubnet: return "\(rawValue) 192.168.1.0/24"
-        case .whileDisplay, .whileACPower: return rawValue
+        // `--while-vpn` takes no value because the condition is "any VPN":
+        // naming one would mean typing a network-service identifier, which is
+        // not a thing anybody has seen. See `VPNObserving`.
+        case .whileDisplay, .whileACPower, .whileVPN: return rawValue
         case .whileCPUBusy:
             return "\(rawValue) \(cpuBusyPercentageRange.lowerBound)-\(cpuBusyPercentageRange.upperBound)"
         }
@@ -309,6 +313,8 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
             kind = .whileExternalDisplay
         case .whileACPower:
             kind = .whileOnACPower
+        case .whileVPN:
+            kind = .whileVPNActive
         case .whileCPUBusy:
             switch scanner.value(for: token).flatMap(parseCPUBusyPercentage) {
             case .success(let threshold): kind = .whileCPUBusy(threshold: threshold)

@@ -62,6 +62,20 @@ fix by editing this list.
 - [ ] Typing a *path* (`/opt/homebrew/bin/claude`) rather than a name into the process field is rejected in the sheet with an explanation, rather than being accepted as a rule that could never fire
 - [ ] A process-running rule for a `node`/`bun`-wrapped CLI (`claude`, installed by npm as a `claude` symlink to `claude.exe`) really does fire — this is the case `p_comm` matching alone could not see, since the kernel records `claude.exe` there and only `argv[0]` ever says `claude`
 - [ ] `keepy-uppy on --while-process <name>` behaves like `--while-app`, ending within ~10s of that process exiting
+
+**The VPN condition — the one half of it no test can reach.**
+`SCDynamicStoreVPNServiceReader` was verified with a real (split-tunnel) VPN
+connected, and against the eight non-VPN `utun` interfaces that share the
+machine with it, but **the transition was never observed**: there was exactly
+one VPN configured and it was up, a non-root process cannot plant a fake one
+(`SCDynamicStoreSetValue` → "Permission denied"), and disconnecting the user's
+VPN was out of scope. `.superpowers/sdd/plan5-vpn-research.md` has the
+measurements. These two items are the missing half.
+
+- [ ] With a VPN connected, `keepy-uppy on --while-vpn` starts a session; disconnecting the VPN ends it within ~10s (two 5s ticks), and it does **not** end when the VPN merely reconnects
+- [ ] With no VPN connected, a `vpnActive` trigger does nothing; connecting one starts a session within ~5s reading `While a VPN is connected — started elsewhere`, and it survives a Wi-Fi hop that leaves the tunnel up
+- [ ] On a Mac with **no VPN configured at all**, a live `--while-vpn` session ends rather than hanging — an empty answer is a confident negative here, deliberately unlike the volume observer's
+- [ ] The Add-trigger sheet's "A VPN is connected" row shows the limitation footnote naming wg-quick/openvpn/Tunnelblick, and a tunnel started by one of those really is *not* detected (this is the stated limitation, not a bug to file)
 - [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field

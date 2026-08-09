@@ -142,6 +142,10 @@ func sessionsToEnd(
             if evidence.recordAndCheckEnd(session.id, reading) {
                 ended.append(session.id)
             }
+        case .whileVPNActive:
+            if evidence.recordAndCheckEnd(session.id, observers.vpn.isVPNActive()) {
+                ended.append(session.id)
+            }
         case .whileCPUBusy(let threshold):
             if evidence.recordAndCheckCPUEnd(session.id, threshold: threshold,
                                              busy: observers.cpuBusy, now: now) {

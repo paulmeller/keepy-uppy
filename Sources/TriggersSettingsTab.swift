@@ -172,7 +172,7 @@ struct TriggersSettingsTab: View {
                 .foregroundStyle(.tertiary)
             Text("No Triggers")
                 .font(.title3.weight(.semibold))
-            Text("Triggers start a session for you — when an app launches or comes to the front, a display is plugged in, power is connected, a volume is mounted, this Mac joins a network, or a process (like a coding-assistant CLI) is running.")
+            Text("Triggers start a session for you — when an app launches or comes to the front, a display is plugged in, power is connected, a volume is mounted, this Mac joins a network, a VPN connects, or a process (like a coding-assistant CLI) is running.")
                 .settingsFootnote()
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
@@ -442,6 +442,15 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
+                // The VPN condition has no field to fill in, so this footnote is
+                // the only place its one limitation can be said at the moment the
+                // rule is being written. A rule that looks correct and never
+                // fires is the failure being headed off.
+                if conditionKind == .vpnActive {
+                    Text(vpnDetectionLimitationNote)
+                        .settingsFootnote()
+                }
+
                 // A condition that binds its session's lifetime has no duration
                 // to pick — `sessionKind(firing:now:)` would discard whatever
                 // was chosen — so the picker is replaced by the sentence saying
@@ -499,7 +508,9 @@ private struct AddTriggerSheet: View {
         case .processRunning: return .process
         case .volumeMounted: return .volume
         case .onSubnet: return .subnet
-        case .externalDisplayConnected, .acPowerConnected: return .none
+        // `.vpnActive` names no tunnel — see `VPNObserving` — so there is
+        // nothing to fill in, exactly like the display and power conditions.
+        case .externalDisplayConnected, .acPowerConnected, .vpnActive: return .none
         }
     }
 
@@ -511,7 +522,7 @@ private struct AddTriggerSheet: View {
         case .volumeMounted: return !volumeName.isEmpty
         case .onSubnet:
             return !subnetCIDR.isEmpty && TriggerCondition.subnetProblem(subnetCIDR) == nil
-        case .externalDisplayConnected, .acPowerConnected: return true
+        case .externalDisplayConnected, .acPowerConnected, .vpnActive: return true
         }
     }
 
@@ -524,6 +535,7 @@ private struct AddTriggerSheet: View {
         case .appFrontmost: return .appFrontmost(bundleID: bundleID)
         case .volumeMounted: return .volumeMounted(name: volumeName)
         case .onSubnet: return .onSubnet(cidr: subnetCIDR)
+        case .vpnActive: return .vpnActive
         }
     }
 

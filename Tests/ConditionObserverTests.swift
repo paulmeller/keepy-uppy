@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SystemConfiguration
 @testable import KeepyUppy
 
 final class CPUBusyWindowTests: XCTestCase {
@@ -650,6 +651,177 @@ final class GetifaddrsNetworkAddressReaderTests: XCTestCase {
 
 /// The memoization and failure behaviour, against a fake table reader so they
 /// can be asserted exactly rather than inferred.
+final class VPNObserverContractTests: XCTestCase {
+    private final class CountingReader: VPNServiceReader {
+        let result: VPNServiceReading
+        private(set) var reads = 0
+        init(_ result: VPNServiceReading) { self.result = result }
+        func read() -> VPNServiceReading {
+            reads += 1
+            return result
+        }
+    }
+
+    func testAFailedConfigurationReadIsUndeterminedRatherThanNoVPN() {
+        XCTAssertEqual(SystemVPNObserver(reader: CountingReader(.unavailable)).isVPNActive(), .undetermined,
+                       "a dynamic store that would not answer says nothing about the tunnel")
+    }
+
+    /// **The deliberate difference from `SystemMountedVolumeObserver`, and the
+    /// same call `SystemNetworkAddressObserver` makes.** A Mac with no VPN
+    /// configured — or with one configured and disconnected — genuinely has no
+    /// VPN up, and that is exactly "the tunnel is down": a confident negative,
+    /// which correctly ends a `.whileVPNActive` session. There is no
+    /// always-present member to make emptiness impossible here, the way `/` is
+    /// for volumes and this process is for `runningApplications`.
+    func testNoLiveVPNServiceIsAConfidentNegativeRatherThanAFailure() {
+        XCTAssertEqual(SystemVPNObserver(reader: CountingReader(.liveServiceIDs([]))).isVPNActive(), .absent)
+    }
+
+    func testAnyLiveVPNServiceIsEnough() {
+        XCTAssertEqual(SystemVPNObserver(reader: CountingReader(.liveServiceIDs(["A"]))).isVPNActive(), .present)
+        XCTAssertEqual(SystemVPNObserver(reader: CountingReader(.liveServiceIDs(["A", "B"]))).isVPNActive(), .present,
+                       "two tunnels at once is still a tunnel")
+    }
+
+    func testOneObserverReadsTheConfigurationAtMostOncePerTick() {
+        let reader = CountingReader(.liveServiceIDs(["A"]))
+        let observer = SystemVPNObserver(reader: reader)
+        for _ in 1...20 { _ = observer.isVPNActive() }
+        XCTAssertEqual(reader.reads, 1)
+    }
+
+    func testANewObserverReadsAgain() {
+        let reader = CountingReader(.liveServiceIDs([]))
+        _ = SystemVPNObserver(reader: reader).isVPNActive()
+        _ = SystemVPNObserver(reader: reader).isVPNActive()
+        XCTAssertEqual(reader.reads, 2)
+    }
+}
+
+/// The live `SCDynamicStore` reader, against this Mac's real network services.
+///
+/// The reading it produces is machine-dependent by nature — whether a VPN is up
+/// right now is not something a test can arrange — so these pin the things that
+/// are true either way, and `.superpowers/sdd/plan5-vpn-research.md` carries the
+/// measurements taken with a real VPN connected.
+final class SCDynamicStoreVPNServiceReaderTests: XCTestCase {
+    /// The key parse, which is the one piece of this reader that can be checked
+    /// exactly. A wrong component index would silently produce identifiers that
+    /// match nothing, and the observer would then answer `.absent` forever —
+    /// ending every `.whileVPNActive` session on a Mac whose VPN is up.
+    func testTheServiceIdentifierIsTakenFromTheRightPathComponent() {
+        let parse = SCDynamicStoreVPNServiceReader.serviceID(inKey:)
+        XCTAssertEqual(parse("Setup:/Network/Service/ABC-123/Interface"), "ABC-123")
+        XCTAssertEqual(parse("State:/Network/Service/ABC-123/IPv4"), "ABC-123")
+        XCTAssertEqual(parse("State:/Network/Service/ABC-123/IPv6"), "ABC-123")
+        XCTAssertEqual(parse("State:/Network/Service/ABC-123"), "ABC-123",
+                       "the bare service key carries the same identifier")
+    }
+
+    func testAKeyWithNoServiceIdentifierIsRefusedRatherThanGuessedAt() {
+        let parse = SCDynamicStoreVPNServiceReader.serviceID(inKey:)
+        XCTAssertNil(parse("State:/Network/Global/IPv4"))
+        XCTAssertNil(parse("State:/Network/Service/"), "an empty component is not an identifier")
+        XCTAssertNil(parse(""))
+    }
+
+    /// Three of the five are `kSCNetworkInterfaceType*` constants and one
+    /// (`VPN`) has no public constant at all, which is why the set is written
+    /// out rather than derived. This pins that the undocumented one — the type
+    /// every NetworkExtension VPN actually reports, and therefore the only one
+    /// that matters on a modern Mac — is in it.
+    func testTheVPNInterfaceTypesCoverTheModernAndTheLegacyOnes() {
+        let types = SCDynamicStoreVPNServiceReader.vpnInterfaceTypes
+        XCTAssertTrue(types.contains("VPN"), "every NetworkExtension VPN reports this type")
+        XCTAssertTrue(types.contains(kSCNetworkInterfaceTypePPP as String))
+        XCTAssertTrue(types.contains(kSCNetworkInterfaceTypeIPSec as String))
+        XCTAssertTrue(types.contains(kSCNetworkInterfaceTypeL2TP as String))
+        XCTAssertFalse(types.contains(kSCNetworkInterfaceTypeEthernet as String),
+                       "an Ethernet service is not a VPN")
+        XCTAssertFalse(types.contains(kSCNetworkInterfaceTypeIEEE80211 as String),
+                       "Wi-Fi is not a VPN")
+    }
+
+    /// The live read must at least *complete* and answer one of its two cases
+    /// on a real Mac. A crash, a hang, or a permission failure here would be
+    /// the whole feature, and this runs every 5s for as long as the agent
+    /// lives.
+    func testTheLiveReadAnswersWithoutFailing() throws {
+        guard case .liveServiceIDs(let ids) = SCDynamicStoreVPNServiceReader().read() else {
+            throw XCTSkip("the dynamic store declined, which is the .unavailable case rather than a defect")
+        }
+        // Whatever this Mac's VPN state is, an identifier that came back has to
+        // be one the store could be asked about again.
+        for id in ids { XCTAssertFalse(id.isEmpty) }
+    }
+
+    /// The observer built on the live reader agrees with the reader, which is
+    /// the join the memoization could break.
+    func testTheLiveObserverAgreesWithTheLiveReader() throws {
+        guard case .liveServiceIDs(let ids) = SCDynamicStoreVPNServiceReader().read() else {
+            throw XCTSkip("the dynamic store declined")
+        }
+        XCTAssertEqual(SystemVPNObserver().isVPNActive(), ConditionReading(!ids.isEmpty))
+    }
+
+    /// Every tunnel-named interface this Mac holds, which is what the rejected
+    /// heuristic would have counted. Nine of them on the machine this was
+    /// written on, of which exactly one was a VPN.
+    private func tunnelInterfaceNames() throws -> Set<String> {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0 else { throw XCTSkip("getifaddrs failed") }
+        defer { freeifaddrs(head) }
+        var tunnels: Set<String> = []
+        var cursor = head
+        while let entry = cursor {
+            let name = String(cString: entry.pointee.ifa_name)
+            cursor = entry.pointee.ifa_next
+            if ["utun", "ppp", "ipsec", "tap"].contains(where: name.hasPrefix) { tunnels.insert(name) }
+        }
+        return tunnels
+    }
+
+    /// A VPN that is up owns a tunnel interface, so the read cannot report one
+    /// where there are none. The direction that can be asserted on any machine
+    /// in any state, and it would catch a read that had started returning
+    /// something other than live VPN services.
+    func testALiveVPNServiceImpliesATunnelInterfaceExists() throws {
+        guard case .liveServiceIDs(let live) = SCDynamicStoreVPNServiceReader().read() else {
+            throw XCTSkip("the dynamic store declined")
+        }
+        guard !live.isEmpty else { return }
+        XCTAssertFalse(try tunnelInterfaceNames().isEmpty,
+                       "\(live.count) live VPN service(s) but no tunnel interface to carry them")
+    }
+
+    /// The whole point of the condition, stated as a test: tunnel interfaces
+    /// existing is **not** what makes this `.present`. Nine exist on a Mac with
+    /// one VPN, and `utun0`–`utun3` exist on essentially every Mac with none.
+    ///
+    /// Skipped rather than failed when a VPN genuinely is up, because then both
+    /// the real read and the rejected heuristic answer `.present` for good
+    /// reasons and there is nothing to tell apart. The measurement that *did*
+    /// separate them — eight non-VPN tunnels contributing nothing while one VPN
+    /// was connected — is in `.superpowers/sdd/plan5-vpn-research.md`, because
+    /// no test can arrange either half of it.
+    func testTunnelInterfacesAloneDoNotMakeTheReadPresent() throws {
+        let tunnels = try tunnelInterfaceNames()
+        guard !tunnels.isEmpty else {
+            throw XCTSkip("this Mac holds no tunnel-named interface, so there is no false positive to rule out")
+        }
+        guard case .liveServiceIDs(let live) = SCDynamicStoreVPNServiceReader().read() else {
+            throw XCTSkip("the dynamic store declined")
+        }
+        guard live.isEmpty else {
+            throw XCTSkip("a VPN really is up here (\(tunnels.count) tunnel interfaces, "
+                          + "\(live.count) live VPN service(s)), so both reads agree for a good reason")
+        }
+        XCTAssertEqual(SystemVPNObserver().isVPNActive(), .absent,
+                       "\(tunnels.sorted()) exist and none of them is a VPN")
+    }
+}
+
 final class ProcessRunningObserverContractTests: XCTestCase {
     private final class CountingReader: ProcessTableReading {
         let result: ProcessTableReadResult

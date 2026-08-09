@@ -71,6 +71,15 @@ final class TriggerRuleTests: XCTestCase {
         }
     }
 
+    /// The only observer with nothing to ask *about*: `.vpnActive` names no
+    /// tunnel, so the fake is a bare reading rather than a set plus an
+    /// override.
+    struct FakeVPN: VPNObserving {
+        let reading: ConditionReading
+        init(_ reading: ConditionReading = .absent) { self.reading = reading }
+        func isVPNActive() -> ConditionReading { reading }
+    }
+
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
     }
@@ -90,6 +99,7 @@ final class TriggerRuleTests: XCTestCase {
                       frontmost: FakeFrontmostApp = FakeFrontmostApp(frontmost: nil),
                       volume: FakeMountedVolume = FakeMountedVolume(mounted: []),
                       network: FakeNetworkAddress = FakeNetworkAddress(),
+                      vpn: FakeVPN = FakeVPN(),
                       acPower: ConditionReading = .absent) -> [TriggerRule] {
         triggersToFire(rules, activeSessions: activeSessions,
                        // No trigger condition consults the CPU sample, so this
@@ -98,6 +108,7 @@ final class TriggerRuleTests: XCTestCase {
                        observers: ObserverSet(appRunning: app, display: display,
                                               processRunning: process, frontmostApp: frontmost,
                                               mountedVolume: volume, networkAddress: network,
+                                              vpn: vpn,
                                               acPower: acPower, cpuBusy: .undetermined))
     }
 
@@ -227,6 +238,36 @@ final class TriggerRuleTests: XCTestCase {
                       "nothing is inside a block that is not one")
     }
 
+    // MARK: - VPN
+
+    func testVPNActiveFiresWhileATunnelIsUp() {
+        let r = rule(.vpnActive)
+        XCTAssertEqual(fire([r], vpn: FakeVPN(.present)).map(\.id), [r.id])
+    }
+
+    /// A Mac with no VPN configured, and a Mac whose VPN is configured but
+    /// disconnected, are the same confident negative — see `VPNServiceReading`
+    /// for why an empty answer here is a real one rather than a failed read.
+    func testVPNActiveDoesNotFireWhileNoTunnelIsUp() {
+        XCTAssertTrue(fire([rule(.vpnActive)], vpn: FakeVPN(.absent)).isEmpty)
+    }
+
+    /// The whole reason this condition is not "a `utun` exists": a read that
+    /// could not tell must not start a session either.
+    func testVPNActiveUndeterminedNeverFires() {
+        XCTAssertTrue(fire([rule(.vpnActive)], vpn: FakeVPN(.undetermined)).isEmpty,
+                      "a network configuration that could not be read is not a connected VPN")
+    }
+
+    /// The motivating case through the one table that decides it: "keep this
+    /// Mac awake while the tunnel is up" starts a session bound to the tunnel,
+    /// whatever duration is stored on the rule.
+    func testVPNActiveBindsItsSessionToTheTunnel() {
+        XCTAssertTrue(TriggerConditionKind.vpnActive.bindsSessionLifetime)
+        let r = rule(.vpnActive, kind: .fourHours)
+        XCTAssertEqual(sessionKind(firing: r, now: Date()), .whileVPNActive)
+    }
+
     // MARK: - Subnet validation
 
     func testAValidBlockOrAddressHasNoProblem() {
@@ -335,6 +376,10 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertTrue(fire([frontmostRule],
                            frontmost: FakeFrontmostApp(frontmost: nil, reading: .undetermined)).isEmpty,
                       "a locked screen has no frontmost app, and that is not 'Xcode came to the front'")
+
+        let vpnRule = rule(.vpnActive)
+        XCTAssertTrue(fire([vpnRule], vpn: FakeVPN(.undetermined)).isEmpty,
+                      "a network configuration that could not be read is not a connected VPN")
     }
 
     /// The reading, not the fake's backing set, is what decides — proving the
@@ -378,6 +423,7 @@ final class TriggerRuleTests: XCTestCase {
                     frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .present),
                     mountedVolume: FakeMountedVolume(mounted: [], reading: .present),
                     networkAddress: FakeNetworkAddress(reading: .present),
+                    vpn: FakeVPN(.present),
                     acPower: .present,
                     // No trigger condition consults the CPU sample today;
                     // `.busy(fraction: 1)` is that reading's analogue of
@@ -393,6 +439,7 @@ final class TriggerRuleTests: XCTestCase {
                     frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .undetermined),
                     mountedVolume: FakeMountedVolume(mounted: [], reading: .undetermined),
                     networkAddress: FakeNetworkAddress(reading: .undetermined),
+                    vpn: FakeVPN(.undetermined),
                     acPower: .undetermined,
                     cpuBusy: .undetermined)
     }

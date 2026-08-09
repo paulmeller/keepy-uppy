@@ -39,6 +39,13 @@ targets:
         copy:
           destination: executables
       - sdk: IOKit.framework
+      # This target compiles Agent/ConditionObservers.swift (see `sources`
+      # above), so it links whatever that file imports — even though the app
+      # itself never runs an observer. SystemConfiguration arrived with
+      # SystemVPNObserver. Leaving it off only this target produces a link
+      # error in the *app*, which is a confusing place to look for a change
+      # made to the agent's code.
+      - sdk: SystemConfiguration.framework
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
@@ -122,6 +129,9 @@ targets:
       - sdk: AppKit.framework
       - sdk: CoreGraphics.framework
       - sdk: IOKit.framework
+      # See the matching entry on the `Keepy Uppy` target: the observers
+      # compile into both, so a framework they import belongs on both.
+      - sdk: SystemConfiguration.framework
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: au.com.workwireless.keepy-uppy.agent
