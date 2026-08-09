@@ -71,8 +71,29 @@ struct SystemDisplayObserver: DisplayObserving {
     }
 }
 
-struct SystemCPUBusyObserver: CPUBusyObserving {
-    func currentBusy() -> CPUBusyReading {
+/// One reading of the kernel's CPU tick counters, which are cumulative since
+/// boot and therefore say nothing on their own — only the difference between
+/// two of them describes what the CPU is doing now. See
+/// `SystemCPUBusyObserver`.
+struct CPUTickSample: Equatable {
+    /// Ticks spent idle since boot.
+    let idle: Double
+    /// Ticks spent in any state since boot: user + system + idle + nice.
+    let total: Double
+}
+
+/// Taking a sample, split out from differencing two of them, for the same
+/// reason `ProcessTableReading` is split from the matching built on it: the
+/// arithmetic — including the three cases that must come back
+/// `.undetermined` rather than "idle" — is then testable without a live
+/// kernel, and exactly.
+protocol CPUTickSampling {
+    /// `nil` when the sample could not be taken at all.
+    func sample() -> CPUTickSample?
+}
+
+struct HostStatisticsCPUTickSampler: CPUTickSampling {
+    func sample() -> CPUTickSample? {
         var cpuLoad = host_cpu_load_info()
         var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
         let result = withUnsafeMutablePointer(to: &cpuLoad) { ptr -> kern_return_t in
@@ -80,12 +101,99 @@ struct SystemCPUBusyObserver: CPUBusyObserving {
                 host_statistics64(mach_host_self(), HOST_CPU_LOAD_INFO, reboundPtr, &count)
             }
         }
-        guard result == KERN_SUCCESS else { return .undetermined }
+        guard result == KERN_SUCCESS else { return nil }
         let ticks = cpuLoad.cpu_ticks
         let user = Double(ticks.0), system = Double(ticks.1), idle = Double(ticks.2), nice = Double(ticks.3)
-        let total = user + system + idle + nice
-        guard total > 0 else { return .undetermined }
-        return .busy(fraction: 1.0 - (idle / total))
+        return CPUTickSample(idle: idle, total: user + system + idle + nice)
+    }
+}
+
+/// The fraction of CPU time spent non-idle **since the previous sample**.
+///
+/// ## The bug this replaces
+///
+/// `host_statistics64(HOST_CPU_LOAD_INFO)` returns tick counters that are
+/// cumulative since boot, so the obvious `1.0 - idle / total` is the
+/// machine's *lifetime average*, not its current load. That is what shipped,
+/// and it does not move: measured on this 16-core Mac, `0.1660` with the
+/// machine idle and `0.1662` immediately after pinning every core for two
+/// seconds — a swing of 0.0002 across the whole width of the range the number
+/// is supposed to describe. Differencing two samples over the same two seconds
+/// gives `0.0506` quiet and `0.9969` busy.
+///
+/// So `.whileCPUBusy` was decided by the machine's uptime rather than by its
+/// CPU: against a threshold above the lifetime average, every such session
+/// ends 120s in no matter how hard the machine is working; against one below
+/// it, no such session ever ends at all.
+///
+/// ## Why this is a class, and why there is exactly one of it
+///
+/// A delta needs a predecessor, so this carries state between calls — which
+/// makes its lifetime part of its contract, in the *opposite* direction from
+/// `SystemProcessRunningObserver` above:
+///
+/// * `SystemProcessRunningObserver` is rebuilt **every tick**, *because* its
+///   memoized process-table read must not outlive the tick that took it.
+///   `EvidenceLoopRunner` therefore holds a `() -> ProcessRunningObserving`
+///   factory for it.
+/// * This one is built **once**, for the agent's whole life, *because* its
+///   previous sample must outlive the tick that took it. `EvidenceLoopRunner`
+///   holds it in a plain `let` and calls it exactly once per tick, into
+///   `ObserverSet.cpuBusy` — a pre-taken reading rather than an observer,
+///   precisely so that no per-session question can take a second sample and
+///   collapse every other session's measurement interval to nothing.
+///
+/// `final class` is load-bearing rather than stylistic: `CPUBusyObserving`
+/// declares `currentBusy()` non-mutating, so a `struct` could not update
+/// `previous` at all, and a `mutating` variant would have its update thrown
+/// away on every copy — including the copy made when `EvidenceLoopRunner`
+/// stores it as a `CPUBusyObserving` existential.
+///
+/// ## What "I could not measure" means here
+///
+/// Three paths return `.undetermined`, and by the rule documented on
+/// `ConditionReading` each therefore does nothing at all — it cannot end a
+/// session and cannot start one, and `SessionEvidence.recordAndCheckCPUEnd`
+/// leaves the 120s sustained-quiet window untouched:
+///
+/// 1. **The very first reading after launch**, which has no predecessor. This
+///    is the one that matters most: `0` here would be indistinguishable from
+///    a genuinely idle CPU and would start the quiet clock of every live
+///    `.whileCPUBusy` session the instant the agent restarted. The loop gets
+///    a real number five seconds later.
+/// 2. **No elapsed ticks** (`Δtotal <= 0`). Two samples inside one kernel tick
+///    period legitimately measure nothing, and `0 / 0` is not "idle".
+/// 3. **A failed sample.** Here the previous sample is deliberately *kept*
+///    rather than dropped, so the next successful sample measures the whole
+///    span across the gap instead of spending a second tick with no
+///    predecessor.
+///
+/// Case 2 also absorbs counter wraparound, which is not hypothetical: the
+/// fields are `natural_t` (`UInt32`) and, measured here, advance at 1599
+/// ticks/second in aggregate across 16 cores — about 31 days of uptime to
+/// wrap. A wrap drives both deltas negative, so it costs exactly one tick.
+/// The clamp then keeps anything else the kernel might hand back inside
+/// 0...1, so `CPUBusyWindow` never compares a threshold against a number that
+/// is not a fraction.
+final class SystemCPUBusyObserver: CPUBusyObserving {
+    private let sampler: CPUTickSampling
+    private var previous: CPUTickSample?
+
+    init(sampler: CPUTickSampling = HostStatisticsCPUTickSampler()) {
+        self.sampler = sampler
+    }
+
+    func currentBusy() -> CPUBusyReading {
+        guard let sample = sampler.sample() else { return .undetermined }
+        let last = previous
+        // Updated even when the delta below is unusable, so that a wrapped or
+        // same-tick pair costs one reading rather than every reading after it.
+        previous = sample
+        guard let last else { return .undetermined }
+        let idleDelta = sample.idle - last.idle
+        let totalDelta = sample.total - last.total
+        guard totalDelta > 0 else { return .undetermined }
+        return .busy(fraction: min(1, max(0, 1.0 - idleDelta / totalDelta)))
     }
 }
 

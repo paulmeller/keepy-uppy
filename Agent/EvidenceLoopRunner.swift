@@ -19,6 +19,13 @@ final class EvidenceLoopRunner {
     /// be memoized safely. See `SystemProcessRunningObserver` — its cache has
     /// no invalidation logic because its lifetime is the tick.
     private let makeProcessRunning: () -> ProcessRunningObserving
+    /// An observer, not a factory — the exact contrast with
+    /// `makeProcessRunning` above, and for the mirror-image reason. CPU busy
+    /// is a rate, so `SystemCPUBusyObserver` reports the difference between
+    /// consecutive samples and its previous sample MUST outlive the tick that
+    /// took it; rebuilding it per tick would leave it permanently on its first
+    /// call, which by contract is `.undetermined` forever. One instance, held
+    /// for this runner's whole life, sampled exactly once per tick below.
     private let cpuObserver: CPUBusyObserving
     private var evidence = SessionEvidence()
     private var timer: Timer?

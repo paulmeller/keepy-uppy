@@ -102,6 +102,25 @@ protocol ProcessRunningObserving {
 /// observer contract — all four protocols and both reading types — is one
 /// file you can read end to end. The protocol itself has no framework
 /// dependency; only `SystemCPUBusyObserver` does, and that stays in the agent.
+///
+/// The one conformer requirement that is not visible in the signature, and is
+/// the exact opposite of `ProcessRunningObserving`'s above: **CPU busy is a
+/// rate, so a conformer is stateful and must outlive the tick**. There is no
+/// instantaneous "how busy is the CPU" to read — the kernel only offers
+/// counters cumulative since boot, so the answer is a difference between two
+/// readings taken at two times, and dividing a single reading yields the
+/// machine's lifetime average instead (which is what shipped, and what
+/// `SystemCPUBusyObserver` documents in full). Two consequences:
+///
+/// * `currentBusy()` is deliberately **non-mutating**, which forces a
+///   conformer to be a reference type. A `struct` would lose its previous
+///   sample on every copy, including the copy taken when it is stored as this
+///   existential, and would then never have a predecessor at all.
+/// * It must be called **exactly once per tick**, by one long-lived instance.
+///   That is why `ObserverSet.cpuBusy` is a pre-taken `CPUBusyReading` rather
+///   than a `CPUBusyObserving`: asking twice in a tick would not give two
+///   sessions two answers, it would give the second one a measurement over an
+///   interval of nearly zero and leave the first's interval truncated.
 protocol CPUBusyObserving {
     func currentBusy() -> CPUBusyReading
 }
