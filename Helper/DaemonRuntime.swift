@@ -273,24 +273,40 @@ final class DaemonRuntime {
     ///   stays on leaves the Mac awake for longer than asked, which is the one
     ///   direction that cannot lose a user's work, so it must never fail a
     ///   start. That is precisely the fact this method exists to learn, so it
-    ///   makes the write itself, unconditionally, and reports what it got.
-    ///   Same division of labour as `start()`, for the same reason, read in
-    ///   the other direction.
+    ///   makes the write itself, unconditionally. Same division of labour as
+    ///   `start()`, for the same reason, read in the other direction.
+    /// - **What it reports is the setting's state, not the write's return.**
+    ///   Those are not the same claim, and reporting the second one locked the
+    ///   caller out for good on a whole class of machine. `SleepDisabled` is
+    ///   written through undeclared SPI, and "a machine where the undeclared
+    ///   SPI refuses writes outright" is a case `PowerPlanHolder.apply` already
+    ///   contemplates: there the clear returns `false` every single time, so
+    ///   `reset` refused, every single time, promising a retry that could never
+    ///   succeed — for a Mac the same SPI had also refused to set to `1`, and
+    ///   which was therefore never held. So the reply comes from
+    ///   `DaemonRemoval.sleepWasRestored`: the clear landed, or the setting
+    ///   reads off. The read is the one `isKeepingAwake()` already makes.
     /// - **The assertion axis needs nothing extra here.** `applyLocked`
     ///   releases whatever the now-empty plan no longer wants, and `powerd`
     ///   reaps the rest the moment this process dies. Only the persistent axis
     ///   can outlive an eviction, so only it needs the belt-and-braces write.
     /// - **This does not stop the daemon.** It stays up and keeps ticking, and
     ///   would honour a session started a millisecond later; the caller's
-    ///   `SMAppService.unregister()` is what ends it. Closing that window would
-    ///   need a refuse-new-sessions shutdown state this daemon does not have,
-    ///   and the window is bounded by one synchronous call in the client.
+    ///   `SMAppService.unregister()` is what ends it. Refusing new sessions in
+    ///   that window would need a shutdown state this daemon does not have, and
+    ///   the window is bounded by one synchronous call in the client. What such
+    ///   a session can no longer do is *outlive* the window: `Helper/main.swift`
+    ///   converges the persistent axis on SIGTERM, and SIGTERM is what the
+    ///   eviction itself delivers — so the cost of losing that race is a Mac
+    ///   held for the rest of one XPC call rather than for the rest of its life.
     func prepareForRemoval() -> (stopped: Int, sleepRestored: Bool) {
         queue.sync {
             let ended = sessions.apply(.stopAll, now: Date())
             _ = applyLocked()
-            let restored = PowerControl.setSleepDisabled(false)
-            helperLogger.log("Prepare for removal: ended \(ended.count) session(s), forced sleep enabled, success=\(restored)")
+            let wrote = PowerControl.setSleepDisabled(false)
+            let restored = DaemonRemoval.sleepWasRestored(
+                writeSucceeded: wrote, settingStillOn: PowerControl.sleepDisabled())
+            helperLogger.log("Prepare for removal: ended \(ended.count) session(s), forced sleep enabled, write=\(wrote), restored=\(restored)")
             return (ended.count, restored)
         }
     }

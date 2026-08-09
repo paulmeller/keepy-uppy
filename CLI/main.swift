@@ -13,6 +13,19 @@ var exitCode: Int32 = 0
 /// own, and building one needs the connection rather than the proxy.
 var daemonConnection: NSXPCConnection?
 
+/// What a verb wants said *in addition to* the shared timeout line at the
+/// bottom of this file, when its own silence needs explaining.
+///
+/// `reset` is the only verb that sets it, and it is the only one that needs to:
+/// for everything else "timed out waiting for the daemon" is the whole story,
+/// whereas a `reset` that stalls has left an install untouched and may have
+/// left this Mac held awake — neither of which is deducible from that line.
+///
+/// A closure rather than a string because the note reports what this Mac's
+/// sleep setting reads, and that read has to happen when the timeout fires
+/// rather than ten seconds earlier.
+var timeoutAdvice: (() -> String)?
+
 func connect() -> HelperProtocol? {
     // The CLI-ONLY Mach service, never the app's. That is what makes the
     // daemon see this process as the CLI, and therefore what gives every
@@ -260,8 +273,18 @@ case .reset:
                 // this is the ordinary case, and `reset` still has real work
                 // to do. It is a note, not a failure, so the exit status is
                 // left to whether the unregisters below succeed.
+                //
+                // The read is this process's own. It is unprivileged —
+                // `PowerControl.sleepDisabled()` is in `Shared/`, compiled into
+                // this target — and it is the difference between telling a user
+                // what to go and check and telling them what is true of their
+                // Mac. It matters most in the case the note reads oddest for: a
+                // daemon too old to know `prepareForRemoval` answers "does not
+                // implement selector" and lands here while still alive and
+                // still holding the setting on.
                 FileHandle.standardError.write(
-                    "keepy-uppy: \(DaemonRemoval.unreachableNote)\n".data(using: .utf8)!)
+                    "keepy-uppy: \(DaemonRemoval.unreachableNote(sleepStillDisabled: PowerControl.sleepDisabled()))\n"
+                        .data(using: .utf8)!)
             case .sleepRestored, .sleepStillDisabled:
                 break
             }
@@ -271,6 +294,14 @@ case .reset:
         }
         semaphore.signal()
     }
+
+    // The third way this can end, after the reply and the error: the daemon
+    // accepts the message and never answers. Nothing here runs then — the
+    // semaphore times out ten seconds later and the process exits without
+    // unregistering, which is the safe direction but says so to nobody. This is
+    // what it says instead, and it reads the sleep setting at the moment it is
+    // printed rather than now.
+    timeoutAdvice = { DaemonRemoval.timedOutNote(sleepStillDisabled: PowerControl.sleepDisabled()) }
 
     // A proxy of this branch's own, so an unreachable daemon lands in
     // `finish(.unreachable)` rather than in the shared handler's exit path —
@@ -283,7 +314,14 @@ case .reset:
 
     if let removalProxy {
         removalProxy.prepareForRemoval { stopped, sleepRestored in
-            finish(sleepRestored ? .sleepRestored(stopped: stopped) : .sleepStillDisabled)
+            // The count is carried on both branches. It used to be dropped on
+            // the refusal, which made the refusal sound like a no-op — but
+            // `prepareForRemoval` ends every session *before* it tries the
+            // clear, so by the time this arrives those sessions are gone
+            // whichever way the flag went.
+            finish(sleepRestored
+                   ? .sleepRestored(stopped: stopped)
+                   : .sleepStillDisabled(stopped: stopped))
         }
     } else {
         finish(.unreachable)
@@ -293,6 +331,9 @@ case .reset:
 let waitResult = semaphore.wait(timeout: .now() + 10)
 if waitResult == .timedOut {
     FileHandle.standardError.write("keepy-uppy: timed out waiting for the daemon\n".data(using: .utf8)!)
+    if let timeoutAdvice {
+        FileHandle.standardError.write("keepy-uppy: \(timeoutAdvice())\n".data(using: .utf8)!)
+    }
     exitCode = 1
 }
 exit(exitCode)

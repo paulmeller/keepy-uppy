@@ -200,7 +200,7 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 370 tests on `main`, and
+**v0.1 — new, and moving fast.** Signed and notarized, 387 tests on `main`, and
 a privilege boundary that's been through three adversarial review passes. What
 it hasn't had yet is months on other people's hardware — and two claims above
 are still unverified there specifically: closed-lid behaviour on real hardware
