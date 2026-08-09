@@ -22,6 +22,55 @@ guard SigningRequirement.teamID != "REPLACE_WITH_TEAM_ID" else {
 }
 #endif
 
+// The daemon's last act on the way out, and part of why the persistent axis is
+// safe to entrust to a process at all.
+//
+// `SleepDisabled` is global, root-only, and survives process death *and*
+// reboot, so any path that ends this process without clearing it leaves a Mac
+// that will not sleep and nothing running to explain why. Until now the only
+// covered path was the one this daemon chooses for itself
+// (`DaemonRuntime.tickLocked`'s "app bundle is gone", which makes exactly the
+// write below before `exit(0)`). Every path somebody *else* chooses —
+// `launchctl bootout`, the eviction `keepy-uppy reset` performs, an upgrade, a
+// toggle in System Settings — arrives as SIGTERM, whose default disposition is
+// to die quietly with the setting still on. This makes the persistent axis's
+// lifetime match the process's, which is what the assertion axis has always got
+// for free: `powerd` reaps a dead holder's assertions and logs it as
+// `ClientDied`. Two mechanisms, both put back, for two different reasons —
+// they are complementary, and neither stands in for the other.
+//
+// `DispatchSource`, not `signal(SIGTERM, handler)`: the handler calls IOKit and
+// `Logger`, neither of which is async-signal-safe, so running it on the
+// interrupted thread would be undefined behaviour at exactly the moment
+// correctness matters most. `SIG_IGN` first is what stops the default
+// disposition from killing the process before the source ever fires.
+//
+// The write is direct and takes no locks, deliberately. Routing it through
+// `DaemonRuntime`'s serial queue would be tidier and could block behind
+// whatever that queue is already running — and a handler that blocks is
+// indistinguishable from no handler, because launchd follows SIGTERM with
+// SIGKILL. A bare `setSleepDisabled(false)` touches no shared state and cannot
+// be made to wait. Assertions are left to `powerd`, as they are on every other
+// exit path here.
+//
+// `exit(0)`, for the same reason the Team ID guard above gives: the plist's
+// `KeepAlive.SuccessfulExit = false` respawns this daemon on any non-zero
+// exit, so exiting non-zero here would fight whoever asked it to stop, in a
+// loop. Zero leaves the job on-demand — the next client message relaunches it,
+// and `start()` converges again on the way in.
+//
+// SIGKILL stays uncatchable, so this is one more path covered, not a
+// guarantee. `DaemonRuntime.start()`'s converge-to-safe at launch remains the
+// backstop for everything nothing can catch.
+signal(SIGTERM, SIG_IGN)
+let terminationSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+terminationSource.setEventHandler {
+    let ok = PowerControl.setSleepDisabled(false)
+    helperLogger.log("SIGTERM: forced sleep enabled, success=\(ok); exiting")
+    exit(0)
+}
+terminationSource.resume()
+
 let runtime = DaemonRuntime()
 runtime.start()
 
