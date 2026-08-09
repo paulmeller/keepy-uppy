@@ -40,6 +40,16 @@ final class DaemonRuntime {
     /// `SafetyConfigStore.load(forUserID:)`). There is also nobody to read
     /// for yet at construction time; no agent has connected.
     private var safety = SafetyEngine(config: .default)
+    /// The daemon's single, process-lifetime holder for **both** power
+    /// mechanisms. Confined to `queue` exactly like the two engines above:
+    /// `PowerPlanHolder` is explicitly not thread-safe, and the live
+    /// `IOPMAssertionID`s it owns are the state that would leak if two
+    /// threads converged it at once.
+    ///
+    /// One instance, created here, never replaced and never handed out —
+    /// which is also the precondition its `deinit` documents for releasing
+    /// assertions off-queue.
+    private let power = PowerPlanHolder()
     private let observer: SafetyObserving
     private let bundlePath: String
     private var timer: DispatchSourceTimer?
@@ -100,10 +110,34 @@ final class DaemonRuntime {
     /// Converge to safe before serving anyone, so a daemon crash — or an
     /// upgrade from v1, which left disablesleep set persistently — cannot
     /// leave the Mac stranded awake.
+    ///
+    /// Two mechanisms, two separate calls, and deliberately *not* one
+    /// `power.apply(.sleepAllowed)`, because the reason each needs doing is
+    /// not the same reason:
+    ///
+    /// - `SleepDisabled` is why this method exists at all. It is global,
+    ///   root-only, and survives both process death *and reboot*, so whatever
+    ///   a previous incarnation of this daemon left set is still in force
+    ///   right now, before we have applied anything. Only an unconditional
+    ///   write repairs that, and only a direct one — this is the reconciling
+    ///   write, not part of a plan, and its own success is worth a log line
+    ///   of its own.
+    /// - Assertions need no reconciliation whatsoever: they are per-process
+    ///   and `powerd` reaps them when their holder dies (it logs it as
+    ///   `ClientDied`), so a fresh process provably holds none. The release
+    ///   below is therefore a no-op today. It stays because "converge to
+    ///   safe" should be true of *both* axes by inspection — the reader's
+    ///   obvious next question deserves a visible answer rather than a
+    ///   silence that looks like an oversight.
+    ///
+    /// Folding them into one call would flatten exactly that asymmetry, and
+    /// would disguise the one write that genuinely repairs persistent global
+    /// state as ordinary bookkeeping.
     func start() {
         queue.sync {
             let ok = PowerControl.setSleepDisabled(false)
             helperLogger.log("Daemon start: forced sleep enabled, success=\(ok)")
+            power.releaseAllAssertions()
         }
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 5, repeating: 5)
@@ -121,8 +155,9 @@ final class DaemonRuntime {
             // returns before `sessions.startSession` ever reaches `apply`,
             // which is otherwise the only place expiry gets swept. Without
             // this, an already-expired session keeps occupying a cap slot —
-            // and keeps `desiredKeepAwake` true — for up to 5s, until the
-            // next timer tick catches it. `.tick` has no effect of its own
+            // and keeps contributing its `WakeMode` to the plan `applyLocked`
+            // holds the machine to — for up to 5s, until the next timer tick
+            // catches it. `.tick` has no effect of its own
             // beyond the unconditional sweep `apply` always performs at the
             // end of every event.
             _ = sessions.apply(.tick, now: now)
@@ -139,6 +174,23 @@ final class DaemonRuntime {
                     // id the caller will not receive. Otherwise a later retry
                     // can turn a reported failure into an unmanageable live
                     // session, especially when it is detached.
+                    //
+                    // The gate is now the *whole* apply — both mechanisms —
+                    // rather than `setSleepDisabled`'s return alone. That
+                    // return was the entire story only while every session
+                    // was a clamshell session; a `.system` session's promise
+                    // is kept by an assertion that write knows nothing about,
+                    // so keying off it would report success for a Mac free to
+                    // idle-sleep. See `applyLocked` for why the conjunction,
+                    // and why a `false` is always safe to destroy a session
+                    // over.
+                    //
+                    // The re-apply below can itself fail (it converges the
+                    // *remaining* sessions, which may want the very thing
+                    // that just failed). Nothing better is available here:
+                    // it logs, and the 5s tick keeps retrying. What matters
+                    // is that the caller and the table now agree that this
+                    // session does not exist.
                     _ = sessions.apply(.stop(id: session.id), now: now)
                     _ = applyLocked()
                     return .failed
@@ -317,8 +369,8 @@ final class DaemonRuntime {
             // (Fix 3a): `endCondition`'s `.notFound`/`.notAgentEvaluated`
             // paths return before `apply` ever runs, so a *different*,
             // already-expired session sitting in the table — unrelated to
-            // `id` — would otherwise keep counting toward the caps and
-            // `desiredKeepAwake` until the next tick.
+            // `id` — would otherwise keep counting toward the caps and toward
+            // the power plan `applyLocked` applies, until the next tick.
             _ = sessions.apply(.tick, now: now)
             let outcome = sessions.endCondition(id: id, reportedByUserID: userID, now: now)
             if case .ended = outcome { _ = applyLocked() }
@@ -328,7 +380,26 @@ final class DaemonRuntime {
 
     func currentSessions() -> [Session] { queue.sync { sessions.sessions } }
 
-    func isKeepingAwake() -> Bool { queue.sync { PowerControl.sleepDisabled() } }
+    /// Whether the daemon is holding the Mac awake by **either** mechanism —
+    /// what the menu bar's balloon and `keepy-uppy status` report.
+    ///
+    /// Reading `SleepDisabled` alone was the whole truth only while every
+    /// session set it. It is not any more: a `.system` or `.systemAndDisplay`
+    /// session is held entirely by assertions and deliberately leaves the
+    /// global setting clear, so the old one-line answer would have started
+    /// reporting "not keeping awake" with sessions live and the Mac genuinely
+    /// held — a silent lie in the one place a user looks.
+    ///
+    /// The global read stays, and stays first, because it is a real read of
+    /// real machine state (including anything a previous incarnation left
+    /// behind). The assertion half can only be what *we asked for* — held
+    /// assertions are advisory, so `pmset -g assertions` remains the truth
+    /// about the machine and `heldTypes` the truth about our request. That
+    /// weaker claim is still the right one here: this reports whether the
+    /// daemon is keeping the Mac awake, not whether the kernel is obeying.
+    func isKeepingAwake() -> Bool {
+        queue.sync { PowerControl.sleepDisabled() || !power.heldTypes.isEmpty }
+    }
 
     /// Drops one reference and reports whether that was the last one.
     ///
@@ -353,7 +424,15 @@ final class DaemonRuntime {
     private func tickLocked() {
         guard bundleStillExists() else {
             helperLogger.error("App bundle is gone; restoring sleep and exiting")
+            // Same shape, and same reasoning, as `start()`'s converge-to-safe,
+            // read in the other direction: the `SleepDisabled` write is the
+            // one that matters, because it would otherwise outlive this
+            // process and the reboot after it. The release is belt-and-braces
+            // — `exit(0)` runs no deinits, but `powerd` reaps a dead client's
+            // assertions anyway — and is here so that both axes are visibly
+            // put back on the way out.
             _ = PowerControl.setSleepDisabled(false)
+            power.releaseAllAssertions()
             exit(0)
         }
 
@@ -440,9 +519,77 @@ final class DaemonRuntime {
         FileManager.default.fileExists(atPath: bundlePath)
     }
 
+    /// Converge the machine onto whatever the live session table now asks
+    /// for. One call, both mechanisms: `sessions.desiredPowerPlan` is the
+    /// pure reduction (`Shared/SessionTable.swift`) and
+    /// `PowerPlanHolder.apply` establishes both of its axes.
+    ///
+    /// ## What "the apply failed" means, now that there are two mechanisms
+    ///
+    /// It means **the holder could not establish everything the plan asked
+    /// for, on either axis.** The conjunction — not "the important half
+    /// worked", not "at least something is held". Three reasons, in order of
+    /// weight:
+    ///
+    /// 1. **The axes cover disjoint sleep paths, so neither stands in for the
+    ///    other.** Assertions prevent *idle* sleep and demonstrably do not
+    ///    survive a lid close (15 of 15 observed clamshell sleeps happened
+    ///    with sleep-preventing assertions live — see
+    ///    `power-assertion-research.md` Q4). `SleepDisabled` is the only
+    ///    thing that survives a shut lid, and is the only mechanism a
+    ///    `.clamshell` session's promise rests on. So a partial apply is not
+    ///    "weaker protection": it is *no* protection against whichever path
+    ///    failed. A `.system` session whose assertion was refused idle-sleeps;
+    ///    a `.clamshell` session whose `SleepDisabled` write was refused
+    ///    sleeps the moment the lid shuts. Either is exactly the state this
+    ///    daemon must never be in — believing a session is live while the Mac
+    ///    is free to sleep.
+    ///
+    /// 2. **A `false` from the holder always means under-application, never
+    ///    over-application.** A failed *release* deliberately still returns
+    ///    `true` (the id is dropped regardless, so there is nothing left to
+    ///    retry, and the residue leaves the Mac awake longer than asked). The
+    ///    only ways to see `false` are a create that did not happen and a
+    ///    setting write that did not land — both "we hold less than we
+    ///    promised". That one-directionality is what makes `false` safe for
+    ///    `startSession` to *destroy a session* over: the failure can never
+    ///    have been "too awake".
+    ///
+    /// 3. **Self-healing is real but too slow to soften the gate with.** The
+    ///    holder retries whatever it is not holding, and rewrites the setting,
+    ///    on every apply — so both axes do recover. But the next apply is up
+    ///    to five seconds away, and a Mac that idle-sleeps inside that window
+    ///    has already lost the work the session existed to protect. Handing
+    ///    back a session id is a promise about *now*, so it is made only when
+    ///    the machine is in the requested state now.
+    ///
+    /// The much-discussed asymmetry between the mechanisms therefore lives in
+    /// *recovery*, not in this predicate. An unheld assertion is knowable —
+    /// `held[type] == nil` is literally the retry queue — while the true value
+    /// of `SleepDisabled` is never re-read and is repaired only by being
+    /// blindly rewritten on every apply, plus `start()`'s converge-to-safe for
+    /// the case where no apply is ever coming because the process died. Both
+    /// are best-effort *afterwards*; neither is a reason to call a failed
+    /// apply a success *now*.
+    ///
+    /// Only `startSession` reads the result, as before. Every other caller is
+    /// converging *after* sessions ended, where a failure means the Mac stays
+    /// awake longer than asked and the next tick retries — the same
+    /// discarded-result behaviour those paths have always had, except that it
+    /// is no longer silent.
     @discardableResult
     private func applyLocked() -> Bool {
-        let desired = sessions.desiredKeepAwake
-        return PowerControl.setSleepDisabled(desired)
+        let plan = sessions.desiredPowerPlan
+        guard power.apply(plan) else {
+            // Scalars only: `Logger` redacts interpolated strings by default,
+            // and this line is worth nothing if it reads `<private>`. Which
+            // mechanism failed, and why, is already logged by `PowerPlanHolder`
+            // (`powerLogger`); what this adds is the session context that
+            // explains what was being promised at the time.
+            let live = sessions.sessions.count
+            helperLogger.error("Power apply FAILED: \(live) live session(s) wanted \(plan.assertions.count) assertion(s), sleepDisabled=\(plan.sleepDisabled)")
+            return false
+        }
+        return true
     }
 }

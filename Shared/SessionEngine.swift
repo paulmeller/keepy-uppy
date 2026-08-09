@@ -105,6 +105,9 @@ struct SessionEngine {
     private var table = SessionTable()
 
     var sessions: [Session] { table.sessions }
+    /// The reduction the daemon applies on every event and every tick. See
+    /// `SessionTable.desiredPowerPlan`.
+    var desiredPowerPlan: PowerPlan { table.desiredPowerPlan }
     var desiredKeepAwake: Bool { table.desiredKeepAwake }
 
     /// Mirrors `SafetyConfig.default.maxSessionDuration` (8 hours): the

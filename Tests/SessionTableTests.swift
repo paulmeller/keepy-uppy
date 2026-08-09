@@ -7,10 +7,12 @@ final class SessionTableTests: XCTestCase {
     private let bob = ClientID(rawValue: "bob")
 
     private func session(_ id: String, owner: ClientID,
-                         persistence: SessionPersistence = .clientBound) -> Session {
+                         persistence: SessionPersistence = .clientBound,
+                         wakeMode: WakeMode = .clamshell) -> Session {
         Session(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(id)")!,
                 kind: .indefinite, owner: owner,
-                persistence: persistence, origin: .manual, startedAt: t0)
+                persistence: persistence, origin: .manual, startedAt: t0,
+                wakeMode: wakeMode)
     }
 
     func testEmptyTableWantsSleepEnabled() {
@@ -137,6 +139,86 @@ final class SessionTableTests: XCTestCase {
         table.insert(session("01", owner: alice))
         XCTAssertTrue(table.removeExpired(at: .distantFuture).isEmpty)
         XCTAssertEqual(table.count, 1)
+    }
+
+    // MARK: - The reduction the daemon applies
+
+    /// `DaemonRuntime.applyLocked` reads `desiredPowerPlan` on every event and
+    /// every tick and hands it straight to `PowerPlanHolder.apply`. `Helper/`
+    /// is not reachable from this target, so this property is the whole of the
+    /// daemon's apply input that *can* be tested — which is why it was put
+    /// here rather than written inline in the daemon.
+
+    func testAnEmptyTableReducesToSleepAllowed() {
+        XCTAssertEqual(SessionTable().desiredPowerPlan, .sleepAllowed)
+    }
+
+    /// Every session that exists today is a clamshell session (`Session`'s
+    /// initializer default *and* its decode-time default), so wiring the
+    /// reduction into the daemon must not have changed what such a table asks
+    /// for: the global setting exactly as before, plus the system assertion
+    /// the reduction now adds as defence in depth.
+    func testTheDefaultClamshellSessionStillAsksForTheGlobalSetting() {
+        var table = SessionTable()
+        table.insert(session("01", owner: alice))
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true))
+    }
+
+    /// The regression the split exists to prevent, in the direction that
+    /// matters most: sessions that never asked for a shut lid must not make
+    /// the daemon write the root-only, reboot-surviving global setting.
+    func testSessionsThatDidNotAskForAShutLidNeverSetTheGlobal() {
+        var table = SessionTable()
+        table.insert(session("01", owner: alice, wakeMode: .system))
+        table.insert(session("02", owner: bob, wakeMode: .systemAndDisplay))
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                                 sleepDisabled: false))
+    }
+
+    /// Modes union across the table, and each axis is released by *its own*
+    /// last asker — over the real storage, whose `Dictionary` order is not
+    /// stable between runs.
+    func testEachAxisSurvivesUntilItsLastAskerLeaves() {
+        var table = SessionTable()
+        let lid = session("01", owner: alice, wakeMode: .clamshell)
+        let display = session("02", owner: bob, wakeMode: .systemAndDisplay)
+        table.insert(lid)
+        table.insert(display)
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                                 sleepDisabled: true))
+
+        table.remove(id: display.id)
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true),
+                       "the lid session still needs the global setting")
+
+        table.remove(id: lid.id)
+        XCTAssertEqual(table.desiredPowerPlan, .sleepAllowed,
+                       "the last session left, so both mechanisms go back")
+    }
+
+    /// `desiredKeepAwake` is now *defined* as "the reduction is non-empty",
+    /// while every existing caller reads it as "is any session live". The two
+    /// must agree for every mode — including whichever mode is added next,
+    /// which is why this loops `allCases` instead of naming three.
+    func testKeepAwakeIsExactlyTheReductionBeingNonEmpty() {
+        for mode in WakeMode.allCases {
+            var table = SessionTable()
+            XCTAssertFalse(table.desiredKeepAwake, "\(mode.rawValue): empty table")
+
+            let only = session("01", owner: alice, wakeMode: mode)
+            table.insert(only)
+            XCTAssertTrue(table.desiredKeepAwake,
+                          "\(mode.rawValue) is a live session and must keep the Mac awake")
+            XCTAssertNotEqual(table.desiredPowerPlan, .sleepAllowed, mode.rawValue)
+
+            table.remove(id: only.id)
+            XCTAssertFalse(table.desiredKeepAwake, "\(mode.rawValue): last session removed")
+            XCTAssertEqual(table.desiredPowerPlan, .sleepAllowed, mode.rawValue)
+        }
     }
 }
 

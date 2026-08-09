@@ -19,7 +19,40 @@ struct SessionTable {
 
     var sessions: [Session] { Array(storage.values) }
     var count: Int { storage.count }
-    var desiredKeepAwake: Bool { !storage.isEmpty }
+
+    /// What the machine's power state should be right now: every live
+    /// session's `WakeMode`, reduced to the two axes the daemon actually
+    /// drives (`PowerPlan`).
+    ///
+    /// This is the whole of `DaemonRuntime.applyLocked`'s input — it hands
+    /// exactly this to `PowerPlanHolder.apply` — and it lives *here*, in
+    /// `Shared/`, on purpose. `Helper/` is not reachable from the test
+    /// target, so anything left there is verified by reading alone; the
+    /// session-table→plan step is the part of the apply path that can be
+    /// pure, so it is, and `SessionTableTests` covers it directly.
+    ///
+    /// A union (see `PowerPlan.reduce`), so the answer cannot depend on
+    /// `storage`'s iteration order — a `Dictionary`'s, which is not stable
+    /// between runs — and no session can weaken another's request. Lazy, so
+    /// asking for the plan does not materialise an array of modes on every
+    /// event.
+    var desiredPowerPlan: PowerPlan {
+        PowerPlan.reduce(storage.values.lazy.map(\.wakeMode))
+    }
+
+    /// True exactly when the reduction asks for anything at all.
+    ///
+    /// Deliberately *defined* as "the plan is not `.sleepAllowed`" rather
+    /// than as `!storage.isEmpty`. Once the two mechanisms split, "keeping
+    /// the Mac awake" stopped being a single boolean the daemon writes, and
+    /// the honest statement is about the plan. The two formulations do agree
+    /// today — `PowerPlan.reduce` gives every live mode at least the system
+    /// assertion, so a non-empty table always reduces to something — and
+    /// `SessionTableTests` pins that agreement over `WakeMode.allCases`, so a
+    /// future mode that reduced to nothing would have to be somebody's
+    /// deliberate decision rather than a silent divergence between two
+    /// definitions of "awake".
+    var desiredKeepAwake: Bool { desiredPowerPlan != .sleepAllowed }
 
     /// O(1) lookup by id, so callers that only need one session (e.g.
     /// authorizing an agent's condition report) never have to materialise

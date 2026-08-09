@@ -584,6 +584,31 @@ final class PowerPlanHolderTests: XCTestCase {
                        "deinit does not write the global setting from an unknown thread")
     }
 
+    /// The exact predicate `DaemonRuntime.startSession` rolls a session back
+    /// on. Applying the plan a live table reduced to, with *either* mechanism
+    /// refusing, must report failure — "the important half worked" is not a
+    /// conclusion the daemon may reach. Neither axis substitutes for the
+    /// other: assertions do not survive a lid close, and `SleepDisabled` does
+    /// nothing about idle sleep, so whichever half failed is a sleep path left
+    /// wide open under a session the daemon believes is live.
+    func testEitherMechanismFailingFailsTheWholeApply() {
+        let plan = PowerPlan.reduce([.clamshell, .systemAndDisplay])
+
+        backend.failing = [.preventIdleDisplaySleep]
+        XCTAssertFalse(holder.apply(plan), "an assertion the plan wanted was refused")
+        XCTAssertEqual(sleepSetting.lastWrite, true,
+                       "…and the other axis still went through, which is not success")
+
+        backend.failing = []
+        sleepSetting.shouldFail = true
+        XCTAssertFalse(holder.apply(plan), "the clamshell write was refused")
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                       "…and both assertions are held, which is also not success")
+
+        sleepSetting.shouldFail = false
+        XCTAssertTrue(holder.apply(plan), "both axes established: the only shape of success")
+    }
+
     /// End to end at the level the daemon will use: a session table's worth of
     /// modes goes in, the right assertions *and* the right clamshell setting
     /// come out, and the last session leaving puts both back.

@@ -8,16 +8,50 @@ final class SessionEngineTests: XCTestCase {
     private func make(_ kind: SessionKind,
                       persistence: SessionPersistence = .clientBound,
                       origin: SessionOrigin = .manual,
-                      userID: UInt32 = 0) -> Session {
+                      userID: UInt32 = 0,
+                      wakeMode: WakeMode = .clamshell) -> Session {
         Session(id: UUID(), kind: kind, owner: alice,
                 ownerUID: userID, persistence: persistence,
-                origin: origin, startedAt: t0)
+                origin: origin, startedAt: t0, wakeMode: wakeMode)
     }
 
     func testStartingASessionKeepsAwake() {
         var engine = SessionEngine()
         _ = engine.apply(.start(make(.indefinite)), now: t0)
         XCTAssertTrue(engine.desiredKeepAwake)
+    }
+
+    /// The engine is the object `DaemonRuntime` actually holds, and
+    /// `applyLocked` reads exactly this property off it on every event and
+    /// every tick before handing the result to `PowerPlanHolder.apply`. The
+    /// daemon itself is unreachable from this target; this is the closest a
+    /// test can stand to its apply path.
+    func testThePlanTracksEveryEventThatChangesTheTable() {
+        var engine = SessionEngine()
+        XCTAssertEqual(engine.desiredPowerPlan, .sleepAllowed)
+
+        let lid = make(.indefinite, wakeMode: .clamshell)
+        _ = engine.apply(.start(lid), now: t0)
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true))
+
+        let display = make(.duration(until: t0.addingTimeInterval(60)),
+                           wakeMode: .systemAndDisplay)
+        _ = engine.apply(.start(display), now: t0)
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                                 sleepDisabled: true))
+
+        // Expiry is part of the apply path too: a swept session must stop
+        // counting toward the plan in the very pass that removes it, or the
+        // daemon holds the display awake for up to five more seconds.
+        _ = engine.apply(.tick, now: t0.addingTimeInterval(61))
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true))
+
+        _ = engine.apply(.stopAll, now: t0.addingTimeInterval(61))
+        XCTAssertEqual(engine.desiredPowerPlan, .sleepAllowed,
+                       "`keepy-uppy off` must put both mechanisms back, not one")
     }
 
     func testSessionCodingPreservesAuthenticatedOwnerUID() throws {
