@@ -248,6 +248,7 @@ final class SessionKindEvaluationTests: XCTestCase {
         // a `.whileVolumeMounted` session outliving the agent would be one
         // nothing could ever end.
         XCTAssertFalse(SessionKind.whileVolumeMounted(name: "Backup").isDaemonEvaluable)
+        XCTAssertFalse(SessionKind.whileOnSubnet(cidr: "192.168.1.0/24").isDaemonEvaluable)
     }
 
     /// `.whileProcessRunning` was added to `SessionKind` and to
@@ -261,7 +262,7 @@ final class SessionKindEvaluationTests: XCTestCase {
             .indefinite, .duration(until: t0), .untilTime(t0), .lease(expires: t0), .whileOnACPower,
             .whileAppRunning(bundleID: "com.apple.dt.Xcode"), .whileExternalDisplay,
             .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "claude"),
-            .whileVolumeMounted(name: "Backup"),
+            .whileVolumeMounted(name: "Backup"), .whileOnSubnet(cidr: "192.168.1.0/24"),
         ]
         for kind in allKinds {
             let daemonCanEvaluateItAlone: Bool
@@ -271,11 +272,11 @@ final class SessionKindEvaluationTests: XCTestCase {
             case .whileOnACPower:
                 daemonCanEvaluateItAlone = true   // the daemon reads IOKit power itself
             case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
-                 .whileVolumeMounted:
+                 .whileVolumeMounted, .whileOnSubnet:
                 daemonCanEvaluateItAlone = false  // needs the agent's observers
             }
             XCTAssertEqual(kind.isDaemonEvaluable, daemonCanEvaluateItAlone, "\(kind)")
         }
-        XCTAssertEqual(allKinds.count, 10, "a case was added to SessionKind but not to allKinds")
+        XCTAssertEqual(allKinds.count, 11, "a case was added to SessionKind but not to allKinds")
     }
 }

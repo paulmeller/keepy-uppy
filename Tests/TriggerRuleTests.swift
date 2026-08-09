@@ -56,6 +56,21 @@ final class TriggerRuleTests: XCTestCase {
         }
     }
 
+    /// Answers from a set of addresses, exactly as the live observer does, so
+    /// the fake exercises `IPv4Subnet.contains` rather than standing in for
+    /// it. `reading` overrides the lot, for the failure case.
+    struct FakeNetworkAddress: NetworkAddressObserving {
+        let addresses: Set<UInt32>
+        var reading: ConditionReading? = nil
+        init(_ dotted: [String] = [], reading: ConditionReading? = nil) {
+            addresses = Set(dotted.compactMap { IPv4Subnet(cidr: $0)?.network })
+            self.reading = reading
+        }
+        func isOnSubnet(_ subnet: IPv4Subnet) -> ConditionReading {
+            reading ?? ConditionReading(addresses.contains(where: subnet.contains))
+        }
+    }
+
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
     }
@@ -74,6 +89,7 @@ final class TriggerRuleTests: XCTestCase {
                       process: FakeProcessRunning = FakeProcessRunning(running: []),
                       frontmost: FakeFrontmostApp = FakeFrontmostApp(frontmost: nil),
                       volume: FakeMountedVolume = FakeMountedVolume(mounted: []),
+                      network: FakeNetworkAddress = FakeNetworkAddress(),
                       acPower: ConditionReading = .absent) -> [TriggerRule] {
         triggersToFire(rules, activeSessions: activeSessions,
                        // No trigger condition consults the CPU sample, so this
@@ -81,8 +97,8 @@ final class TriggerRuleTests: XCTestCase {
                        // cannot fire anything if one ever starts to.
                        observers: ObserverSet(appRunning: app, display: display,
                                               processRunning: process, frontmostApp: frontmost,
-                                              mountedVolume: volume, acPower: acPower,
-                                              cpuBusy: .undetermined))
+                                              mountedVolume: volume, networkAddress: network,
+                                              acPower: acPower, cpuBusy: .undetermined))
     }
 
     func testDisabledRuleNeverFires() {
@@ -173,6 +189,77 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertTrue(TriggerConditionKind.volumeMounted.bindsSessionLifetime)
         let r = rule(.volumeMounted(name: "Backup"), kind: .fourHours)
         XCTAssertEqual(sessionKind(firing: r, now: Date()), .whileVolumeMounted(name: "Backup"))
+    }
+
+    func testOnSubnetFiresWhenThisMacHoldsAnAddressInTheBlock() {
+        let r = rule(.onSubnet(cidr: "192.168.1.0/24"))
+        XCTAssertEqual(fire([r], network: FakeNetworkAddress(["192.168.1.50"])).map(\.id), [r.id])
+    }
+
+    func testOnSubnetDoesNotFireFromADifferentNetwork() {
+        let r = rule(.onSubnet(cidr: "192.168.1.0/24"))
+        XCTAssertTrue(fire([r], network: FakeNetworkAddress(["10.0.0.5", "192.168.2.50"])).isEmpty)
+    }
+
+    /// A Mac with Wi-Fi off holds no address at all, and that is a *confident*
+    /// negative rather than a failed read — the one place the three Plan 5
+    /// observers differ, since an empty volume list or an empty app list means
+    /// the enumeration broke.
+    func testOnSubnetDoesNotFireWithNoAddressesAtAll() {
+        let r = rule(.onSubnet(cidr: "192.168.1.0/24"))
+        XCTAssertTrue(fire([r], network: FakeNetworkAddress([])).isEmpty)
+    }
+
+    /// `getifaddrs` failing is not "you are on a different subnet".
+    func testOnSubnetUndeterminedNeverFires() {
+        let r = rule(.onSubnet(cidr: "192.168.1.0/24"))
+        XCTAssertTrue(fire([r], network: FakeNetworkAddress(["192.168.1.50"],
+                                                            reading: .undetermined)).isEmpty,
+                      "this Mac really is on that network, but the read failed")
+    }
+
+    /// A rule holding a block this build cannot parse fires nothing. It cannot
+    /// be created from the UI or the CLI — both refuse it — so this pins the
+    /// backstop rather than a route.
+    func testAnUnparseableBlockFiresNothing() {
+        let r = rule(.onSubnet(cidr: "not-a-network"))
+        XCTAssertTrue(fire([r], network: FakeNetworkAddress(["192.168.1.50"], reading: .present)).isEmpty,
+                      "nothing is inside a block that is not one")
+    }
+
+    // MARK: - Subnet validation
+
+    func testAValidBlockOrAddressHasNoProblem() {
+        XCTAssertNil(TriggerCondition.subnetProblem("192.168.1.0/24"))
+        XCTAssertNil(TriggerCondition.subnetProblem("192.168.1.50"))
+        XCTAssertNil(TriggerCondition.subnetProblem("10.0.0.0/8"))
+    }
+
+    func testTheEmptySubnetFieldIsNotYetAnError() {
+        XCTAssertNil(TriggerCondition.subnetProblem(""),
+                     "an empty field is incomplete, not wrong — the Add button is disabled for it")
+    }
+
+    func testAValueThatCanNeverMatchIsRejectedWithASentence() {
+        for bad in ["192.168.1", "banana", "192.168.1.0/33", "256.0.0.1"] {
+            guard let problem = TriggerCondition.subnetProblem(bad) else {
+                return XCTFail("\"\(bad)\" can never match, so it must be named")
+            }
+            XCTAssertTrue(problem.contains("192.168.1.0/24"),
+                          "the message has to show what would work: \(problem)")
+        }
+    }
+
+    /// A v6 address is a perfectly good address that this build cannot watch,
+    /// which is a different message from "that is not an address" — and the
+    /// one Task 8 exists to say out loud rather than silently never matching.
+    func testAnIPv6AddressSaysWhyRatherThanJustBeingWrong() {
+        for v6 in ["::1", "fe80::1/64", "2001:db8::1"] {
+            guard let problem = TriggerCondition.subnetProblem(v6) else {
+                return XCTFail("\(v6) can never match")
+            }
+            XCTAssertTrue(problem.contains("IPv6"), "\(v6): \(problem)")
+        }
     }
 
     /// The most important test in this file: a trigger already represented
@@ -290,6 +377,7 @@ final class TriggerRuleTests: XCTestCase {
                     processRunning: FakeProcessRunning(running: [], reading: .present),
                     frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .present),
                     mountedVolume: FakeMountedVolume(mounted: [], reading: .present),
+                    networkAddress: FakeNetworkAddress(reading: .present),
                     acPower: .present,
                     // No trigger condition consults the CPU sample today;
                     // `.busy(fraction: 1)` is that reading's analogue of
@@ -304,6 +392,7 @@ final class TriggerRuleTests: XCTestCase {
                     processRunning: FakeProcessRunning(running: [], reading: .undetermined),
                     frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .undetermined),
                     mountedVolume: FakeMountedVolume(mounted: [], reading: .undetermined),
+                    networkAddress: FakeNetworkAddress(reading: .undetermined),
                     acPower: .undetermined,
                     cpuBusy: .undetermined)
     }

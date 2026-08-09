@@ -25,6 +25,10 @@ enum TriggerCondition: Codable, Equatable {
     /// path cannot be used. The second condition that binds its session's
     /// lifetime.
     case volumeMounted(name: String)
+    /// This Mac holds an IPv4 address inside the block. "While I am on my
+    /// home network", and the permission-free alternative to a Wi-Fi SSID
+    /// trigger — see `NetworkAddressObserving`. Binds its session's lifetime.
+    case onSubnet(cidr: String)
 
     /// Why a `.processRunning` name can never match anything, or `nil` if it
     /// can. Lives here rather than inside the Add-trigger sheet so it is
@@ -46,6 +50,28 @@ enum TriggerCondition: Codable, Equatable {
             return "Enter just the name the tool runs as (\"claude\"), not a path — a path can never match."
         }
         return nil
+    }
+
+    /// Why an `.onSubnet` value can never match anything, or `nil` if it can.
+    /// The `processNameProblem` of this condition, and it lives here for the
+    /// same two reasons: the rule has one statement, and that statement is
+    /// testable without a UI.
+    ///
+    /// The empty field is `nil` — incomplete, not wrong — exactly as it is
+    /// there; the Add button is disabled for it separately. A v6 address gets
+    /// its own sentence rather than the generic one, because "that isn't an
+    /// IPv4 block" is a fact about the value and "IPv6 isn't supported yet" is
+    /// a fact about this build, and only the second one tells a user who typed
+    /// a perfectly good address what to do next.
+    static func subnetProblem(_ cidr: String) -> String? {
+        guard !cidr.isEmpty else { return nil }
+        guard IPv4Subnet(cidr: cidr) == nil else { return nil }
+        if cidr.contains(":") {
+            return "This build watches IPv4 addresses only, so an IPv6 address can never match. "
+                + "Enter an IPv4 address or block, like 192.168.1.0/24."
+        }
+        return "Enter an IPv4 address or block, like 192.168.1.0/24 or 192.168.1.50 — "
+            + "anything else can never match."
     }
 }
 
@@ -70,7 +96,7 @@ enum TriggerCondition: Codable, Equatable {
 /// user actually typed.
 enum TriggerConditionKind: String, CaseIterable, Identifiable {
     case appLaunched, externalDisplayConnected, acPowerConnected, processRunning
-    case appFrontmost, volumeMounted
+    case appFrontmost, volumeMounted, onSubnet
 
     var id: String { rawValue }
 
@@ -125,10 +151,15 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     ///   `.volumeMounted` rule to have its meaning changed under them, which
     ///   is the objection that keeps the display and power conditions
     ///   unbound.
+    /// * `.onSubnet` — **yes**, for `.volumeMounted`'s reasons. "While I am on
+    ///   my home network" is the whole request, and an address is as stable as
+    ///   a mount: a Mac does not leave and rejoin a subnet between two ticks
+    ///   while sitting on a desk. A brief roam is absorbed by the same two
+    ///   consecutive negatives everything else gets.
     var bindsSessionLifetime: Bool {
         switch self {
         case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost: return false
-        case .processRunning, .volumeMounted: return true
+        case .processRunning, .volumeMounted, .onSubnet: return true
         }
     }
 
@@ -143,6 +174,7 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
         case .processRunning: return .processRunning(processName: "claude")
         case .appFrontmost: return .appFrontmost(bundleID: "com.apple.dt.Xcode")
         case .volumeMounted: return .volumeMounted(name: "Backup")
+        case .onSubnet: return .onSubnet(cidr: "192.168.1.0/24")
         }
     }
 }
@@ -157,6 +189,7 @@ extension TriggerCondition {
         case .processRunning: return .processRunning
         case .appFrontmost: return .appFrontmost
         case .volumeMounted: return .volumeMounted
+        case .onSubnet: return .onSubnet
         }
     }
 
@@ -179,6 +212,8 @@ extension TriggerCondition {
             return .whileProcessRunning(processName: processName)
         case .volumeMounted(let name):
             return .whileVolumeMounted(name: name)
+        case .onSubnet(let cidr):
+            return .whileOnSubnet(cidr: cidr)
         }
     }
 }
@@ -568,6 +603,13 @@ func triggersToFire(
             return observers.frontmostApp.isFrontmost(bundleID: bundleID).isConfidentlyPresent
         case .volumeMounted(let name):
             return observers.mountedVolume.isMounted(volumeName: name).isConfidentlyPresent
+        case .onSubnet(let cidr):
+            // A rule whose block this build cannot parse cannot fire: nothing
+            // is inside a block that is not one. It is refused at both the
+            // keyboard (`subnetProblem`) and the command line, so this is the
+            // belt to those braces rather than a path a user can reach.
+            guard let subnet = IPv4Subnet(cidr: cidr) else { return false }
+            return observers.networkAddress.isOnSubnet(subnet).isConfidentlyPresent
         }
     }
 }
@@ -578,16 +620,18 @@ func triggersToFire(
 ///
 /// A condition that binds ignores `defaultKind` entirely. It is still stored on
 /// the rule (the Settings UI needs somewhere to persist it, and the schema
-/// didn't need to change), but for `.processRunning` — the only binding
-/// condition today — ending the session when the process exits, not after some
-/// picked duration, is the entire reason to use a process trigger over a plain
-/// `--for`. The Add sheet hides the duration picker for exactly these
-/// conditions rather than showing one it would discard.
+/// didn't need to change), but for each of the three binding conditions —
+/// `.processRunning`, `.volumeMounted`, `.onSubnet` — ending the session when
+/// the thing being watched goes away, rather than after some picked duration,
+/// is the entire reason to use that trigger over a plain `--for`. The Add
+/// sheet hides the duration picker for exactly these conditions rather than
+/// showing one it would discard.
 ///
 /// This used to match `.processRunning` here, and again in two places in
 /// `Sources/SessionDisplay.swift`, and a fourth time in the Add sheet. All four
-/// now read `TriggerCondition.boundSessionKind`, so a fifth condition that
-/// binds is described correctly everywhere by adding one line to one table.
+/// now read `TriggerCondition.boundSessionKind`, which is what made the second
+/// and third binding conditions one line in one table rather than four edits
+/// each.
 func sessionKind(firing rule: TriggerRule, now: Date) -> SessionKind {
     rule.condition.boundSessionKind ?? rule.defaultKind.sessionKind(now: now)
 }

@@ -36,6 +36,9 @@ final class EvidenceLoopRunner {
     /// enumeration answers every rule and session on a tick, and the cache
     /// that makes that true must not outlive the tick that filled it.
     private let makeMountedVolume: () -> MountedVolumeObserving
+    /// A factory too, for `makeMountedVolume`'s reason: one `getifaddrs` pass
+    /// answers every rule and session on the tick that took it.
+    private let makeNetworkAddress: () -> NetworkAddressObserving
     private var evidence = SessionEvidence()
     private var timer: Timer?
     /// Snapshot bookkeeping for the session-completion action, including the
@@ -52,7 +55,8 @@ final class EvidenceLoopRunner {
          processRunning: @escaping () -> ProcessRunningObserving = { SystemProcessRunningObserver() },
          cpuObserver: CPUBusyObserving = SystemCPUBusyObserver(),
          frontmostApp: FrontmostAppObserving = SystemFrontmostAppObserver(),
-         mountedVolume: @escaping () -> MountedVolumeObserving = { SystemMountedVolumeObserver() }) {
+         mountedVolume: @escaping () -> MountedVolumeObserving = { SystemMountedVolumeObserver() },
+         networkAddress: @escaping () -> NetworkAddressObserving = { SystemNetworkAddressObserver() }) {
         self.connection = connection
         self.appRunning = appRunning
         self.display = display
@@ -60,6 +64,7 @@ final class EvidenceLoopRunner {
         self.cpuObserver = cpuObserver
         self.frontmostApp = frontmostApp
         self.makeMountedVolume = mountedVolume
+        self.makeNetworkAddress = networkAddress
     }
 
     /// The timer fires every 5s and spawns a `Task` per fire, but `tick()` is
@@ -110,6 +115,7 @@ final class EvidenceLoopRunner {
         // per session AND once per rule, every 5 seconds.
         let processRunning = makeProcessRunning()
         let mountedVolume = makeMountedVolume()
+        let networkAddress = makeNetworkAddress()
         // One bundle, built once, passed to both — which is what keeps that
         // guarantee true: a second `ObserverSet` here would be a second
         // process-table enumeration, and a second CPU sample, whose delta
@@ -124,6 +130,7 @@ final class EvidenceLoopRunner {
                                     processRunning: processRunning,
                                     frontmostApp: frontmostApp,
                                     mountedVolume: mountedVolume,
+                                    networkAddress: networkAddress,
                                     acPower: PowerControl.batteryState().source.acPowerReading,
                                     cpuBusy: cpuObserver.currentBusy())
 

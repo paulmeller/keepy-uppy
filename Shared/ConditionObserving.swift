@@ -5,10 +5,11 @@ import Foundation
 // (Shared/TriggerRule.swift). Declared here, not in
 // Agent/ConditionObservers.swift, because Shared/ compiles into every
 // target — including the daemon and CLI — which must not gain those live
-// implementations' AppKit/CoreGraphics dependency. The live implementations
-// (SystemAppRunningObserver, SystemDisplayObserver,
-// SystemProcessRunningObserver, SystemCPUBusyObserver) stay in
-// Agent/ConditionObservers.swift.
+// implementations' AppKit/CoreGraphics dependency. Every live implementation
+// (SystemAppRunningObserver, SystemFrontmostAppObserver,
+// SystemDisplayObserver, SystemProcessRunningObserver,
+// SystemMountedVolumeObserver, SystemNetworkAddressObserver,
+// SystemCPUBusyObserver) stays in Agent/ConditionObservers.swift.
 
 /// One observation of a condition, including the answer a `Bool` return type
 /// could not express: "I could not tell."
@@ -32,11 +33,13 @@ import Foundation
 ///   *confident positive* (`.present`).
 ///
 /// `.undetermined` therefore does nothing at all, which is the only reading
-/// that is safe in both directions. Six more triggers are planned (Wi-Fi
-/// SSID, VPN, IP address, USB/Bluetooth device, mounted volume, frontmost
-/// app); every one of them has a read that can fail, and every one of them
-/// inherits this rule for free rather than re-deriving it — a failed SSID
-/// read reads as "I don't know", not as "you left the network."
+/// that is safe in both directions. Every trigger added since inherits the
+/// rule rather than re-deriving it, and each one has found its own way to
+/// fail: a frontmost-app query answers nothing while the screen is locked, a
+/// volume enumeration comes back empty, `getifaddrs` returns non-zero. A
+/// failed network read reads as "I don't know", not as "you left the
+/// network." The triggers still to come (Wi-Fi SSID, VPN, USB/Bluetooth
+/// device) get the same guarantee for free.
 enum ConditionReading: Equatable {
     /// The condition definitely holds right now.
     case present
@@ -126,11 +129,27 @@ protocol MountedVolumeObserving {
     func isMounted(volumeName: String) -> ConditionReading
 }
 
+/// Whether any of this Mac's own IPv4 addresses is inside a block.
+///
+/// Takes an `IPv4Subnet` rather than the rule's string on purpose: parsing is
+/// pure arithmetic with its own exhaustive tests, and an observer that took a
+/// string would have to decide what an unparseable one means — a decision that
+/// belongs at the two call sites, which answer it differently and say why
+/// (`triggersToFire` cannot fire on one; `sessionsToEnd` must not end a
+/// session on one).
+///
+/// The permission-free alternative to a Wi-Fi SSID trigger: `getifaddrs`
+/// needs no entitlement and no Location Services grant, and it additionally
+/// covers Ethernet and Thunderbolt bridging, which an SSID cannot.
+protocol NetworkAddressObserving {
+    func isOnSubnet(_ subnet: IPv4Subnet) -> ConditionReading
+}
+
 /// Lives here with the other three rather than in
 /// Agent/ConditionObservers.swift (where it used to sit, on the grounds that
 /// nothing outside the agent evaluates CPU-busy conditions) so that the whole
-/// observer contract — all four protocols and both reading types — is one
-/// file you can read end to end. The protocol itself has no framework
+/// observer contract — every protocol and both reading types — is one file
+/// you can read end to end. The protocol itself has no framework
 /// dependency; only `SystemCPUBusyObserver` does, and that stays in the agent.
 ///
 /// The one conformer requirement that is not visible in the signature, and is
@@ -197,6 +216,7 @@ struct ObserverSet {
     var processRunning: ProcessRunningObserving
     var frontmostApp: FrontmostAppObserving
     var mountedVolume: MountedVolumeObserving
+    var networkAddress: NetworkAddressObserving
     var acPower: ConditionReading
     var cpuBusy: CPUBusyReading
 }

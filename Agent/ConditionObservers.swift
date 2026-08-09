@@ -34,7 +34,7 @@ struct CPUBusyWindow {
 
 // MARK: - Live implementations
 //
-// The four observer protocols these conform to, and the `ConditionReading` /
+// The observer protocols these conform to, and the `ConditionReading` /
 // `CPUBusyReading` types they answer with, are declared together in
 // Shared/ConditionObserving.swift — Shared/ is compiled into every target,
 // including the daemon and CLI, which must not gain this file's
@@ -473,6 +473,111 @@ final class SystemMountedVolumeObserver: MountedVolumeObserving {
         thisTick = result
         switch result {
         case .names(let names): return ConditionReading(names.contains(volumeName))
+        case .unavailable: return .undetermined
+        }
+    }
+}
+
+// MARK: - Network addresses
+
+/// The result of one pass over this Mac's interfaces: every IPv4 address it
+/// currently holds, in host byte order, or an admission that the interface
+/// list could not be read.
+///
+/// **An empty set is a real answer here, unlike the two readings above**, and
+/// the difference is worth stating because the three observers look
+/// interchangeable. `/` is always mounted and this process is always in
+/// `runningApplications`, so an empty list from either of those is a failed
+/// enumeration. But a Mac with Wi-Fi switched off and no cable really does
+/// hold no non-loopback IPv4 address, and that is precisely "you are not on
+/// that subnet" — a confident negative, correctly ending a
+/// `.whileOnSubnet` session. Only `getifaddrs` itself failing is
+/// `.unavailable`.
+enum NetworkAddressReading: Equatable {
+    case addresses(Set<UInt32>)
+    case unavailable
+}
+
+/// Reading the interface list, split out from the subnet matching for the
+/// reason `ProcessTableReading` is: the matching is then testable with no
+/// network at all — see `IPv4Subnet` and its tests — and one read serves
+/// every rule and session on a tick.
+protocol NetworkAddressReader {
+    func read() -> NetworkAddressReading
+}
+
+/// `getifaddrs(3)`: POSIX, present since forever, no entitlement, no
+/// permission prompt, no framework to link. That is the whole reason
+/// `.onSubnet` exists as the permission-free alternative to a Wi-Fi SSID
+/// trigger, which needs Location Services on modern macOS.
+///
+/// What is skipped, and why:
+///
+/// * **`IFF_LOOPBACK`** — 127.0.0.1 is present on every Mac that has ever
+///   booted, so a rule naming `127.0.0.0/8` would otherwise hold a Mac awake
+///   forever, and a `/0` rule would match on a machine with no network at all.
+/// * **anything not `IFF_UP | IFF_RUNNING`** — an interface that is
+///   configured but not actually carrying traffic (a cable unplugged, Wi-Fi
+///   associated but down) still reports its last address, which is exactly
+///   the "you are still on the home network" claim this must not make.
+/// * **anything that is not `AF_INET`** — link-layer and IPv6 entries share
+///   the list. IPv6 is not silently ignored at the *rule* level: the Add
+///   sheet refuses a v6 address with a sentence saying so
+///   (`TriggerCondition.subnetProblem`).
+///
+/// `freeifaddrs` is paired with the one successful `getifaddrs` on every
+/// path, including the early return, by a `defer` placed immediately after
+/// the guard. This runs every 5 seconds for as long as the agent lives, so a
+/// leak here is not a one-off.
+struct GetifaddrsNetworkAddressReader: NetworkAddressReader {
+    func read() -> NetworkAddressReading {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0 else { return .unavailable }
+        defer { freeifaddrs(head) }
+
+        var addresses = Set<UInt32>()
+        var cursor = head
+        while let entry = cursor {
+            let interface = entry.pointee
+            cursor = interface.ifa_next
+
+            let flags = Int32(interface.ifa_flags)
+            guard flags & IFF_LOOPBACK == 0,
+                  flags & (IFF_UP | IFF_RUNNING) == (IFF_UP | IFF_RUNNING),
+                  let address = interface.ifa_addr,
+                  address.pointee.sa_family == UInt8(AF_INET)
+            else { continue }
+
+            let raw = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                $0.pointee.sin_addr.s_addr
+            }
+            // `s_addr` is network byte order; `IPv4Subnet` works in host order
+            // so that its arithmetic reads the way the dotted quad does.
+            addresses.insert(UInt32(bigEndian: raw))
+        }
+        return .addresses(addresses)
+    }
+}
+
+/// Answers `.onSubnet` questions from a single interface enumeration.
+///
+/// Memoized with the tick's lifetime, exactly as
+/// `SystemProcessRunningObserver` and `SystemMountedVolumeObserver` are: no
+/// invalidation logic, because `EvidenceLoopRunner` builds a new one every
+/// tick and the cache therefore cannot go stale.
+final class SystemNetworkAddressObserver: NetworkAddressObserving {
+    private let reader: NetworkAddressReader
+    private var thisTick: NetworkAddressReading?
+
+    init(reader: NetworkAddressReader = GetifaddrsNetworkAddressReader()) {
+        self.reader = reader
+    }
+
+    func isOnSubnet(_ subnet: IPv4Subnet) -> ConditionReading {
+        let result = thisTick ?? reader.read()
+        thisTick = result
+        switch result {
+        case .addresses(let addresses): return ConditionReading(addresses.contains(where: subnet.contains))
         case .unavailable: return .undetermined
         }
     }

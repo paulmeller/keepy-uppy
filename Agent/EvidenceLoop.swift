@@ -127,6 +127,21 @@ func sessionsToEnd(
             if evidence.recordAndCheckEnd(session.id, observers.mountedVolume.isMounted(volumeName: name)) {
                 ended.append(session.id)
             }
+        case .whileOnSubnet(let cidr):
+            // A block this build cannot parse is **`.undetermined`**, not
+            // `.absent`, and the asymmetry with `triggersToFire`'s arm — which
+            // refuses to fire on the same value — is deliberate. Failing to
+            // understand a rule is not an observation of the world, and this
+            // is the half where being wrong sleeps a Mac. It is not reachable
+            // from the UI or the CLI, both of which refuse an unparseable
+            // block; a hand-crafted XPC request could still get here, and such
+            // a session then behaves like `.indefinite`, which that same
+            // client could have asked for outright.
+            let reading = IPv4Subnet(cidr: cidr)
+                .map(observers.networkAddress.isOnSubnet) ?? .undetermined
+            if evidence.recordAndCheckEnd(session.id, reading) {
+                ended.append(session.id)
+            }
         case .whileCPUBusy(let threshold):
             if evidence.recordAndCheckCPUEnd(session.id, threshold: threshold,
                                              busy: observers.cpuBusy, now: now) {

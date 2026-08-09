@@ -515,6 +515,139 @@ final class MountedVolumeURLsReaderTests: XCTestCase {
     }
 }
 
+/// The matching, the memoization, and the one place this observer's tri-state
+/// differs from the other two — against a scripted reader, so all three are
+/// asserted rather than inferred.
+final class NetworkAddressObserverContractTests: XCTestCase {
+    private final class CountingReader: NetworkAddressReader {
+        let result: NetworkAddressReading
+        private(set) var reads = 0
+        init(_ result: NetworkAddressReading) { self.result = result }
+        func read() -> NetworkAddressReading {
+            reads += 1
+            return result
+        }
+    }
+
+    private func subnet(_ cidr: String) throws -> IPv4Subnet {
+        try XCTUnwrap(IPv4Subnet(cidr: cidr))
+    }
+
+    private func address(_ dotted: String) throws -> UInt32 {
+        try XCTUnwrap(IPv4Subnet(cidr: dotted)).network
+    }
+
+    func testAFailedGetifaddrsIsUndeterminedRatherThanADifferentSubnet() throws {
+        let observer = SystemNetworkAddressObserver(reader: CountingReader(.unavailable))
+        XCTAssertEqual(observer.isOnSubnet(try subnet("192.168.1.0/24")), .undetermined,
+                       "an interface list that could not be read says nothing about where this Mac is")
+    }
+
+    /// **The deliberate difference from `SystemMountedVolumeObserver` and
+    /// `SystemAppRunningObserver`, whose empty lists are `.undetermined`.** A
+    /// Mac with Wi-Fi off and no cable genuinely holds no non-loopback IPv4
+    /// address, and that is exactly "not on that subnet" — a confident
+    /// negative, which correctly ends a `.whileOnSubnet` session. There is no
+    /// always-present member here to make emptiness impossible, the way `/`
+    /// and this very process are for those two.
+    func testNoAddressesAtAllIsAConfidentNegativeRatherThanAFailure() throws {
+        let observer = SystemNetworkAddressObserver(reader: CountingReader(.addresses([])))
+        XCTAssertEqual(observer.isOnSubnet(try subnet("192.168.1.0/24")), .absent)
+    }
+
+    func testASuccessfulReadDistinguishesInsideFromOutside() throws {
+        let observer = SystemNetworkAddressObserver(
+            reader: CountingReader(.addresses([try address("192.168.1.50")])))
+        XCTAssertEqual(observer.isOnSubnet(try subnet("192.168.1.0/24")), .present)
+        XCTAssertEqual(observer.isOnSubnet(try subnet("192.168.1.50")), .present, "a bare address is a /32")
+        XCTAssertEqual(observer.isOnSubnet(try subnet("10.0.0.0/8")), .absent)
+    }
+
+    /// A Mac on two networks at once — Ethernet and a VPN tunnel, which is the
+    /// ordinary case, not an exotic one — is on *both*, and a rule naming
+    /// either must match.
+    func testAnyOneOfSeveralAddressesIsEnough() throws {
+        let observer = SystemNetworkAddressObserver(reader: CountingReader(
+            .addresses([try address("192.168.86.26"), try address("100.78.130.78")])))
+        XCTAssertEqual(observer.isOnSubnet(try subnet("192.168.86.0/24")), .present)
+        XCTAssertEqual(observer.isOnSubnet(try subnet("100.64.0.0/10")), .present)
+        XCTAssertEqual(observer.isOnSubnet(try subnet("172.16.0.0/12")), .absent)
+    }
+
+    func testOneObserverReadsTheInterfaceListAtMostOncePerTick() throws {
+        let reader = CountingReader(.addresses([try address("192.168.1.50")]))
+        let observer = SystemNetworkAddressObserver(reader: reader)
+        for _ in 1...20 {
+            _ = observer.isOnSubnet(try subnet("192.168.1.0/24"))
+            _ = observer.isOnSubnet(try subnet("10.0.0.0/8"))
+        }
+        XCTAssertEqual(reader.reads, 1)
+    }
+
+    func testANewObserverReadsAgain() throws {
+        let reader = CountingReader(.addresses([]))
+        _ = SystemNetworkAddressObserver(reader: reader).isOnSubnet(try subnet("192.168.1.0/24"))
+        _ = SystemNetworkAddressObserver(reader: reader).isOnSubnet(try subnet("192.168.1.0/24"))
+        XCTAssertEqual(reader.reads, 2)
+    }
+}
+
+/// The live `getifaddrs` reader, against this Mac's real interfaces.
+final class GetifaddrsNetworkAddressReaderTests: XCTestCase {
+    private func addresses() throws -> Set<UInt32> {
+        guard case .addresses(let addresses) = GetifaddrsNetworkAddressReader().read() else {
+            throw XCTSkip("getifaddrs failed, which is the .unavailable case rather than a defect here")
+        }
+        return addresses
+    }
+
+    /// Loopback is skipped, and this is the test that matters most for a
+    /// machine with no network: 127.0.0.1 exists on every Mac that has ever
+    /// booted, so leaving it in would make a `/0` rule — or a `127.0.0.0/8`
+    /// one — hold a Mac awake forever with nothing plugged in.
+    func testLoopbackIsNotReported() throws {
+        let loopback = try XCTUnwrap(IPv4Subnet(cidr: "127.0.0.0/8"))
+        XCTAssertFalse(try addresses().contains(where: loopback.contains),
+                       "127.0.0.1 must not count as being on a network")
+    }
+
+    /// Every address reported has to be one this Mac can actually be asked
+    /// about, and the round trip through `IPv4Subnet` is what proves the byte
+    /// order is right: a `sin_addr` left in network order would come back with
+    /// its octets reversed, so `192.168.86.26` would answer to `26.86.168.192`
+    /// and every real rule would silently never match.
+    func testEachAddressIsInsideItsOwnSlash32AndItsOwnSlash24() throws {
+        for address in try addresses() {
+            let octets = (0..<4).map { (address >> (24 - 8 * $0)) & 0xFF }
+            let dotted = octets.map(String.init).joined(separator: ".")
+            let ownSlash32 = try XCTUnwrap(IPv4Subnet(cidr: dotted))
+            let ownSlash24 = try XCTUnwrap(IPv4Subnet(cidr: "\(octets[0]).\(octets[1]).\(octets[2]).0/24"))
+            XCTAssertTrue(ownSlash32.contains(address), dotted)
+            XCTAssertTrue(ownSlash24.contains(address), dotted)
+        }
+    }
+
+    /// The live observer answering two different questions in the same
+    /// instant: the block this Mac is genuinely on, and a block reserved by
+    /// RFC 5737 for documentation that it cannot be on. Skipped rather than
+    /// failed when this Mac has no network — which is a legitimate state, and
+    /// one CI can be in.
+    func testTheLiveObserverSeparatesTheNetworkThisMacIsOnFromOneItIsNot() throws {
+        guard let address = try addresses().first else {
+            throw XCTSkip("this Mac holds no non-loopback IPv4 address, so there is nothing to be on")
+        }
+        let octets = (0..<4).map { (address >> (24 - 8 * $0)) & 0xFF }
+        let mine = try XCTUnwrap(IPv4Subnet(cidr: "\(octets[0]).\(octets[1]).\(octets[2]).0/24"))
+        // TEST-NET-3: reserved for documentation, so no interface can hold one.
+        let notMine = try XCTUnwrap(IPv4Subnet(cidr: "203.0.113.0/24"))
+
+        let observer = SystemNetworkAddressObserver()
+        XCTAssertEqual(observer.isOnSubnet(mine), .present)
+        XCTAssertEqual(observer.isOnSubnet(notMine), .absent,
+                       "a successful read that found nothing matching is a confident negative")
+    }
+}
+
 /// The memoization and failure behaviour, against a fake table reader so they
 /// can be asserted exactly rather than inferred.
 final class ProcessRunningObserverContractTests: XCTestCase {

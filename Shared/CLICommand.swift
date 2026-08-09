@@ -205,6 +205,7 @@ private enum OnOption: String, CaseIterable {
     case whileACPower = "--while-ac-power"
     case whileCPUBusy = "--while-cpu-busy"
     case whileVolume = "--while-volume"
+    case whileSubnet = "--while-subnet"
 
     /// How this option reads in `onUsage`, value placeholder and all.
     ///
@@ -222,6 +223,7 @@ private enum OnOption: String, CaseIterable {
         // The name Finder shows, not a mount path — see
         // `MountedVolumeObserving` for why a path cannot be matched on.
         case .whileVolume: return "\(rawValue) <volume-name>"
+        case .whileSubnet: return "\(rawValue) 192.168.1.0/24"
         case .whileDisplay, .whileACPower: return rawValue
         case .whileCPUBusy:
             return "\(rawValue) \(cpuBusyPercentageRange.lowerBound)-\(cpuBusyPercentageRange.upperBound)"
@@ -296,6 +298,11 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
         case .whileVolume:
             switch scanner.value(for: token) {
             case .success(let raw): kind = .whileVolumeMounted(name: raw)
+            case .failure(let error): return .failure(error)
+            }
+        case .whileSubnet:
+            switch scanner.value(for: token).flatMap(parseSubnet) {
+            case .success(let cidr): kind = .whileOnSubnet(cidr: cidr)
             case .failure(let error): return .failure(error)
             }
         case .whileDisplay:
@@ -564,6 +571,26 @@ func parseCPUBusyPercentage(_ string: String) -> Result<Double, CLIParseError> {
                 + "e.g. 30 for 30% busy"))
     }
     return .success(Double(percentage) / 100)
+}
+
+/// Accepts an IPv4 address or CIDR block, and hands back **what was typed**.
+///
+/// The value is validated but not normalized, for the reason `--while-app`
+/// takes a bundle id verbatim: the string is what `status` and the menu will
+/// show back, and `192.168.1.50/24` is what the user wrote down off their own
+/// network settings. `IPv4Subnet` masks the host bits when it matches, so the
+/// stored form and the matched block cannot disagree.
+///
+/// Refusing an unparseable value here is the same call `parseCPUBusyPercentage`
+/// makes: a session whose block can never match is a session that will not end
+/// on its own condition, and saying so at the keyboard costs one retype.
+func parseSubnet(_ string: String) -> Result<String, CLIParseError> {
+    guard IPv4Subnet(cidr: string) != nil else {
+        return .failure(CLIParseError(
+            message: "invalid --while-subnet block '\(string)' — use an IPv4 address or block, "
+                + "e.g. 192.168.1.0/24 or 192.168.1.50 (IPv6 is not supported yet)"))
+    }
+    return .success(string)
 }
 
 /// Accepts "HH:MM" in the local timezone, rolling to tomorrow if that

@@ -31,6 +31,11 @@ final class EvidenceLoopTests: XCTestCase {
     struct FakeFrontmostApp: FrontmostAppObserving {
         func isFrontmost(bundleID: String) -> ConditionReading { .undetermined }
     }
+    struct FakeNetworkAddress: NetworkAddressObserving {
+        let reading: ConditionReading
+        init(_ reading: ConditionReading) { self.reading = reading }
+        func isOnSubnet(_ subnet: IPv4Subnet) -> ConditionReading { reading }
+    }
     struct FakeMountedVolume: MountedVolumeObserving {
         let reading: ConditionReading
         init(_ reading: ConditionReading) { self.reading = reading }
@@ -56,6 +61,7 @@ final class EvidenceLoopTests: XCTestCase {
                       display: ConditionReading = .present,
                       process: ConditionReading = .present,
                       volume: ConditionReading = .present,
+                      network: ConditionReading = .present,
                       busy: CPUBusyReading = .undetermined,
                       at now: Date? = nil) -> [UUID] {
         sessionsToEnd(sessions,
@@ -68,6 +74,7 @@ final class EvidenceLoopTests: XCTestCase {
                                              processRunning: FakeProcessRunning(process),
                                              frontmostApp: FakeFrontmostApp(),
                                              mountedVolume: FakeMountedVolume(volume),
+                                             networkAddress: FakeNetworkAddress(network),
                                              acPower: .undetermined,
                                              cpuBusy: busy),
                       evidence: &evidence, now: now ?? t0)
@@ -150,6 +157,33 @@ final class EvidenceLoopTests: XCTestCase {
         var evidence = SessionEvidence()
         for _ in 1...5 {
             XCTAssertTrue(tick([s], evidence: &evidence, volume: .present).isEmpty)
+        }
+    }
+
+    /// `getifaddrs` failing is not "you left the network". Same shape as the
+    /// volume test above, and the same consequence if it were wrong: a Mac
+    /// held awake for a long transfer over that very network gets slept.
+    func testANetworkReadThatFailedNeverEndsASession() {
+        let s = session(.whileOnSubnet(cidr: "192.168.1.0/24"))
+        var evidence = SessionEvidence()
+        for tickNumber in 1...50 {
+            XCTAssertTrue(tick([s], evidence: &evidence, network: .undetermined).isEmpty,
+                          "tick \(tickNumber): a failed interface read is not a different subnet")
+        }
+        XCTAssertTrue(tick([s], evidence: &evidence, network: .absent).isEmpty, "first negative debounces")
+        XCTAssertEqual(tick([s], evidence: &evidence, network: .absent), [s.id])
+    }
+
+    /// The deliberate asymmetry with `triggersToFire`, which refuses to fire a
+    /// rule whose block will not parse: here the same value must **not** end a
+    /// live session, because failing to understand a rule is not an
+    /// observation, and this is the half that can sleep a Mac.
+    func testASessionWhoseBlockCannotBeParsedIsNeverEnded() {
+        let s = session(.whileOnSubnet(cidr: "not-a-network"))
+        var evidence = SessionEvidence()
+        for _ in 1...50 {
+            XCTAssertTrue(tick([s], evidence: &evidence, network: .absent).isEmpty,
+                          "an unparseable block is undetermined, whatever the observer says")
         }
     }
 
@@ -242,7 +276,8 @@ final class EvidenceLoopTests: XCTestCase {
         var evidence = SessionEvidence()
         for _ in 1...5 {
             XCTAssertTrue(tick([s], evidence: &evidence, app: .absent, display: .absent,
-                               process: .absent, volume: .absent, busy: .busy(fraction: 0)).isEmpty,
+                               process: .absent, volume: .absent, network: .absent,
+                               busy: .busy(fraction: 0)).isEmpty,
                           "the agent must never report on sessions it doesn't own evaluation of")
         }
     }

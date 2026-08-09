@@ -267,7 +267,7 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             [], ["--for", "2h"], ["--until", "17:00"],
             ["--while-app", "com.apple.dt.Xcode"], ["--while-process", "claude"],
             ["--while-display"], ["--while-ac-power"], ["--while-cpu-busy", "30"],
-            ["--while-volume", "Backup"],
+            ["--while-volume", "Backup"], ["--while-subnet", "192.168.1.0/24"],
         ]
         let reachable = Set(invocations.compactMap { flags -> SessionKind.Family? in
             guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on"] + flags) else { return nil }
@@ -286,6 +286,34 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             return XCTFail("expected a session kind")
         }
         XCTAssertEqual(kind, .whileVolumeMounted(name: "Time Machine"))
+    }
+
+    /// The block is stored as typed rather than normalized, matching
+    /// `--while-app`'s bundle id: it is what `sessions` will print back, and
+    /// `IPv4Subnet` masks the host bits when it matches, so the two cannot
+    /// disagree.
+    func testSubnetIsStoredExactlyAsTyped() {
+        for typed in ["192.168.1.0/24", "192.168.1.50", "10.0.0.0/8"] {
+            guard case .success(.on(let kind, _, _)) =
+                    parseCLIArguments(["on", "--while-subnet", typed]) else {
+                return XCTFail("'--while-subnet \(typed)' must be accepted")
+            }
+            XCTAssertEqual(kind, .whileOnSubnet(cidr: typed))
+        }
+    }
+
+    /// A block that can never match is refused at the keyboard, exactly as an
+    /// out-of-range CPU threshold is — the alternative is a session that will
+    /// not end on its own condition, with nothing to say why.
+    func testSubnetRejectsAValueThatCanNeverMatch() {
+        for bad in ["192.168.1", "256.0.0.1", "192.168.1.0/33", "banana", "fe80::1/64"] {
+            guard case .failure(let error) = parseCLIArguments(["on", "--while-subnet", bad]) else {
+                return XCTFail("'--while-subnet \(bad)' must be refused")
+            }
+            XCTAssertTrue(error.message.contains(bad), "the message must quote what was typed: \(error.message)")
+            XCTAssertTrue(error.message.contains("192.168.1.0/24"),
+                          "the message must give a form that would work: \(error.message)")
+        }
     }
 
     func testCPUBusyThresholdIsParsedAsAPercentage() {

@@ -179,6 +179,8 @@ final class SessionCompletionTests: XCTestCase {
                        "while-process-running:claude")
         XCTAssertEqual(SessionKind.whileVolumeMounted(name: "Backup").wireDescription,
                        "while-volume-mounted:Backup")
+        XCTAssertEqual(SessionKind.whileOnSubnet(cidr: "192.168.1.0/24").wireDescription,
+                       "while-on-subnet:192.168.1.0/24")
     }
 
     /// Every kind must have a name, and no two may share one — otherwise a
@@ -189,7 +191,7 @@ final class SessionCompletionTests: XCTestCase {
             .indefinite, .duration(until: t0), .untilTime(t0), .lease(expires: t0),
             .whileAppRunning(bundleID: "a"), .whileExternalDisplay, .whileOnACPower,
             .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "b"),
-            .whileVolumeMounted(name: "c"),
+            .whileVolumeMounted(name: "c"), .whileOnSubnet(cidr: "192.168.1.0/24"),
         ]
         let names = all.map(\.wireDescription)
         XCTAssertEqual(Set(names).count, all.count)

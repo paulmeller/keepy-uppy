@@ -172,7 +172,7 @@ struct TriggersSettingsTab: View {
                 .foregroundStyle(.tertiary)
             Text("No Triggers")
                 .font(.title3.weight(.semibold))
-            Text("Triggers start a session for you — when an app launches, a display is plugged in, power is connected, or a process (like a coding-assistant CLI) is running.")
+            Text("Triggers start a session for you — when an app launches or comes to the front, a display is plugged in, power is connected, a volume is mounted, this Mac joins a network, or a process (like a coding-assistant CLI) is running.")
                 .settingsFootnote()
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
@@ -285,6 +285,26 @@ private struct AddTriggerSheet: View {
         guard case .names(let names) = MountedVolumeURLsReader().read() else { return [] }
         return names.sorted()
     }()
+    @State private var subnetCIDR = ""
+    /// A `/24` around each IPv4 address this Mac holds right now, read once
+    /// when the sheet is built. `/24` is a suggestion, not a claim — it is
+    /// the overwhelmingly common home and office prefix, and the field stays
+    /// editable — so each row shows the address it came from, which is the
+    /// fact the user can actually check.
+    @State private var currentSubnetSuggestions: [(address: String, block: String)] = {
+        guard case .addresses(let addresses) = GetifaddrsNetworkAddressReader().read() else { return [] }
+        var seen = Set<String>()
+        return addresses.sorted().compactMap { address in
+            let octets = (0..<4).map { (address >> (24 - 8 * $0)) & 0xFF }
+            let block = "\(octets[0]).\(octets[1]).\(octets[2]).0/24"
+            // Deduplicated because a docked laptop with Wi-Fi *and* Ethernet
+            // on the same LAN is the ordinary case, not an exotic one: both
+            // addresses suggest the identical block, which would be two rows
+            // saying the same thing — and a duplicate `ForEach` id.
+            guard seen.insert(block).inserted else { return nil }
+            return (address: octets.map(String.init).joined(separator: "."), block: block)
+        }
+    }()
     @State private var sessionKind: DefaultSessionKind = .indefinite
     @State private var pickerError: String?
 
@@ -388,6 +408,40 @@ private struct AddTriggerSheet: View {
                         .settingsFootnote()
                 }
 
+                if inputField == .subnet {
+                    LabeledContent("Network") {
+                        HStack {
+                            TextField("192.168.1.0/24", text: $subnetCIDR)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body.monospaced())
+                            // The same bargain again: the arithmetic of "what
+                            // block am I on" is the part a person should not
+                            // have to do, but the field stays editable because
+                            // the whole point may be a network they are not on
+                            // right now.
+                            Menu("This Mac…") {
+                                ForEach(currentSubnetSuggestions, id: \.block) { suggestion in
+                                    Button("\(suggestion.block)  (this Mac is \(suggestion.address))") {
+                                        subnetCIDR = suggestion.block
+                                    }
+                                }
+                            }
+                            .fixedSize()
+                            .disabled(currentSubnetSuggestions.isEmpty)
+                        }
+                    }
+
+                    // A block that can never match is worth saying now rather
+                    // than letting the rule sit in the list looking correct —
+                    // the `.processRunning` argument, and here it also carries
+                    // the one limitation a user cannot see: IPv4 only.
+                    if let problem = TriggerCondition.subnetProblem(subnetCIDR) {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
+                }
+
                 // A condition that binds its session's lifetime has no duration
                 // to pick — `sessionKind(firing:now:)` would discard whatever
                 // was chosen — so the picker is replaced by the sentence saying
@@ -434,7 +488,7 @@ private struct AddTriggerSheet: View {
     /// is one: a new condition must *state* which field it wants. A chain of
     /// equality tests answers "none" on its author's behalf, silently, and the
     /// result is a sheet whose Add button is enabled with nothing filled in.
-    private enum InputField { case app, process, volume, none }
+    private enum InputField { case app, process, volume, subnet, none }
 
     private var inputField: InputField {
         switch conditionKind {
@@ -444,6 +498,7 @@ private struct AddTriggerSheet: View {
         case .appLaunched, .appFrontmost: return .app
         case .processRunning: return .process
         case .volumeMounted: return .volume
+        case .onSubnet: return .subnet
         case .externalDisplayConnected, .acPowerConnected: return .none
         }
     }
@@ -454,6 +509,8 @@ private struct AddTriggerSheet: View {
         case .processRunning:
             return !processName.isEmpty && TriggerCondition.processNameProblem(processName) == nil
         case .volumeMounted: return !volumeName.isEmpty
+        case .onSubnet:
+            return !subnetCIDR.isEmpty && TriggerCondition.subnetProblem(subnetCIDR) == nil
         case .externalDisplayConnected, .acPowerConnected: return true
         }
     }
@@ -466,6 +523,7 @@ private struct AddTriggerSheet: View {
         case .processRunning: return .processRunning(processName: processName)
         case .appFrontmost: return .appFrontmost(bundleID: bundleID)
         case .volumeMounted: return .volumeMounted(name: volumeName)
+        case .onSubnet: return .onSubnet(cidr: subnetCIDR)
         }
     }
 

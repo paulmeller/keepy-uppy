@@ -24,6 +24,10 @@ enum SessionKind: Equatable, Codable {
     /// awake while the backup drive is plugged in" is a *while* on its face,
     /// and a mounted volume is a stable fact rather than one that flickers.
     case whileVolumeMounted(name: String)
+    /// Ends when this Mac no longer holds an address inside the block. "While
+    /// I am on my home network" — durable, and unlike the Wi-Fi trigger it
+    /// needs no Location Services grant and works over Ethernet too.
+    case whileOnSubnet(cidr: String)
 
     /// A kind's identity without its associated value, so that `CaseIterable`
     /// guarantees are available to anything that has to cover every kind: the
@@ -57,6 +61,7 @@ enum SessionKind: Equatable, Codable {
         case whileCPUBusy = "while-cpu-busy"
         case whileProcessRunning = "while-process-running"
         case whileVolumeMounted = "while-volume-mounted"
+        case whileOnSubnet = "while-on-subnet"
     }
 
     /// This kind's family, dropping its associated value. Exhaustive, so a new
@@ -74,6 +79,7 @@ enum SessionKind: Equatable, Codable {
         case .whileCPUBusy: return .whileCPUBusy
         case .whileProcessRunning: return .whileProcessRunning
         case .whileVolumeMounted: return .whileVolumeMounted
+        case .whileOnSubnet: return .whileOnSubnet
         }
     }
 
@@ -83,7 +89,7 @@ enum SessionKind: Equatable, Codable {
         switch self {
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower: return true
         case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
-             .whileVolumeMounted: return false
+             .whileVolumeMounted, .whileOnSubnet: return false
         }
     }
 
@@ -104,7 +110,7 @@ enum SessionKind: Equatable, Codable {
     ///
     /// The shape is `name` or `name:value`, lowercase kebab-case, where the
     /// value is everything after the *first* colon. The name is `Family`'s raw
-    /// value rather than a second copy of the same ten literals — one list, so
+    /// value rather than a second copy of the same eleven literals — one list, so
     /// a kind cannot be named one thing here and another there. Only the kinds
     /// whose associated value identifies *what was being watched* carry a
     /// value; a deadline is deliberately omitted (the event already carries
@@ -121,6 +127,7 @@ enum SessionKind: Equatable, Codable {
         case .whileAppRunning(let bundleID): return "\(family.rawValue):\(bundleID)"
         case .whileProcessRunning(let processName): return "\(family.rawValue):\(processName)"
         case .whileVolumeMounted(let name): return "\(family.rawValue):\(name)"
+        case .whileOnSubnet(let cidr): return "\(family.rawValue):\(cidr)"
         case .indefinite, .duration, .untilTime, .lease, .whileExternalDisplay,
              .whileOnACPower, .whileCPUBusy:
             return family.rawValue
@@ -136,7 +143,8 @@ enum SessionKind: Equatable, Codable {
         case .duration(let until), .untilTime(let until), .lease(let until):
             return until
         case .indefinite, .whileAppRunning, .whileExternalDisplay,
-             .whileOnACPower, .whileCPUBusy, .whileProcessRunning, .whileVolumeMounted:
+             .whileOnACPower, .whileCPUBusy, .whileProcessRunning, .whileVolumeMounted,
+             .whileOnSubnet:
             return nil
         }
     }

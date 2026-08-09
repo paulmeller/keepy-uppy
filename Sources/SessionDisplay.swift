@@ -43,6 +43,8 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While \(processName) is running"
     case .whileVolumeMounted(let name):
         return "While \(name) is mounted"
+    case .whileOnSubnet(let cidr):
+        return "While on \(cidr)"
     }
 }
 
@@ -94,6 +96,7 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
     case .processRunning: return "A process is running"
     case .appFrontmost: return "An app comes to the front"
     case .volumeMounted: return "A volume is mounted"
+    case .onSubnet: return "This Mac is on a network"
     }
 }
 
@@ -109,7 +112,8 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
 /// truth, because `sessionKind(firing:now:)` starts the bound kind and
 /// `sessionsToEnd` really does end it.
 ///
-/// `.processRunning` and `.volumeMounted` are the two such conditions today.
+/// `.processRunning`, `.volumeMounted` and `.onSubnet` are the three such
+/// conditions today.
 /// Which ones say "while" is pinned against `bindsSessionLifetime` in
 /// `SessionDisplayTests`, not against a list of case names, so a seventh
 /// condition cannot pick the wrong voice quietly.
@@ -121,6 +125,7 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     case .processRunning(let processName): return "While \(processName) is running"
     case .appFrontmost(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) comes to the front"
     case .volumeMounted(let name): return "While \(name) is mounted"
+    case .onSubnet(let cidr): return "While this Mac is on \(cidr)"
     }
 }
 
@@ -152,6 +157,8 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
         return "Keeps this Mac awake until \(processName) exits"
     case .volumeMounted(let name):
         return "Keeps this Mac awake until \(name) is unmounted"
+    case .onSubnet(let cidr):
+        return "Keeps this Mac awake until it leaves \(cidr)"
     }
 }
 
@@ -173,6 +180,9 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
     case .volumeMounted(let name):
         let subject = name.isEmpty ? "the volume" : name
         return "Ends automatically when \(subject) is unmounted — no duration to pick."
+    case .onSubnet(let cidr):
+        let subject = cidr.isEmpty ? "that network" : cidr
+        return "Ends automatically when this Mac leaves \(subject) — no duration to pick."
     }
 }
 

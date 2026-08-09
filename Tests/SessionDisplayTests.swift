@@ -68,6 +68,11 @@ final class SessionDisplayTests: XCTestCase {
         XCTAssertEqual(remainingTimeText(for: s, now: t0), "While Time Machine is mounted")
     }
 
+    func testWhileOnSubnetShowsTheNetworkCondition() {
+        let s = session(.whileOnSubnet(cidr: "192.168.1.0/24"))
+        XCTAssertEqual(remainingTimeText(for: s, now: t0), "While on 192.168.1.0/24")
+    }
+
     func testOriginTextDistinguishesManualAndTrigger() {
         XCTAssertEqual(originText(for: session(.indefinite, origin: .manual)), "Started manually")
         XCTAssertEqual(originText(for: session(.indefinite, origin: .trigger)), "Started automatically")
@@ -297,6 +302,20 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionKindLabel(.processRunning), "A process is running")
         XCTAssertEqual(triggerConditionKindLabel(.appFrontmost), "An app comes to the front")
         XCTAssertEqual(triggerConditionKindLabel(.volumeMounted), "A volume is mounted")
+        XCTAssertEqual(triggerConditionKindLabel(.onSubnet), "This Mac is on a network")
+    }
+
+    /// The subnet condition binds too, so its copy has to name the leaving —
+    /// the event that will end the session — and it has to quote the block
+    /// back, because a rule that just said "a network" would be
+    /// indistinguishable from the next one in the list.
+    func testTheSubnetConditionSaysWhatWillEndTheSession() {
+        XCTAssertEqual(triggerConditionTitle(.onSubnet(cidr: "192.168.1.0/24")),
+                       "While this Mac is on 192.168.1.0/24")
+        XCTAssertEqual(triggerBoundEffectSubtitle(.onSubnet(cidr: "192.168.1.0/24")),
+                       "Keeps this Mac awake until it leaves 192.168.1.0/24")
+        XCTAssertEqual(triggerBindingFootnote(.onSubnet(cidr: "")),
+                       "Ends automatically when this Mac leaves that network — no duration to pick.")
     }
 
     /// The volume condition binds, so it is entitled to "while" — and its
