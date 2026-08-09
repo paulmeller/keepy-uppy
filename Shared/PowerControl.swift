@@ -268,7 +268,8 @@ struct PowerPlan: Equatable {
     }
 }
 
-/// The IOKit calls `PowerAssertions` makes, behind a seam.
+/// The IOKit calls `PowerPlanHolder` makes for the assertion axis, behind a
+/// seam.
 ///
 /// The seam exists so the create/release *bookkeeping* — the part that leaks
 /// `IOPMAssertionID`s when it is wrong — can be tested without a test ever
@@ -305,7 +306,53 @@ struct IOKitPowerAssertionBackend: PowerAssertionBackend {
     }
 }
 
-/// Holds at most one assertion of each type and converges that set on demand.
+/// The clamshell axis's one write, behind a seam of its own.
+///
+/// It exists for the same reason `PowerAssertionBackend` does, and it became
+/// *necessary* the moment both axes started travelling together through
+/// `PowerPlanHolder.apply`: a test of the holder now touches this axis on every
+/// call, and `SleepDisabled` is a global, root-only, reboot-surviving setting
+/// that a test host must never write. The seam is what keeps "apply both axes
+/// in one call" from meaning "unit tests write the real system setting".
+///
+/// The seam is *only* a seam. `PowerControl.setSleepDisabled` — whose
+/// converge-to-safe-at-launch use in `DaemonRuntime.start` predates all of
+/// this and is depended on elsewhere — is untouched, and
+/// `SystemSleepSettingBackend` does nothing but forward to it.
+protocol SleepSettingBackend {
+    /// Returns whether the write succeeded. Requires root, so it returns
+    /// `false` — harmlessly — in the unprivileged targets and in tests.
+    func setSleepDisabled(_ disabled: Bool) -> Bool
+}
+
+struct SystemSleepSettingBackend: SleepSettingBackend {
+    func setSleepDisabled(_ disabled: Bool) -> Bool {
+        PowerControl.setSleepDisabled(disabled)
+    }
+}
+
+/// Applies a whole `PowerPlan` to the machine: holds at most one assertion of
+/// each type, and writes the clamshell setting, converging both on demand.
+///
+/// ## Why one type owns both axes
+///
+/// The two mechanisms stay deliberately separate as *mechanisms* (see the long
+/// comment above), but they must not be separable as an *action*. The earlier
+/// shape took a bare `Set<PowerAssertionType>`, which let a caller write
+///
+///     holder.apply(plan.assertions)     // and forget plan.sleepDisabled
+///
+/// That compiles, passes, and silently drops clamshell support — and since
+/// assertions demonstrably do not survive a lid close, that one omission is
+/// exactly the failure the two-axis design exists to prevent. Nothing in the
+/// type system objected, because "the assertions" was a value you could hold
+/// on its own.
+///
+/// So there is no longer an entry point that accepts one axis. `apply` takes
+/// the `PowerPlan` that `PowerPlan.reduce` produced, and applies both halves
+/// itself. Under-applying now requires *fabricating a different plan* —
+/// `PowerPlan(assertions: plan.assertions, sleepDisabled: false)` — which is a
+/// visible false statement at the call site rather than a silent omission.
 ///
 /// Stateful on purpose: the live `IOPMAssertionID`s *are* the state, which is
 /// why this is an owned instance rather than another static namespace like
@@ -320,15 +367,35 @@ struct IOKitPowerAssertionBackend: PowerAssertionBackend {
 /// chance to run cleanup), but that only fires on *process* death. A session
 /// that ends while the daemon keeps running still needs a real
 /// `IOPMAssertionRelease`, or assertions accumulate for the daemon's lifetime.
-final class PowerAssertions {
-    private let backend: PowerAssertionBackend
+final class PowerPlanHolder {
+    private let assertionBackend: PowerAssertionBackend
+    private let sleepSetting: SleepSettingBackend
     private var held: [PowerAssertionType: IOPMAssertionID] = [:]
 
-    init(backend: PowerAssertionBackend = IOKitPowerAssertionBackend()) {
-        self.backend = backend
+    init(assertions: PowerAssertionBackend = IOKitPowerAssertionBackend(),
+         sleepSetting: SleepSettingBackend = SystemSleepSettingBackend()) {
+        self.assertionBackend = assertions
+        self.sleepSetting = sleepSetting
     }
 
-    deinit { releaseAll() }
+    /// Releases the assertion axis only, and deliberately so.
+    ///
+    /// `deinit` runs on whichever thread happens to drop the last reference,
+    /// which is *not* the serial queue this class is otherwise confined to.
+    /// That is safe here only because of how the daemon owns it: one instance,
+    /// created at startup, never handed out, never replaced, so the last
+    /// reference goes away only as the process itself does and no queue work
+    /// can still be in flight. Anything that starts creating short-lived
+    /// holders, or sharing one across queues, breaks that assumption and needs
+    /// real synchronisation rather than this comment.
+    ///
+    /// It is also why the clamshell axis is left alone here. `SleepDisabled`
+    /// is global, root-only and survives both process death and reboot; a
+    /// privileged write to it from an arbitrary thread at an arbitrary moment
+    /// is worse than the reconciliation that already exists, which is
+    /// `DaemonRuntime.start`'s converge-to-safe at launch. That reconciliation
+    /// is precisely why the persistent mechanism is safe to use at all.
+    deinit { releaseAllAssertions() }
 
     /// What is actually held right now, for the daemon's own logging and for
     /// tests. Deliberately not a status source for users: assertions are
@@ -337,23 +404,37 @@ final class PowerAssertions {
     /// and this is only the truth about what we asked for.
     var heldTypes: Set<PowerAssertionType> { Set(held.keys) }
 
-    /// Converge the held set to `wanted`. Idempotent: calling it twice with
-    /// the same set creates nothing the second time.
+    /// Converge the machine to `plan` — **both** axes, in one call. Idempotent
+    /// on the assertion axis: calling it twice with the same plan creates
+    /// nothing the second time.
     ///
-    /// Returns `false` if any wanted assertion could not be created, so the
-    /// daemon can treat a failed apply the same way it already treats a failed
-    /// `setSleepDisabled`. A failed create simply leaves that type unheld, so
-    /// the next apply retries it.
+    /// Returns `false` if any wanted assertion could not be created, or if the
+    /// clamshell setting could not be written. A failed create simply leaves
+    /// that type unheld, so the next apply retries it.
     ///
-    /// Creates run before releases so a transition never passes through a
-    /// moment with strictly less held than either the old or new set.
+    /// **The `Bool` reflects create and sleep-setting-write failures only.** A
+    /// failed *release* still returns `true`: the id is dropped regardless (see
+    /// the release loop), so there is nothing left to retry, and the residual
+    /// error leaves the Mac awake for longer than asked rather than sleeping
+    /// sooner — the direction that cannot lose a user's work. A caller must not
+    /// read `true` as "nothing is held that shouldn't be".
+    ///
+    /// Ordering: creates, then the setting write, then releases. Every
+    /// *strengthening* step therefore precedes every *weakening* one, so no
+    /// transition passes through a moment holding strictly less than both the
+    /// old plan and the new one.
+    ///
+    /// The setting is written on every apply, not only when it changes: it is
+    /// global state anyone with root can alter behind our back, and rewriting
+    /// it each tick is what repairs that. The assertion axis needs no such
+    /// repair — those handles are ours alone.
     @discardableResult
-    func apply(_ wanted: Set<PowerAssertionType>) -> Bool {
+    func apply(_ plan: PowerPlan) -> Bool {
         var succeeded = true
 
         for type in PowerAssertionType.allCases
-        where wanted.contains(type) && held[type] == nil {
-            if let id = backend.create(type: type, name: type.assertionName) {
+        where plan.assertions.contains(type) && held[type] == nil {
+            if let id = assertionBackend.create(type: type, name: type.assertionName) {
                 held[type] = id
                 powerLogger.log("Assertion held: \(type.ioKitType) (id \(id))")
             } else {
@@ -362,21 +443,33 @@ final class PowerAssertions {
             }
         }
 
+        if !sleepSetting.setSleepDisabled(plan.sleepDisabled) {
+            succeeded = false
+            powerLogger.error("SleepDisabled could not be set to \(plan.sleepDisabled)")
+        }
+
+        releaseAssertions(notIn: plan.assertions)
+
+        return succeeded
+    }
+
+    /// Drop every assertion, leaving the clamshell axis untouched. Only
+    /// `deinit` wants this; everything else converges through
+    /// `apply(.sleepAllowed)`, which puts *both* axes back.
+    func releaseAllAssertions() { releaseAssertions(notIn: []) }
+
+    private func releaseAssertions(notIn wanted: Set<PowerAssertionType>) {
         for type in PowerAssertionType.allCases where !wanted.contains(type) {
             // Remove first, then release. The stored id is cleared whether or
             // not the release succeeds, so nothing can ever release the same
             // id twice: `IOPMAssertionID` is an opaque handle and whether
             // `powerd` recycles them was never established, so a stale id is
             // treated as unsafe to reuse rather than merely useless.
+            // `PowerPlanHolderTests.testAFailedReleaseStillDropsTheIDForGood`
+            // pins that, because it is a decision and not an accident.
             guard let id = held.removeValue(forKey: type) else { continue }
-            let ok = backend.release(id)
+            let ok = assertionBackend.release(id)
             powerLogger.log("Assertion released: \(type.ioKitType) (id \(id)), success=\(ok)")
         }
-
-        return succeeded
     }
-
-    /// Drop everything. Routed through `apply` so the two teardown paths
-    /// cannot drift apart.
-    func releaseAll() { _ = apply([]) }
 }

@@ -1,4 +1,7 @@
 build/
+# SwiftPM's build directory, which shows up untracked in every `git status`
+# the moment anything runs `swift build`.
+.build/
 *.xcuserstate
 xcuserdata/
 DerivedData/

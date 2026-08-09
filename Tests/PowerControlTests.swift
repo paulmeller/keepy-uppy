@@ -99,10 +99,16 @@ final class ACPowerReadingTests: XCTestCase {
 // second power mechanism, so it lives in `Shared/` where this test host can
 // reach it — `Helper/`, where the daemon wires it up, cannot be imported here.
 //
-// Nothing below creates a real system assertion. A test that failed between
+// Nothing below touches the real machine. A test that failed between
 // `IOPMAssertionCreateWithName` and `IOPMAssertionRelease` would leave this
-// machine awake after the run, which is why `PowerAssertions` takes its IOKit
+// machine awake after the run, which is why `PowerPlanHolder` takes its IOKit
 // calls behind `PowerAssertionBackend` and every test here passes a fake.
+//
+// The same now goes double for the clamshell axis: `apply` writes both axes in
+// one call, so every holder test would otherwise reach
+// `IOPMSetSystemPowerSetting` — a global, root-only setting that survives
+// reboot. `SleepSettingBackend` is the seam that keeps it out of the suite, and
+// every holder here is constructed with a `RecordingSleepSetting`.
 
 /// The type list is a safety constraint, not an implementation detail, so it
 /// gets pinned rather than trusted.
@@ -275,13 +281,30 @@ private final class RecordingBackend: PowerAssertionBackend {
     /// Types whose `create` should fail, standing in for a `kIOReturn…` other
     /// than success.
     var failing: Set<PowerAssertionType> = []
+    /// Types whose `release` should fail. The real
+    /// `IOPMAssertionRelease` can return `kIOReturnNotFound` (and did, for a
+    /// stale id) — before this existed, `release` always returned `true`, so
+    /// the documented "the id is cleared whether or not the release succeeds"
+    /// decision was never once executed by a test.
+    var failingReleases: Set<PowerAssertionType> = []
     var namesSeen: [PowerAssertionType: String] = [:]
+    /// Which type each live id belongs to, so `failingReleases` can be
+    /// expressed per type even though `release` only ever sees an id.
+    private var typeByID: [IOPMAssertionID: PowerAssertionType] = [:]
 
     var createdIDs: [IOPMAssertionID] {
         events.compactMap { if case .created(_, let id) = $0 { return id } else { return nil } }
     }
+    /// Every id `PowerPlanHolder` handed to `release`, successful or not — so
+    /// a test can assert an id was never offered back a second time.
     var releasedIDs: [IOPMAssertionID] {
         events.compactMap { if case .released(let id) = $0 { return id } else { return nil } }
+    }
+
+    func id(of type: PowerAssertionType) -> IOPMAssertionID? {
+        events.compactMap {
+            if case .created(type, let id) = $0 { return id } else { return nil }
+        }.first
     }
 
     func create(type: PowerAssertionType, name: String) -> IOPMAssertionID? {
@@ -289,26 +312,53 @@ private final class RecordingBackend: PowerAssertionBackend {
         guard !failing.contains(type) else { return nil }
         let id = nextID
         nextID += 1
+        typeByID[id] = type
         events.append(.created(type, id))
         return id
     }
 
     func release(_ id: IOPMAssertionID) -> Bool {
         events.append(.released(id))
-        return true
+        guard let type = typeByID[id] else { return true }
+        return !failingReleases.contains(type)
     }
 }
 
+/// A `SleepSettingBackend` that records instead of writing the real,
+/// root-only, reboot-surviving `SleepDisabled`. Every holder test passes one:
+/// now that both axes travel together, *any* `apply` would otherwise reach
+/// `IOPMSetSystemPowerSetting` on the machine running the suite.
+private final class RecordingSleepSetting: SleepSettingBackend {
+    var writes: [Bool] = []
+    var shouldFail = false
+
+    var lastWrite: Bool? { writes.last }
+
+    func setSleepDisabled(_ disabled: Bool) -> Bool {
+        writes.append(disabled)
+        return !shouldFail
+    }
+}
+
+/// A plan that exercises the assertion axis alone. The clamshell axis is
+/// spelled out rather than defaulted, because "the axis you did not mention"
+/// is the exact mistake `PowerPlanHolder.apply` was reshaped to prevent.
+private func assertionsOnly(_ types: Set<PowerAssertionType>) -> PowerPlan {
+    PowerPlan(assertions: types, sleepDisabled: false)
+}
+
 /// The create/release bookkeeping — the part that leaks `IOPMAssertionID`s
-/// when it is wrong.
-final class PowerAssertionsHolderTests: XCTestCase {
+/// when it is wrong — and the two-axis apply that carries it.
+final class PowerPlanHolderTests: XCTestCase {
     private var backend = RecordingBackend()
-    private var holder: PowerAssertions!
+    private var sleepSetting = RecordingSleepSetting()
+    private var holder: PowerPlanHolder!
 
     override func setUp() {
         super.setUp()
         backend = RecordingBackend()
-        holder = PowerAssertions(backend: backend)
+        sleepSetting = RecordingSleepSetting()
+        holder = PowerPlanHolder(assertions: backend, sleepSetting: sleepSetting)
     }
 
     override func tearDown() {
@@ -321,10 +371,12 @@ final class PowerAssertionsHolderTests: XCTestCase {
     func testANewHolderHoldsNothing() {
         XCTAssertTrue(holder.heldTypes.isEmpty)
         XCTAssertTrue(backend.events.isEmpty)
+        XCTAssertTrue(sleepSetting.writes.isEmpty, "constructing a holder writes nothing")
     }
 
     func testApplyCreatesEachWantedTypeExactlyOnce() {
-        XCTAssertTrue(holder.apply([.preventIdleSystemSleep, .preventIdleDisplaySleep]))
+        XCTAssertTrue(holder.apply(
+            assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep])))
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventIdleDisplaySleep])
         XCTAssertEqual(backend.createdIDs.count, 2)
         XCTAssertEqual(Set(backend.createdIDs).count, 2, "distinct ids")
@@ -332,64 +384,74 @@ final class PowerAssertionsHolderTests: XCTestCase {
     }
 
     /// The refcount hazard, directly: however many sessions want a type, the
-    /// daemon holds one assertion. Re-applying the same set must be a no-op.
-    func testReapplyingTheSameSetCreatesNothingNew() {
-        holder.apply([.preventIdleSystemSleep])
-        for _ in 0..<10 { holder.apply([.preventIdleSystemSleep]) }
+    /// daemon holds one assertion. Re-applying the same plan must create
+    /// nothing new.
+    ///
+    /// The clamshell axis is deliberately *not* idempotent in the same way: it
+    /// is a global anyone with root can change behind our back, so it is
+    /// rewritten on every apply, and that is what repairs external tampering
+    /// on the next tick.
+    func testReapplyingTheSamePlanCreatesNothingNewButRewritesTheSetting() {
+        let plan = PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true)
+        holder.apply(plan)
+        for _ in 0..<10 { holder.apply(plan) }
         XCTAssertEqual(backend.createdIDs.count, 1)
         XCTAssertTrue(backend.releasedIDs.isEmpty)
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep])
+        XCTAssertEqual(sleepSetting.writes, Array(repeating: true, count: 11))
     }
 
     func testShrinkingReleasesOnlyTheDroppedType() {
-        holder.apply([.preventIdleSystemSleep, .preventIdleDisplaySleep])
-        let displayID = backend.events.compactMap { event -> IOPMAssertionID? in
-            if case .created(.preventIdleDisplaySleep, let id) = event { return id }
-            return nil
-        }.first
+        holder.apply(assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep]))
+        let displayID = backend.id(of: .preventIdleDisplaySleep)
         backend.events = []
 
-        holder.apply([.preventIdleSystemSleep])
+        holder.apply(assertionsOnly([.preventIdleSystemSleep]))
         XCTAssertEqual(backend.releasedIDs, [displayID!])
         XCTAssertTrue(backend.createdIDs.isEmpty, "the surviving assertion is not recreated")
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep])
     }
 
-    func testReleaseAllReleasesEverythingAndEmptiesTheHolder() {
-        holder.apply([.preventIdleSystemSleep, .preventIdleDisplaySleep])
+    func testApplyingTheEmptyPlanReleasesEverythingAndEmptiesTheHolder() {
+        holder.apply(PowerPlan(assertions: [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                               sleepDisabled: true))
         let created = backend.createdIDs
-        holder.releaseAll()
+        holder.apply(.sleepAllowed)
         XCTAssertEqual(Set(backend.releasedIDs), Set(created))
         XCTAssertTrue(holder.heldTypes.isEmpty)
+        XCTAssertEqual(sleepSetting.lastWrite, false, "the last session leaving restores sleep")
     }
 
     /// The no-leak property stated as one assertion: after converging back to
     /// nothing, every id ever created has been released exactly once.
     func testEveryCreatedAssertionIsReleasedExactlyOnceAcrossAChurnOfApplies() {
-        let sets: [Set<PowerAssertionType>] = [
-            [.preventIdleSystemSleep],
-            [.preventIdleSystemSleep, .preventIdleDisplaySleep],
-            [.preventIdleDisplaySleep],
-            [],
-            [.preventIdleSystemSleep, .preventIdleDisplaySleep],
-            [.preventIdleSystemSleep],
-            [],
+        let plans: [PowerPlan] = [
+            assertionsOnly([.preventIdleSystemSleep]),
+            PowerPlan(assertions: [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                      sleepDisabled: true),
+            assertionsOnly([.preventIdleDisplaySleep]),
+            .sleepAllowed,
+            assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep]),
+            PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true),
+            .sleepAllowed,
         ]
-        for wanted in sets { holder.apply(wanted) }
+        for plan in plans { holder.apply(plan) }
         XCTAssertTrue(holder.heldTypes.isEmpty)
         XCTAssertEqual(backend.createdIDs.sorted(), backend.releasedIDs.sorted())
         XCTAssertEqual(Set(backend.releasedIDs).count, backend.releasedIDs.count,
                        "no id released twice")
+        XCTAssertEqual(sleepSetting.lastWrite, false,
+                       "the clamshell axis came back down with the assertions")
     }
 
     /// A stale id must never be handed back to IOKit: whether `powerd`
     /// recycles `IOPMAssertionID`s was never established, so releasing one
     /// twice could in principle release a *different* assertion later.
-    func testAnIDIsNeverReleasedTwiceEvenWhenReleaseAllIsRepeated() {
-        holder.apply([.preventIdleSystemSleep])
-        holder.releaseAll()
-        holder.releaseAll()
-        holder.releaseAll()
+    func testAnIDIsNeverReleasedTwiceEvenWhenTheEmptyPlanIsRepeated() {
+        holder.apply(assertionsOnly([.preventIdleSystemSleep]))
+        holder.apply(.sleepAllowed)
+        holder.apply(.sleepAllowed)
+        holder.apply(.sleepAllowed)
         XCTAssertEqual(backend.releasedIDs.count, 1)
     }
 
@@ -397,22 +459,58 @@ final class PowerAssertionsHolderTests: XCTestCase {
     /// poison the other one — and the next apply retries it.
     func testAFailedCreateIsReportedAndRetriedOnTheNextApply() {
         backend.failing = [.preventIdleDisplaySleep]
-        XCTAssertFalse(holder.apply([.preventIdleSystemSleep, .preventIdleDisplaySleep]))
+        XCTAssertFalse(holder.apply(
+            assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep])))
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep],
                        "the one that worked is still held")
 
         backend.failing = []
-        XCTAssertTrue(holder.apply([.preventIdleSystemSleep, .preventIdleDisplaySleep]))
+        XCTAssertTrue(holder.apply(
+            assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep])))
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventIdleDisplaySleep])
         XCTAssertEqual(backend.createdIDs.count, 2, "the survivor was not recreated")
+    }
+
+    /// The documented decision, executed at last: *"The stored id is cleared
+    /// whether or not the release succeeds."*
+    ///
+    /// Until `RecordingBackend.failingReleases` existed, `release` always
+    /// returned `true`, so this branch never ran and inverting it — keeping the
+    /// id when the release fails — passed the whole suite. The decision is not
+    /// arbitrary: an `IOPMAssertionID` is an opaque handle, and whether
+    /// `powerd` recycles them was never established, so a failed release makes
+    /// the id *unsafe to reuse*, not merely useless. Retrying it could in
+    /// principle release somebody else's assertion later.
+    ///
+    /// The cost is accepted and bounded: a genuinely leaked assertion stays
+    /// held until the daemon exits, which keeps the Mac awake for longer than
+    /// asked — the wrong direction that cannot lose a user's work.
+    func testAFailedReleaseStillDropsTheIDForGood() {
+        backend.failingReleases = [.preventIdleDisplaySleep]
+        holder.apply(assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep]))
+        let displayID = backend.id(of: .preventIdleDisplaySleep)
+        XCTAssertNotNil(displayID)
+
+        XCTAssertTrue(holder.apply(assertionsOnly([.preventIdleSystemSleep])),
+                      "apply's Bool reports create failures, not release failures")
+        XCTAssertFalse(holder.heldTypes.contains(.preventIdleDisplaySleep),
+                       "the id is dropped even though IOKit refused the release")
+        XCTAssertEqual(backend.releasedIDs, [displayID!], "released once")
+
+        // …and never offered back to IOKit, however many times we converge.
+        holder.apply(.sleepAllowed)
+        holder.apply(assertionsOnly([.preventIdleSystemSleep, .preventIdleDisplaySleep]))
+        holder.apply(.sleepAllowed)
+        XCTAssertEqual(backend.releasedIDs.filter { $0 == displayID! }.count, 1,
+                       "a stale id must never be handed back to IOKit")
     }
 
     /// Creates run before releases, so a transition never passes through a
     /// moment holding less than either the old set or the new one.
     func testCreatesRunBeforeReleasesWithinOneApply() {
-        holder.apply([.preventIdleDisplaySleep])
+        holder.apply(assertionsOnly([.preventIdleDisplaySleep]))
         backend.events = []
-        holder.apply([.preventIdleSystemSleep])
+        holder.apply(assertionsOnly([.preventIdleSystemSleep]))
 
         guard backend.events.count == 2 else {
             return XCTFail("expected one create and one release, got \(backend.events)")
@@ -425,37 +523,91 @@ final class PowerAssertionsHolderTests: XCTestCase {
         }
     }
 
+    /// Every type's name, not just the first one: the name is the only thing
+    /// tying a live assertion back to this app in `pmset -g assertions`, and a
+    /// type added later must not be able to reach IOKit unnamed.
     func testTheHolderPassesTheHumanReadableNameThrough() {
-        holder.apply([.preventIdleSystemSleep])
-        XCTAssertEqual(backend.namesSeen[.preventIdleSystemSleep],
-                       PowerAssertionType.preventIdleSystemSleep.assertionName)
+        holder.apply(assertionsOnly(Set(PowerAssertionType.allCases)))
+        for type in PowerAssertionType.allCases {
+            XCTAssertEqual(backend.namesSeen[type], type.assertionName, type.rawValue)
+        }
+    }
+
+    // MARK: Both axes, one call
+
+    /// The seam itself. `apply` takes a whole `PowerPlan`, so the clamshell
+    /// axis cannot be left behind by a caller who reached for "the
+    /// assertions" — the shape that used to compile,
+    /// `holder.apply(plan.assertions)`, no longer type-checks.
+    func testApplyingAClamshellPlanWritesTheGlobalSettingToo() {
+        let plan = PowerPlan.reduce([.clamshell])
+        XCTAssertTrue(holder.apply(plan))
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep])
+        XCTAssertEqual(sleepSetting.writes, [true],
+                       "a clamshell session must reach the only mechanism that survives a lid close")
+    }
+
+    /// Both halves are reported through one `Bool`, so a daemon that already
+    /// treats a failed apply as a failure keeps doing so when it is the
+    /// root-only write that failed — the half that fails on *every*
+    /// unprivileged run.
+    func testAFailedSleepSettingWriteFailsTheApplyEvenThoughAssertionsWorked() {
+        sleepSetting.shouldFail = true
+        XCTAssertFalse(holder.apply(PowerPlan.reduce([.clamshell])))
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep],
+                       "defence in depth: idle sleep is still prevented")
     }
 
     /// Auto-release on process death is a safety net, not the plan: a holder
     /// that goes away while the process lives on still releases.
-    func testDeallocatingTheHolderReleasesWhatItHeld() {
+    ///
+    /// `deinit` touches the assertion axis only. It runs on whichever thread
+    /// drops the last reference, and `SleepDisabled` is a global, root-only,
+    /// reboot-surviving setting whose reconciliation is `DaemonRuntime.start`'s
+    /// converge-to-safe at launch — not an arbitrary thread at an arbitrary
+    /// moment.
+    func testDeallocatingTheHolderReleasesItsAssertionsAndOnlyThose() {
         let local = RecordingBackend()
-        var temporary: PowerAssertions? = PowerAssertions(backend: local)
-        temporary?.apply([.preventIdleSystemSleep, .preventIdleDisplaySleep])
+        let localSetting = RecordingSleepSetting()
+        var temporary: PowerPlanHolder? = PowerPlanHolder(assertions: local,
+                                                          sleepSetting: localSetting)
+        temporary?.apply(PowerPlan(assertions: [.preventIdleSystemSleep,
+                                                .preventIdleDisplaySleep],
+                                   sleepDisabled: true))
         XCTAssertTrue(local.releasedIDs.isEmpty)
+        XCTAssertEqual(localSetting.writes, [true])
 
         temporary = nil
         XCTAssertEqual(Set(local.releasedIDs), Set(local.createdIDs))
         XCTAssertEqual(local.releasedIDs.count, 2)
+        XCTAssertEqual(localSetting.writes, [true],
+                       "deinit does not write the global setting from an unknown thread")
     }
 
     /// End to end at the level the daemon will use: a session table's worth of
-    /// modes goes in, the right assertions come out, and the last session
-    /// leaving puts everything back.
+    /// modes goes in, the right assertions *and* the right clamshell setting
+    /// come out, and the last session leaving puts both back.
+    ///
+    /// The clamshell session is the point of the test. Written against
+    /// `plan.assertions` — which is how this read before `apply` took the whole
+    /// plan — every assertion below still passed while the one mechanism that
+    /// survives a lid close was never touched.
     func testTheReductionDrivesTheHolder() {
-        holder.apply(PowerPlan.reduce([.system, .systemAndDisplay]).assertions)
+        holder.apply(PowerPlan.reduce([.system, .systemAndDisplay]))
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventIdleDisplaySleep])
+        XCTAssertEqual(sleepSetting.lastWrite, false, "nobody asked for a shut lid yet")
 
-        holder.apply(PowerPlan.reduce([.system]).assertions)
+        holder.apply(PowerPlan.reduce([.system, .clamshell]))
         XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep])
+        XCTAssertEqual(sleepSetting.lastWrite, true)
 
-        holder.apply(PowerPlan.reduce([WakeMode]()).assertions)
+        holder.apply(PowerPlan.reduce([.system]))
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep])
+        XCTAssertEqual(sleepSetting.lastWrite, false, "the last clamshell session ended")
+
+        holder.apply(PowerPlan.reduce([WakeMode]()))
         XCTAssertTrue(holder.heldTypes.isEmpty)
         XCTAssertEqual(backend.createdIDs.sorted(), backend.releasedIDs.sorted())
+        XCTAssertEqual(sleepSetting.lastWrite, false)
     }
 }
