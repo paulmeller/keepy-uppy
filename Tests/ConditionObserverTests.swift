@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import KeepyUppy
 
 final class CPUBusyWindowTests: XCTestCase {
@@ -359,6 +360,61 @@ final class SystemProcessRunningObserverTests: XCTestCase {
         try XCTSkipIf(geteuid() == 0, "running as root, so root's processes legitimately are ours")
         XCTAssertEqual(SystemProcessRunningObserver().isRunning(processName: "launchd"), .absent,
                        "pid 1 runs as uid 0 and must be invisible to a non-root user's observer")
+    }
+}
+
+/// The live frontmost-app observer, against whatever is actually in front of
+/// the machine running the suite.
+///
+/// Every test here **skips** rather than fails when there is no frontmost app,
+/// and that is not defensiveness — "no app is in front" is exactly the
+/// `.undetermined` case this observer exists to report (a locked screen, the
+/// login window, another user switched in, a CI runner with no session). A
+/// test that failed there would be asserting a fact about the machine running
+/// it rather than about the observer.
+///
+/// What is *not* covered here, said plainly: the `.undetermined` paths
+/// themselves. Both of them — `frontmostApplication` nil and
+/// `runningApplications` empty — are properties of Launch Services that this
+/// process cannot make happen on demand without locking the screen, so they
+/// are verified by reading, and by the fact that `triggersToFire` treats the
+/// reading and not the observer as the source of truth
+/// (`testFrontmostAppUndeterminedNeverFires`).
+final class SystemFrontmostAppObserverTests: XCTestCase {
+    /// The bundle identifier of whatever is in front, or a skip.
+    private func frontmostBundleID() throws -> String {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else {
+            throw XCTSkip("no app is frontmost here, which is the .undetermined case, not a failure")
+        }
+        return bundleID
+    }
+
+    func testTheAppThatIsActuallyInFrontReadsPresent() throws {
+        let frontmost = try frontmostBundleID()
+        XCTAssertEqual(SystemFrontmostAppObserver().isFrontmost(bundleID: frontmost), .present)
+    }
+
+    /// The distinction the whole condition rests on: running is not frontmost.
+    /// Exactly one app can be in front, so every *other* running app must read
+    /// `.absent` from the same observer, in the same instant.
+    func testAnAppThatIsRunningButNotInFrontReadsAbsent() throws {
+        let frontmost = try frontmostBundleID()
+        let others = NSWorkspace.shared.runningApplications
+            .compactMap(\.bundleIdentifier)
+            .filter { $0 != frontmost }
+        guard let other = others.first else {
+            throw XCTSkip("nothing else with a bundle identifier is running here")
+        }
+        XCTAssertEqual(SystemFrontmostAppObserver().isFrontmost(bundleID: other), .absent,
+                       "\(other) is running, but \(frontmost) is the one in front")
+    }
+
+    func testAnAppThatIsNotRunningAtAllReadsAbsent() throws {
+        _ = try frontmostBundleID()
+        XCTAssertEqual(
+            SystemFrontmostAppObserver().isFrontmost(bundleID: "au.com.workwireless.definitely-not-running"),
+            .absent,
+            "a successful read that found a different app in front is a confident negative")
     }
 }
 

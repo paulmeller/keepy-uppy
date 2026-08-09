@@ -73,6 +73,20 @@ protocol AppRunningObserving {
     func isRunning(bundleID: String) -> ConditionReading
 }
 
+/// Whether a named app is the one the user is *looking at*, which is a
+/// strictly stronger fact than `AppRunningObserving`'s and a much more
+/// fragile one — it changes every time a window is switched.
+///
+/// That fragility is why nothing binds a session's lifetime to it (see
+/// `TriggerConditionKind.bindsSessionLifetime`), and it is also why the
+/// `.undetermined` case here is not a formality. `frontmostApplication` is
+/// `nil` whenever no app owns the front: the screen is locked, the login
+/// window is up, another user is switched in. None of those means "you
+/// switched away from Xcode", and none of them may start a session.
+protocol FrontmostAppObserving {
+    func isFrontmost(bundleID: String) -> ConditionReading
+}
+
 protocol DisplayObserving {
     func hasExternalDisplay() -> ConditionReading
 }
@@ -165,6 +179,7 @@ struct ObserverSet {
     var appRunning: AppRunningObserving
     var display: DisplayObserving
     var processRunning: ProcessRunningObserving
+    var frontmostApp: FrontmostAppObserving
     var acPower: ConditionReading
     var cpuBusy: CPUBusyReading
 }

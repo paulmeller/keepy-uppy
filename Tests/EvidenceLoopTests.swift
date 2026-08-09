@@ -22,6 +22,15 @@ final class EvidenceLoopTests: XCTestCase {
         init(running: Set<String>) { self.reading = running.isEmpty ? .absent : .present }
         func isRunning(processName: String) -> ConditionReading { reading }
     }
+    /// No `SessionKind` is bound to the frontmost app — deliberately, see
+    /// `TriggerConditionKind.bindsSessionLifetime` — so nothing this file
+    /// tests can consult it. It is here to satisfy `ObserverSet`, which gives
+    /// no member a default, and it answers `.undetermined` for the same
+    /// reason `acPower` does below: if a session kind ever does start reading
+    /// it, filler that cannot end a session is the filler to have.
+    struct FakeFrontmostApp: FrontmostAppObserving {
+        func isFrontmost(bundleID: String) -> ConditionReading { .undetermined }
+    }
 
     private func session(_ kind: SessionKind) -> Session {
         Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"),
@@ -51,6 +60,7 @@ final class EvidenceLoopTests: XCTestCase {
                       observers: ObserverSet(appRunning: FakeAppRunning(app),
                                              display: FakeDisplay(display),
                                              processRunning: FakeProcessRunning(process),
+                                             frontmostApp: FakeFrontmostApp(),
                                              acPower: .undetermined,
                                              cpuBusy: busy),
                       evidence: &evidence, now: now ?? t0)

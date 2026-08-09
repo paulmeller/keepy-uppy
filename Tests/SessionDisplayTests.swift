@@ -89,7 +89,8 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionTitle(.externalDisplayConnected), "When an external display connects")
         XCTAssertEqual(triggerConditionTitle(.acPowerConnected), "When power is connected")
         for condition: TriggerCondition in [.externalDisplayConnected, .acPowerConnected,
-                                            .appLaunched(bundleID: "com.apple.dt.Xcode")] {
+                                            .appLaunched(bundleID: "com.apple.dt.Xcode"),
+                                            .appFrontmost(bundleID: "com.apple.dt.Xcode")] {
             let title = triggerConditionTitle(condition).lowercased()
             XCTAssertTrue(title.hasPrefix("when "), "\(title) should describe an event")
             XCTAssertFalse(title.contains("while "), "\(title) must not imply a condition-bound lifetime")
@@ -289,6 +290,19 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(triggerConditionKindLabel(.externalDisplayConnected), "An external display connects")
         XCTAssertEqual(triggerConditionKindLabel(.acPowerConnected), "Power is connected")
         XCTAssertEqual(triggerConditionKindLabel(.processRunning), "A process is running")
+        XCTAssertEqual(triggerConditionKindLabel(.appFrontmost), "An app comes to the front")
+    }
+
+    /// The two app conditions sit next to each other in one picker, so their
+    /// labels and their titles have to be tellable apart at a glance — a user
+    /// choosing between "An app launches" and "An app comes to the front" is
+    /// choosing between two genuinely different triggers.
+    func testTheTwoAppConditionsReadDifferentlyFromEachOther() {
+        XCTAssertNotEqual(triggerConditionKindLabel(.appLaunched),
+                          triggerConditionKindLabel(.appFrontmost))
+        let title = triggerConditionTitle(.appFrontmost(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertTrue(title.hasSuffix(" comes to the front"), title)
+        XCTAssertNotEqual(title, triggerConditionTitle(.appLaunched(bundleID: "com.apple.dt.Xcode")))
     }
 
     /// Nothing to report is reported as nothing: the pane must not carry a

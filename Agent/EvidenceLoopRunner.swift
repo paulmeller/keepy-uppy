@@ -27,6 +27,11 @@ final class EvidenceLoopRunner {
     /// call, which by contract is `.undetermined` forever. One instance, held
     /// for this runner's whole life, sampled exactly once per tick below.
     private let cpuObserver: CPUBusyObserving
+    /// A plain observer rather than a factory: it holds no state and caches
+    /// nothing, because `NSWorkspace.frontmostApplication` is a cheap
+    /// property read rather than a table enumeration. There is nothing whose
+    /// lifetime has to be the tick.
+    private let frontmostApp: FrontmostAppObserving
     private var evidence = SessionEvidence()
     private var timer: Timer?
     /// Snapshot bookkeeping for the session-completion action, including the
@@ -41,12 +46,14 @@ final class EvidenceLoopRunner {
          appRunning: AppRunningObserving = SystemAppRunningObserver(),
          display: DisplayObserving = SystemDisplayObserver(),
          processRunning: @escaping () -> ProcessRunningObserving = { SystemProcessRunningObserver() },
-         cpuObserver: CPUBusyObserving = SystemCPUBusyObserver()) {
+         cpuObserver: CPUBusyObserving = SystemCPUBusyObserver(),
+         frontmostApp: FrontmostAppObserving = SystemFrontmostAppObserver()) {
         self.connection = connection
         self.appRunning = appRunning
         self.display = display
         self.makeProcessRunning = processRunning
         self.cpuObserver = cpuObserver
+        self.frontmostApp = frontmostApp
     }
 
     /// The timer fires every 5s and spawns a `Task` per fire, but `tick()` is
@@ -108,6 +115,7 @@ final class EvidenceLoopRunner {
         let observers = ObserverSet(appRunning: appRunning,
                                     display: display,
                                     processRunning: processRunning,
+                                    frontmostApp: frontmostApp,
                                     acPower: PowerControl.batteryState().source.acPowerReading,
                                     cpuBusy: cpuObserver.currentBusy())
 

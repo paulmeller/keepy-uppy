@@ -90,6 +90,7 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
     case .externalDisplayConnected: return "An external display connects"
     case .acPowerConnected: return "Power is connected"
     case .processRunning: return "A process is running"
+    case .appFrontmost: return "An app comes to the front"
     }
 }
 
@@ -114,6 +115,7 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
     case .externalDisplayConnected: return "When an external display connects"
     case .acPowerConnected: return "When power is connected"
     case .processRunning(let processName): return "While \(processName) is running"
+    case .appFrontmost(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) comes to the front"
     }
 }
 
@@ -139,7 +141,7 @@ func triggerEffectSubtitle(_ rule: TriggerRule) -> String {
 /// row that quietly misdescribes what the daemon will do.
 func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
     switch condition {
-    case .appLaunched, .externalDisplayConnected, .acPowerConnected:
+    case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost:
         return nil
     case .processRunning(let processName):
         return "Keeps this Mac awake until \(processName) exits"
@@ -156,7 +158,7 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
 /// subtitle only ever describes a saved rule.
 func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
     switch condition {
-    case .appLaunched, .externalDisplayConnected, .acPowerConnected:
+    case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost:
         return nil
     case .processRunning(let processName):
         let subject = processName.isEmpty ? "the process" : processName

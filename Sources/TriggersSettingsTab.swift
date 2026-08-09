@@ -291,7 +291,7 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
-                if conditionKind == .appLaunched {
+                if inputField == .app {
                     // Typing a reverse-DNS bundle identifier from memory is a
                     // developer's chore, not a user's. Picking the app gets
                     // the identifier exactly right, and shows a name back.
@@ -321,7 +321,7 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
-                if conditionKind == .processRunning {
+                if inputField == .process {
                     LabeledContent("Process name") {
                         TextField("claude", text: $processName)
                             .textFieldStyle(.roundedBorder)
@@ -393,9 +393,30 @@ private struct AddTriggerSheet: View {
         .frame(width: 460)
     }
 
+    /// Which input a condition needs filling in, so the sheet shows exactly
+    /// that one.
+    ///
+    /// An exhaustive `switch` rather than the chain of `conditionKind == …`
+    /// this replaced, for the reason `TriggerConditionKind.bindsSessionLifetime`
+    /// is one: a new condition must *state* which field it wants. A chain of
+    /// equality tests answers "none" on its author's behalf, silently, and the
+    /// result is a sheet whose Add button is enabled with nothing filled in.
+    private enum InputField { case app, process, none }
+
+    private var inputField: InputField {
+        switch conditionKind {
+        // Both app conditions name an app by bundle identifier and are picked
+        // the same way; `.appFrontmost` is a stronger question about the same
+        // subject, not a different one.
+        case .appLaunched, .appFrontmost: return .app
+        case .processRunning: return .process
+        case .externalDisplayConnected, .acPowerConnected: return .none
+        }
+    }
+
     private var isValid: Bool {
         switch conditionKind {
-        case .appLaunched: return !bundleID.isEmpty
+        case .appLaunched, .appFrontmost: return !bundleID.isEmpty
         case .processRunning:
             return !processName.isEmpty && TriggerCondition.processNameProblem(processName) == nil
         case .externalDisplayConnected, .acPowerConnected: return true
@@ -408,6 +429,7 @@ private struct AddTriggerSheet: View {
         case .externalDisplayConnected: return .externalDisplayConnected
         case .acPowerConnected: return .acPowerConnected
         case .processRunning: return .processRunning(processName: processName)
+        case .appFrontmost: return .appFrontmost(bundleID: bundleID)
         }
     }
 
@@ -418,7 +440,10 @@ private struct AddTriggerSheet: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
-        panel.message = "Choose the app whose running state should keep your Mac awake."
+        // Deliberately not "whose running state…": the same picker now serves
+        // `.appFrontmost`, where the fact being watched is which app is in
+        // front rather than whether it is running at all.
+        panel.message = "Choose the app this trigger should watch."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let bundle = Bundle(url: url), let identifier = bundle.bundleIdentifier else {
             // Returning silently here left the sheet reading "None chosen"

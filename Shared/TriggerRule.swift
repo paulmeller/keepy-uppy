@@ -15,6 +15,11 @@ enum TriggerCondition: Codable, Equatable {
     /// `codex` are the motivating case. The one condition that currently binds
     /// its session's lifetime (`TriggerConditionKind.bindsSessionLifetime`).
     case processRunning(processName: String)
+    /// The app is the one in front — not merely running, which
+    /// `.appLaunched` already covers. Deliberately a *start* trigger with no
+    /// lifetime binding; see `TriggerConditionKind.bindsSessionLifetime` for
+    /// why "while Zoom is frontmost" is not a session anybody would want.
+    case appFrontmost(bundleID: String)
 
     /// Why a `.processRunning` name can never match anything, or `nil` if it
     /// can. Lives here rather than inside the Add-trigger sheet so it is
@@ -60,6 +65,7 @@ enum TriggerCondition: Codable, Equatable {
 /// user actually typed.
 enum TriggerConditionKind: String, CaseIterable, Identifiable {
     case appLaunched, externalDisplayConnected, acPowerConnected, processRunning
+    case appFrontmost
 
     var id: String { rawValue }
 
@@ -97,9 +103,18 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     /// skip-and-preserve machinery does not catch that, because nothing
     /// failed. Making the change undecodable to older builds is what routes it
     /// through the machinery that does.
+    /// `.appFrontmost` answers `false`, and it is the first of the six to be
+    /// asked the question this comment was written for. "While Zoom is
+    /// frontmost" sounds coherent and is not: frontmost changes every time a
+    /// window is switched, so with a 5s tick and
+    /// `SessionEvidence.negativesBeforeEnding == 2`, glancing at a browser for
+    /// eleven seconds would end the session the user was relying on. The
+    /// debounce that would fix it is measured in minutes, and is a different
+    /// feature ("while I have been using this app recently"). The durable
+    /// version already exists and is `.whileAppRunning`.
     var bindsSessionLifetime: Bool {
         switch self {
-        case .appLaunched, .externalDisplayConnected, .acPowerConnected: return false
+        case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost: return false
         case .processRunning: return true
         }
     }
@@ -113,6 +128,7 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
         case .externalDisplayConnected: return .externalDisplayConnected
         case .acPowerConnected: return .acPowerConnected
         case .processRunning: return .processRunning(processName: "claude")
+        case .appFrontmost: return .appFrontmost(bundleID: "com.apple.dt.Xcode")
         }
     }
 }
@@ -125,6 +141,7 @@ extension TriggerCondition {
         case .externalDisplayConnected: return .externalDisplayConnected
         case .acPowerConnected: return .acPowerConnected
         case .processRunning: return .processRunning
+        case .appFrontmost: return .appFrontmost
         }
     }
 
@@ -141,7 +158,7 @@ extension TriggerCondition {
     /// each used to do.
     var boundSessionKind: SessionKind? {
         switch self {
-        case .appLaunched, .externalDisplayConnected, .acPowerConnected:
+        case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost:
             return nil
         case .processRunning(let processName):
             return .whileProcessRunning(processName: processName)
@@ -530,6 +547,8 @@ func triggersToFire(
             return observers.acPower.isConfidentlyPresent
         case .processRunning(let processName):
             return observers.processRunning.isRunning(processName: processName).isConfidentlyPresent
+        case .appFrontmost(let bundleID):
+            return observers.frontmostApp.isFrontmost(bundleID: bundleID).isConfidentlyPresent
         }
     }
 }

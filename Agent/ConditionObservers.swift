@@ -52,6 +52,34 @@ struct SystemAppRunningObserver: AppRunningObserving {
     }
 }
 
+/// The app the user is actually looking at.
+///
+/// Two separate reads can fail here, and both of them mean "I could not
+/// tell" rather than "you switched away":
+///
+/// * **`frontmostApplication` is `nil`.** This is the one that matters, and
+///   it is not a theoretical failure mode: the screen being locked, the
+///   login window being up, or another user being switched in all produce
+///   `nil` while the app in question is still exactly where it was. Reading
+///   that as `.absent` would let a locked screen answer a question about
+///   window order.
+/// * **`runningApplications` is empty.** The same guard, and the same
+///   argument, as `SystemAppRunningObserver` above: that list always
+///   contains at least this process, so empty is Launch Services failing to
+///   answer rather than a Mac with nothing running.
+///
+/// A frontmost app that exists and is a *different* one is `.absent`,
+/// including one with no bundle identifier at all — an app that has no
+/// identifier is definitely not the identifier the rule named.
+struct SystemFrontmostAppObserver: FrontmostAppObserving {
+    func isFrontmost(bundleID: String) -> ConditionReading {
+        let workspace = NSWorkspace.shared
+        guard !workspace.runningApplications.isEmpty else { return .undetermined }
+        guard let frontmost = workspace.frontmostApplication else { return .undetermined }
+        return ConditionReading(frontmost.bundleIdentifier == bundleID)
+    }
+}
+
 struct SystemDisplayObserver: DisplayObserving {
     func hasExternalDisplay() -> ConditionReading {
         // Built-in display, if present, is always id 0 on a MacBook; any

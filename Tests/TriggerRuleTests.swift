@@ -35,6 +35,18 @@ final class TriggerRuleTests: XCTestCase {
             reading ?? ConditionReading(running.contains(processName))
         }
     }
+    /// `frontmost` is deliberately an `Optional`, and `nil` means `.absent`
+    /// rather than `.undetermined`: "no app is in front" is not a state the
+    /// *matching* can produce — only the live observer's failed read is, and
+    /// that is what `reading` is for. A fake that conflated the two would let
+    /// a call site testing for "not absent" pass.
+    struct FakeFrontmostApp: FrontmostAppObserving {
+        let frontmost: String?
+        var reading: ConditionReading? = nil
+        func isFrontmost(bundleID: String) -> ConditionReading {
+            reading ?? ConditionReading(frontmost == bundleID)
+        }
+    }
 
     private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
         TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
@@ -52,14 +64,15 @@ final class TriggerRuleTests: XCTestCase {
                       app: FakeAppRunning = FakeAppRunning(running: []),
                       display: FakeDisplay = FakeDisplay(external: false),
                       process: FakeProcessRunning = FakeProcessRunning(running: []),
+                      frontmost: FakeFrontmostApp = FakeFrontmostApp(frontmost: nil),
                       acPower: ConditionReading = .absent) -> [TriggerRule] {
         triggersToFire(rules, activeSessions: activeSessions,
                        // No trigger condition consults the CPU sample, so this
                        // is filler — and `.undetermined` is the filler that
                        // cannot fire anything if one ever starts to.
                        observers: ObserverSet(appRunning: app, display: display,
-                                              processRunning: process, acPower: acPower,
-                                              cpuBusy: .undetermined))
+                                              processRunning: process, frontmostApp: frontmost,
+                                              acPower: acPower, cpuBusy: .undetermined))
     }
 
     func testDisabledRuleNeverFires() {
@@ -90,6 +103,36 @@ final class TriggerRuleTests: XCTestCase {
     func testProcessRunningDoesNotFireWhenNotRunning() {
         let r = rule(.processRunning(processName: "claude"))
         XCTAssertTrue(fire([r]).isEmpty)
+    }
+
+    func testFrontmostAppFiresWhenItIsFrontmost() {
+        let r = rule(.appFrontmost(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertEqual(fire([r], frontmost: FakeFrontmostApp(frontmost: "com.apple.dt.Xcode")).map(\.id),
+                       [r.id])
+    }
+
+    /// The whole difference between this condition and `.appLaunched`. An app
+    /// that is running but behind something else must not fire it — otherwise
+    /// the two conditions are one condition with two names, and the picker
+    /// offers a choice that makes no difference.
+    func testFrontmostAppDoesNotFireWhenItIsMerelyRunning() {
+        let r = rule(.appFrontmost(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertTrue(fire([r],
+                           app: FakeAppRunning(running: ["com.apple.dt.Xcode"]),
+                           frontmost: FakeFrontmostApp(frontmost: "com.apple.Safari")).isEmpty,
+                      "Xcode is running, but Safari is the app in front")
+    }
+
+    /// The safety half, named for this condition specifically because its
+    /// `.undetermined` is the most reachable of the three Plan 5 adds: a
+    /// locked screen, the login window, and fast user switching all leave
+    /// `NSWorkspace.frontmostApplication` nil while the app is exactly where
+    /// it was. None of those is "Xcode came to the front".
+    func testFrontmostAppUndeterminedNeverFires() {
+        let r = rule(.appFrontmost(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertTrue(fire([r], frontmost: FakeFrontmostApp(frontmost: "com.apple.dt.Xcode",
+                                                            reading: .undetermined)).isEmpty,
+                      "the app really is in front, but the observer could not tell — so it must not fire")
     }
 
     /// The most important test in this file: a trigger already represented
@@ -160,6 +203,11 @@ final class TriggerRuleTests: XCTestCase {
         let powerRule = rule(.acPowerConnected)
         XCTAssertTrue(fire([powerRule], acPower: .undetermined).isEmpty,
                       "IOKit declining to name the power source is not 'AC connected'")
+
+        let frontmostRule = rule(.appFrontmost(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertTrue(fire([frontmostRule],
+                           frontmost: FakeFrontmostApp(frontmost: nil, reading: .undetermined)).isEmpty,
+                      "a locked screen has no frontmost app, and that is not 'Xcode came to the front'")
     }
 
     /// The reading, not the fake's backing set, is what decides — proving the
@@ -200,6 +248,7 @@ final class TriggerRuleTests: XCTestCase {
         ObserverSet(appRunning: FakeAppRunning(running: [], reading: .present),
                     display: FakeDisplay(external: false, reading: .present),
                     processRunning: FakeProcessRunning(running: [], reading: .present),
+                    frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .present),
                     acPower: .present,
                     // No trigger condition consults the CPU sample today;
                     // `.busy(fraction: 1)` is that reading's analogue of
@@ -212,6 +261,7 @@ final class TriggerRuleTests: XCTestCase {
         ObserverSet(appRunning: FakeAppRunning(running: [], reading: .undetermined),
                     display: FakeDisplay(external: false, reading: .undetermined),
                     processRunning: FakeProcessRunning(running: [], reading: .undetermined),
+                    frontmostApp: FakeFrontmostApp(frontmost: nil, reading: .undetermined),
                     acPower: .undetermined,
                     cpuBusy: .undetermined)
     }
@@ -743,6 +793,17 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertFalse(TriggerConditionKind.appLaunched.bindsSessionLifetime)
         XCTAssertFalse(TriggerConditionKind.externalDisplayConnected.bindsSessionLifetime)
         XCTAssertFalse(TriggerConditionKind.acPowerConnected.bindsSessionLifetime)
+    }
+
+    /// Task 6's design decision, pinned rather than left in a comment. "While
+    /// this app is frontmost" is a session that ends because you glanced at a
+    /// browser: the tick is 5s and two confident negatives end a session, so
+    /// eleven seconds in another window would stop it. `.whileAppRunning` is
+    /// the durable version and already exists. A later change of heart here
+    /// has to turn this red first.
+    func testFrontmostAppDeliberatelyDoesNotBindTheSessionsLifetime() {
+        XCTAssertFalse(TriggerConditionKind.appFrontmost.bindsSessionLifetime)
+        XCTAssertNil(TriggerCondition.appFrontmost(bundleID: "com.apple.dt.Xcode").boundSessionKind)
     }
 
     /// The table restated as the behaviour it drives: whatever
