@@ -33,6 +33,14 @@ func remainingTimeText(for session: Session, now: Date) -> String {
     }
 }
 
+/// **Currently unreachable from the app.** Nothing outside the tests calls
+/// this: the menu rebuild replaced the row it used to render
+/// ("Indefinite — Started manually — Stop") with `menuStopLabel`, and the
+/// automatic case is served by `menuAutomaticSuffix` below — which has a
+/// reachability problem of its own, documented there. Kept, not deleted,
+/// because Plan 5 (trigger expansion) is expected to want exactly this string
+/// back; the note is here so a reader does not take its existence as evidence
+/// that anything shows it today.
 func originText(for session: Session) -> String {
     session.origin == .trigger ? "Started automatically" : "Started manually"
 }
@@ -237,6 +245,21 @@ func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> St
 /// Origin earns a mention only when it is surprising. "Started manually" on a
 /// session you started by hand is noise; "started automatically" on one that
 /// appeared by itself is the whole story.
+///
+/// **It never fires today, on two independent counts, and neither is a bug in
+/// this function.** `MenuContent` appends it only to `mine` — sessions owned by
+/// `app-<uid>` — while the only thing that produces `origin == .trigger` is the
+/// agent, and the daemon stamps `owner` from the accepting listener's role, so
+/// a trigger session is owned by `agent-<uid>` and lands in `others`. Those
+/// rows render `menuForeignSessionLabel`, which has no suffix at all. So an
+/// automatic session reads `Indefinite — started elsewhere`, exactly like the
+/// CLI's or another user's.
+///
+/// Kept rather than deleted: a user being unable to tell an automatic session
+/// from a foreign one is a real product gap, and closing it is Plan 5's
+/// (trigger expansion), which will want this string. The note exists so the
+/// next reader does not conclude from the code that the tag already works —
+/// `SessionDisplayTests` covers the function, not its reachability.
 func menuAutomaticSuffix(for session: Session) -> String {
     session.origin == .trigger ? " (started automatically)" : ""
 }
@@ -389,9 +412,9 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
 
 /// Whose sessions this actually governs, and **when**. Three of the four
 /// clients ignore it: `keepy-uppy on` chooses per invocation with a flag, and a
-/// trigger-started session is built by `Agent/EvidenceLoopRunner.swift` with no
-/// `wakeMode:` at all, so it is `.clamshell` whatever is stored here. Said as
-/// the positive fact about triggers, which stays true under the union.
+/// trigger-started session is built by `Agent/EvidenceLoopRunner.swift` with an
+/// explicit `wakeMode: .clamshell`, so it is lid-safe whatever is stored here.
+/// Said as the positive fact about triggers, which stays true under the union.
 ///
 /// "from now on" is not filler. A session's mode is fixed when it starts —
 /// nothing here reaches a running one — and someone who switches this picker to

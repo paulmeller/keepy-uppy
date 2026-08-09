@@ -43,10 +43,21 @@ observable from any test.
 - [ ] Settings → Safety: lowering the battery cutoff and confirming (via `keepy-uppy status`) the daemon picks it up within ~5s without restarting anything
 
 **Settings → Triggers:**
-- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and is tagged "Started automatically" in the menu, and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
+
+A trigger session is **not** tagged as automatic in the menu, and these items
+are written to match. The daemon stamps `owner` from the accepting listener's
+role, so an agent-started session is owned by `agent-<uid>`, not `app-<uid>` —
+it lands in `MenuContent`'s `others` list, which renders
+`menuForeignSessionLabel` and never `menuAutomaticSuffix`. So it reads
+`… — started elsewhere`, indistinguishable from the CLI's or another user's
+session. That a user cannot tell an automatic session from a foreign one is a
+real gap, and it belongs to Plan 5 (trigger expansion); it is not something to
+fix by editing this list.
+
+- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and shows up in the menu as an unclickable row reading `Indefinite — started elsewhere` (or `Xh Ym left — started elsewhere` for a timed `defaultKind`), and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
 - [ ] A trigger does not fire again while its session is still active (leave the triggering app running, confirm no duplicate session appears)
 - [ ] Triggering a real safety stop (or lowering the thermal sensitivity to `cautious` under load) suppresses a trigger from firing again until the configured cooldown elapses, while a manual "Start…" click still works immediately
-- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s tagged "Started automatically" and the duration picker plays no part; quitting `claude` ends the session within ~10s (two 5s ticks — `sessionsToEnd` needs `SessionEvidence.negativesBeforeEnding` consecutive confident negatives, so a single bad reading can never end a session)
+- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s and appears in the menu as `While claude is running — started elsewhere` (unclickable and untagged, for the reason above), and that the duration picker plays no part; quitting `claude` ends the session within ~10s (two 5s ticks — `sessionsToEnd` needs `SessionEvidence.negativesBeforeEnding` consecutive confident negatives, so a single bad reading can never end a session)
 - [ ] The Cursor CLI and Pi presets show the generic-name collision warning; the other three presets don't
 - [ ] Typing a *path* (`/opt/homebrew/bin/claude`) rather than a name into the process field is rejected in the sheet with an explanation, rather than being accepted as a rule that could never fire
 - [ ] A process-running rule for a `node`/`bun`-wrapped CLI (`claude`, installed by npm as a `claude` symlink to `claude.exe`) really does fire — this is the case `p_comm` matching alone could not see, since the kernel records `claude.exe` there and only `argv[0]` ever says `claude`
@@ -71,7 +82,9 @@ observable from any test.
 - [ ] `keepy-uppy setup` registers both background items; approving once is enough
 - [ ] `keepy-uppy on --for 30s` starts a session that ends on its own after 30 seconds
 - [ ] `keepy-uppy on --while-app <bundle id>` ends within ~5s of quitting that app
-- [ ] External `sudo pmset -a disablesleep 1/0` is reflected in the icon within 30 seconds
+- [ ] An external `sudo pmset -a disablesleep 1` does **not** stick: the daemon rewrites the setting from its own session table on every 5s tick, so with no session live `pmset -g | grep -i sleepdisabled` is back to `0` within ~5s and the icon does not latch on. The converse too — clearing it by hand while a default-mode session runs is undone on the next tick, and the session goes on being honoured
+- [ ] `keepy-uppy reset` with a default-mode session live prints how many sessions it ended, and `pmset -g | grep -i sleepdisabled` reads `0` **before** anything is unregistered — the eviction must never be the last thing that touches a Mac still being held awake, because it removes the only process that could ever clear that setting and the setting survives a reboot
+- [ ] `keepy-uppy reset` on a machine with no daemon registered still unregisters cleanly, exits 0, and prints the "did not answer" note on stderr rather than refusing — that half-installed state is what the verb is for
 - [ ] Killing the agent process (Activity Monitor) does not end `--for`/indefinite sessions, but does end `--while-app` ones
 - [ ] Deleting the app while a session is active restores sleep
 - [ ] Two terminals opening 25 sessions each are individually capped at 20 and rate-limited within each connection

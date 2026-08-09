@@ -117,6 +117,9 @@ when the Mac is open in front of you and you'd rather it behaved normally in
 every other respect. Settings → General picks the mode for sessions you start
 from the menu bar.
 
+*Both flags and that picker are on `main` only — the current download predates
+them. See [Status](#status).*
+
 CLI sessions outlive the shell that started them. Menu-bar sessions end when
 you quit the app. That's deliberate — one is for automation, the other is for
 you.
@@ -171,7 +174,7 @@ another user's.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **362 unit tests**.
+by **370 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -197,10 +200,20 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed, notarized, 362 tests, and a privilege
-boundary that's been through three adversarial review passes. What it hasn't
-had yet is months on other people's hardware. If something misbehaves, an issue
-with the daemon log is genuinely useful:
+**v0.1 — new, and moving fast.** Signed and notarized, 370 tests on `main`, and
+a privilege boundary that's been through three adversarial review passes. What
+it hasn't had yet is months on other people's hardware — and two claims above
+are still unverified there specifically: closed-lid behaviour on real hardware
+over a long job, and the thermal and battery guards actually firing. Both are
+designed for and covered as pure logic; neither has been watched happen on a
+machine in a bag.
+
+The build on [Releases](../../releases) is **v0.1.0**, cut before wake modes
+existed — no `--display-may-sleep`, no `--keep-display-awake`, no picker in
+Settings. Those are on `main` and haven't been notarized into a release yet, so
+build it yourself if you want them now.
+
+If something misbehaves, an issue with the daemon log is genuinely useful:
 
 ```sh
 log show --predicate 'subsystem BEGINSWITH "au.com.workwireless.keepy-uppy"'

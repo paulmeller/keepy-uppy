@@ -344,11 +344,17 @@ extension WakeMode {
     /// clamshell session; a `--display-may-sleep` session now prints the same
     /// `status` output as a default one, so this listing is where the
     /// difference has to become visible.
+    /// Each parenthetical is about **this session**, never about the Mac, for
+    /// the reason `lidCloseCaveat` above spells out: the daemon unions every
+    /// live session's mode, so a concurrent `.clamshell` session holds the lid
+    /// regardless. A bare "no lid close" read as a claim about the machine, and
+    /// as such was false exactly when two sessions were live — the moment this
+    /// listing is most worth printing.
     var sessionListDescription: String {
         switch self {
-        case .clamshell: return "clamshell (survives a lid close)"
-        case .system: return "system (no lid close; display may sleep)"
-        case .systemAndDisplay: return "systemAndDisplay (no lid close; display stays on)"
+        case .clamshell: return "clamshell (this session survives a lid close)"
+        case .system: return "system (this session does not survive a lid close; display may sleep)"
+        case .systemAndDisplay: return "systemAndDisplay (this session does not survive a lid close; display stays on)"
         }
     }
 }

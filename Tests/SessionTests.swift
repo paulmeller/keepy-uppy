@@ -72,7 +72,19 @@ final class SessionAuthorizationTests: XCTestCase {
     /// every server-owned field to something the daemon must refuse to
     /// believe, and the expectation states exactly which of the two each
     /// field should have come from. A field dropped from `authorized` takes
-    /// its initialiser default and this fails.
+    /// its initialiser default and this fails — **for the fields named
+    /// below**.
+    ///
+    /// That qualifier is the whole point, and it does not stretch to fields
+    /// that do not exist yet. The expectation is built with the *same*
+    /// memberwise initialiser as the value under test, so a defaulted field
+    /// added to `Session` later and named on neither side is absent from both
+    /// and compares default-to-default — silently uncovered, in precisely the
+    /// way dropping `wakeMode:` from `authorized` once was. Adding a defaulted
+    /// field to `Session` means naming it here with a **non-default** value,
+    /// and nothing but this sentence will say so.
+    /// `DaemonConnectionRequestTests` carries the same warning, for the same
+    /// reason.
     func testAuthorizingKeepsWhatTheClientChoseAndOverwritesWhatItCannotBeTrustedWith() {
         let triggerID = UUID()
         let requested = Session(id: UUID(), kind: .whileProcessRunning(processName: "claude"),

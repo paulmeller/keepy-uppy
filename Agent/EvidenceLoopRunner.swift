@@ -112,10 +112,18 @@ final class EvidenceLoopRunner {
             // now — see `TriggerRule.defaultKind` for what going the other
             // way costs (a permanent 5s refire loop against the daemon).
             let now = Date()
+            // `wakeMode:` is written out rather than left to the memberwise
+            // default: a trigger fires while nobody is watching, so its session
+            // has to be the one that survives a lid close. Spelling it is not
+            // ceremony — `wakeMode` is one of `Session`'s three defaulted
+            // fields, so omitting it is not a compile error (see
+            // `Session.renewed(until:)`), and this file is not in the test
+            // target, making this the one construction site with neither a
+            // compiler nor a test to notice.
             let session = Session(id: UUID(), kind: sessionKind(firing: rule, now: now),
                                   owner: ClientID(rawValue: "agent"),
                                   persistence: .detached, origin: .trigger, startedAt: now,
-                                  triggerID: rule.id)
+                                  triggerID: rule.id, wakeMode: .clamshell)
             let (sessionID, error) = await connection.startSession(session)
             if sessionID == nil {
                 // A `.triggerSuppressed` ("cooldown") rejection here is

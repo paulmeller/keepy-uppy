@@ -163,8 +163,18 @@ final class SessionEngineTests: XCTestCase {
     /// expectation comes from the same factory with only the deadline moved.
     /// A field dropped from `Session.renewed(until:)` takes its initialiser
     /// default, the two structs stop being equal, and this fails — whether or
-    /// not anyone thought to name it. A field added to `Session` is covered
-    /// the moment it is added to the factory below.
+    /// not anyone thought to name it, **for the fields the factory sets**.
+    ///
+    /// That qualifier is the whole point, and it does not stretch to fields
+    /// that do not exist yet. The expectation is built with the *same*
+    /// memberwise initialiser as the value under test, so a defaulted field
+    /// added to `Session` later and left out of the factory below is left out
+    /// of both sides and compares default-to-default — silently uncovered, in
+    /// precisely the way this test exists to prevent. A new defaulted field is
+    /// covered only once someone gives it a **non-default** value in the
+    /// factory, and nothing but this sentence will say so.
+    /// `DaemonConnectionRequestTests` carries the same warning, for the same
+    /// reason.
     func testRenewingALeaseMovesTheDeadlineAndChangesNothingElse() {
         let id = UUID()
         let triggerID = UUID()

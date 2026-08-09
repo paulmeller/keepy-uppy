@@ -513,8 +513,22 @@ final class WakeModeCLISurfaceTests: XCTestCase {
                           "the row should lead with the mode's own name, as the README and spec call it: \(text)")
             XCTAssertEqual(text.contains("survives a lid close"), mode.requiresSleepDisabled,
                            "\(mode.rawValue)'s row disagrees with whether it actually survives a lid close")
-            XCTAssertEqual(text.contains("no lid close"), !mode.requiresSleepDisabled,
+            XCTAssertEqual(text.contains("does not survive a lid close"), !mode.requiresSleepDisabled,
                            "\(mode.rawValue)'s row disagrees with whether it actually survives a lid close")
+        }
+    }
+
+    /// Every row is a statement about the session it describes, never about the
+    /// Mac — the same rule `lidCloseCaveat` follows, and for the same reason.
+    /// The daemon unions the modes of every live session, so "no lid close" as
+    /// a bare fact about the machine was false the moment a `.clamshell`
+    /// session was live alongside — which is exactly when someone runs
+    /// `keepy-uppy sessions`.
+    func testEachRowIsScopedToItsOwnSessionAndNotToTheWholeMac() {
+        for mode in WakeMode.allCases {
+            XCTAssertTrue(mode.sessionListDescription.contains("this session"),
+                          "a concurrent clamshell session changes what is true of the Mac but not of "
+                          + "this one, so the row has to say which it means: \(mode.sessionListDescription)")
         }
     }
 }

@@ -19,8 +19,10 @@ jobs:
         run: brew install xcodegen
 
       - name: Generate the Xcode project
-        # The .xcodeproj is generated from project.yml, so regenerating here
-        # also checks that the committed one is not silently out of date.
+        # The .xcodeproj is not committed (80e796f untracked project.pbxproj),
+        # so this is not a drift check — it is the step that creates the
+        # project every later step needs. project.yml is the only source of
+        # truth for the four targets.
         run: xcodegen generate
 
       - name: Build all four targets
