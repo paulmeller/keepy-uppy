@@ -226,11 +226,21 @@ struct SessionEngine {
                 table.insert(existing)
                 break
             }
+            // Every field but the deadline is carried across verbatim. An
+            // omitted argument here does NOT fail to compile — it silently
+            // takes `Session.init`'s default — which is how `triggerID` was
+            // once dropped, and how `wakeMode` was dropped when it was added.
+            // A dropped `wakeMode` defaults to `.clamshell`, so a renewal
+            // *escalated* the session: a client that asked for the display to
+            // be free to sleep had the global `SleepDisabled` switched on for
+            // it at the first renewal. Adding a field to `Session` means
+            // adding it here.
             table.insert(Session(id: existing.id, kind: .lease(expires: until),
                                  owner: existing.owner, ownerUID: existing.ownerUID,
                                  persistence: existing.persistence,
                                  origin: existing.origin, startedAt: existing.startedAt,
-                                 triggerID: existing.triggerID))
+                                 triggerID: existing.triggerID,
+                                 wakeMode: existing.wakeMode))
 
         case .tick:
             break

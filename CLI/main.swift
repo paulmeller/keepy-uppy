@@ -72,9 +72,13 @@ if case .finished(let tool) = command {
 guard let proxy = connect() else { fail("could not connect to the Keepy Uppy daemon") }
 
 switch command {
-case .on(let kind, let persistence):
+case .on(let kind, let persistence, let wakeMode):
+    // `wakeMode` needs no new XPC method and no new parameter: `Session` is
+    // what crosses the boundary, as JSON, and it carries the field. See
+    // `HelperProtocol.startSession` for which fields of this payload the
+    // daemon actually honours — `owner` below is not one of them.
     let session = Session(id: UUID(), kind: kind, owner: ownerID, persistence: persistence,
-                          origin: .manual, startedAt: Date(), triggerID: nil)
+                          origin: .manual, startedAt: Date(), triggerID: nil, wakeMode: wakeMode)
     guard let data = try? JSONEncoder().encode(session) else { fail("internal error encoding session") }
     proxy.startSession(data) { sessionID, error in
         if let sessionID {

@@ -56,8 +56,18 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     /// start. The daemon sets `id`, `owner`, `ownerUID`, and `startedAt`
     /// itself from the caller's authenticated identity and its own clock —
     /// never trusting those fields from the client — so `kind`,
-    /// `persistence`, and `origin` are the only fields the payload actually
-    /// controls. Replies with the started session's id, or an error.
+    /// `persistence`, `origin`, `triggerID`, and `wakeMode` are the fields
+    /// the payload actually controls. Replies with the started session's id,
+    /// or an error. See `HelperService.startSession` for why each field is in
+    /// the category it is in.
+    ///
+    /// `wakeMode` needed no change to this protocol, which is the point of
+    /// sending a JSON `Session` rather than a fixed argument list: a new
+    /// client-chosen field is a new key in a payload both ends already
+    /// encode and decode, so a client and daemon of different vintages stay
+    /// compatible in both directions (`Session.init(from:)` defaults an
+    /// absent `wakeMode` to `.clamshell`, and an unrecognised extra key is
+    /// ignored by `JSONDecoder`).
     func startSession(_ sessionJSON: Data, reply: @escaping (String?, String?) -> Void)
 
     /// Ends a single session. Rejected unless the caller owns it (Task 10

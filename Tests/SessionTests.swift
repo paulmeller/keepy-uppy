@@ -53,3 +53,99 @@ final class WakeModeTests: XCTestCase {
         XCTAssertEqual(session.wakeMode, .clamshell)
     }
 }
+
+/// Plan 4 Task 4 rests on the claim that `wakeMode` needs **no XPC protocol
+/// change**, because `Session` already crosses the boundary as a JSON blob
+/// (`HelperProtocol.startSession(_ sessionJSON: Data, …)`). That is a claim
+/// about the *transport*, and `WakeModeTests` above cannot check it — those
+/// tests round-trip through `JSONEncoder` in one process and never touch
+/// NSXPC.
+///
+/// So this drives a real `NSXPCConnection`, over the real
+/// `NSXPCInterface(with: HelperProtocol.self)` both ends of the product use,
+/// with the exact bytes `CLI/main.swift` puts on the wire. The far side
+/// replies with the `wakeMode` it decoded from what it actually received, so
+/// a value lost or flattened anywhere between `encode` and `decode` shows up
+/// as a wrong string rather than as a silent `.clamshell`.
+///
+/// An anonymous listener rather than the daemon's Mach service, deliberately:
+/// no privileged service, no code-signing requirement, and nothing to install
+/// — this exercises the serialization path, which is the only part of the
+/// claim that could be false.
+final class SessionOverXPCTransportTests: XCTestCase {
+    /// Echoes back the `wakeMode` it decoded, as `startSession`'s "session
+    /// id" reply. Every other method is an unused stub: `HelperProtocol` is
+    /// an `@objc` protocol, so conformance must be complete even though this
+    /// test sends exactly one message.
+    private final class EchoingHelper: NSObject, HelperProtocol {
+        func startSession(_ sessionJSON: Data, reply: @escaping (String?, String?) -> Void) {
+            guard let session = try? JSONDecoder().decode(Session.self, from: sessionJSON) else {
+                return reply(nil, "invalid session payload")
+            }
+            reply(session.wakeMode.rawValue, nil)
+        }
+
+        func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
+        func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) { reply(0, "unused") }
+        func listSessions(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
+        func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
+        func reportConditionEnded(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
+        func registerAsAgent(reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
+        func currentState(reply: @escaping (Bool) -> Void) { reply(false) }
+        func version(reply: @escaping (String) -> Void) { reply("test") }
+    }
+
+    private final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
+        let exported = EchoingHelper()
+        func listener(_ listener: NSXPCListener, shouldAcceptNewConnection new: NSXPCConnection) -> Bool {
+            new.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
+            new.exportedObject = exported
+            new.resume()
+            return true
+        }
+    }
+
+    /// Every mode, not just one: this is the check that the enum's *values*
+    /// survive, so testing only `.system` would pass even if every payload
+    /// arrived as the same mode.
+    func testEveryWakeModeSurvivesARealXPCRoundTrip() throws {
+        let listener = NSXPCListener.anonymous()
+        // `NSXPCListener.delegate` is weak — see Helper/main.swift's comment
+        // on the same trap. A delegate created inline would be deallocated
+        // before the first connection arrives, and every connection silently
+        // refused.
+        let delegate = ListenerDelegate()
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+        connection.resume()
+        defer { connection.invalidate() }
+
+        for mode in WakeMode.allCases {
+            let replied = expectation(description: "reply for \(mode.rawValue)")
+            // The error handler and the reply block arrive on different
+            // queues and either may be the one that runs; the expectation
+            // tolerates both rather than trapping on over-fulfilment.
+            replied.assertForOverFulfill = false
+            var echoed: String?
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                XCTFail("XPC error for \(mode.rawValue): \(error.localizedDescription)")
+                replied.fulfill()
+            } as? HelperProtocol
+            let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "cli-501"),
+                                  ownerUID: 501, persistence: .detached, origin: .manual,
+                                  startedAt: Date(), wakeMode: mode)
+            let payload = try JSONEncoder().encode(session)
+            proxy?.startSession(payload) { decoded, _ in
+                echoed = decoded
+                replied.fulfill()
+            }
+            wait(for: [replied], timeout: 10)
+            XCTAssertEqual(echoed, mode.rawValue,
+                           "wakeMode \(mode.rawValue) did not survive the XPC round trip")
+        }
+    }
+}

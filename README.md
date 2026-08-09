@@ -89,6 +89,23 @@ keepy-uppy status --json                     # {"keepingAwake": true}
 keepy-uppy sessions
 ```
 
+`on` also takes one flag saying *how* awake, and it combines with any of the
+above:
+
+```sh
+keepy-uppy on --for 8h                       # lid can be shut (the default)
+keepy-uppy on --for 8h --display-may-sleep   # stays running, screen goes dark
+keepy-uppy on --for 8h --keep-display-awake  # screen stays lit too
+```
+
+The default is the strongest and stays that way: with no flag, the Mac keeps
+running with the lid closed. **Both flags trade that away.** Closing the lid
+puts a laptop to sleep under either of them — macOS only honours a lid-closed
+override for the whole machine, not per session, so a session that is polite
+about your screen cannot also survive a lid close. Pick the default for a
+headless box or a docked laptop you'll shut; pick a flag when the Mac is open
+in front of you and you'd rather it behaved normally in every other respect.
+
 CLI sessions outlive the shell that started them. Menu-bar sessions end when
 you quit the app. That's deliberate — one is for automation, the other is for
 you.

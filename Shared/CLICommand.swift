@@ -16,7 +16,10 @@ enum StopTarget: Equatable {
 }
 
 enum CLICommand: Equatable {
-    case on(kind: SessionKind, persistence: SessionPersistence)
+    /// `kind` and `wakeMode` are two independent axes, and every combination
+    /// of them is legal: `kind` says *when the session ends*, `wakeMode` says
+    /// *how it keeps the Mac awake while it lasts*.
+    case on(kind: SessionKind, persistence: SessionPersistence, wakeMode: WakeMode)
     case off(StopTarget)
     case status(json: Bool)
     case sessions
@@ -96,7 +99,52 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
     guard endConditions.count <= 1 else {
         return .failure(CLIParseError(message: "only one of --for, --until, --while-app, --while-process may be given"))
     }
-    return .success(.on(kind: endConditions.first ?? .indefinite, persistence: .detached))
+
+    switch parseWakeMode(args) {
+    case .success(let wakeMode):
+        return .success(.on(kind: endConditions.first ?? .indefinite,
+                            persistence: .detached, wakeMode: wakeMode))
+    case .failure(let error):
+        return .failure(error)
+    }
+}
+
+/// `on`'s second, independent axis: how the session keeps the Mac awake.
+///
+/// **Absence means `.clamshell`**, and that is load-bearing rather than an
+/// arbitrary pick. `.clamshell` is the only mode that survives a lid close
+/// (it is the one that sets the global `SleepDisabled`; assertions do not
+/// survive a lid close — spec §1), and it is what every `keepy-uppy on`
+/// written before these flags existed already got. Any other default would
+/// silently weaken every script and every documented invocation.
+///
+/// Two flags rather than one boolean because `WakeMode` has three cases and a
+/// bool can only name two. Two flags rather than a `--wake-mode <name>`
+/// option because each flag names exactly what it changes about the display,
+/// and because the raw values (`systemAndDisplay`) are camelCase wire strings
+/// that have no business being typed at a shell prompt.
+///
+/// They are mutually exclusive for the same reason `--for` and `--until` are,
+/// and the rejection is written the same way: a session holds exactly one
+/// `WakeMode`, so asking for two is a contradiction to reject, not a
+/// precedence rule to invent. (Two *different* live sessions may hold
+/// different modes; unioning those is `PowerPlan.reduce`'s job in the daemon,
+/// not something one `on` invocation can express.)
+///
+/// Worth knowing when reading an invocation: both flags *drop* the clamshell
+/// axis, because the mode they select is not `.clamshell`. `--keep-display-awake`
+/// therefore keeps the display lit but no longer keeps a lid-shut laptop
+/// awake. It reads additive and is not; the README says so out loud.
+private func parseWakeMode(_ args: [String]) -> Result<WakeMode, CLIParseError> {
+    var modes: [WakeMode] = []
+    if args.contains("--display-may-sleep") { modes.append(.system) }
+    if args.contains("--keep-display-awake") { modes.append(.systemAndDisplay) }
+
+    guard modes.count <= 1 else {
+        return .failure(CLIParseError(
+            message: "only one of --display-may-sleep, --keep-display-awake may be given"))
+    }
+    return .success(modes.first ?? .clamshell)
 }
 
 /// `--tool` is optional context, not a selector — `finished` fires the same

@@ -183,6 +183,42 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(engine.sessions.first?.triggerID, triggerID)
     }
 
+    // Regression, and the same trap `triggerID` fell into directly above:
+    // `.renewLease` rebuilds the session field by field, and an omitted
+    // argument does not fail to compile — it silently takes `Session.init`'s
+    // default. For `wakeMode` that default is `.clamshell`, so a renewal
+    // *escalated* the session: a client that explicitly asked for the display
+    // to be allowed to sleep got the global `SleepDisabled` turned on for it
+    // instead, at the first renewal, with nothing logged and nothing failing.
+    //
+    // Checked for every mode rather than one, so this cannot pass by
+    // accident on whichever mode happens to be the default.
+    func testRenewLeasePreservesWakeMode() {
+        for mode in WakeMode.allCases {
+            var engine = SessionEngine()
+            let session = make(.lease(expires: t0.addingTimeInterval(60)), wakeMode: mode)
+            engine.startSession(session, now: t0, liveAgentConnections: 1)
+            _ = engine.renewLease(id: session.id, until: t0.addingTimeInterval(120), now: t0)
+            XCTAssertEqual(engine.sessions.first?.wakeMode, mode,
+                           "renewing a \(mode.rawValue) lease changed its wake mode")
+        }
+    }
+
+    /// The consequence the test above exists to prevent, stated in the terms
+    /// the daemon actually acts on: `applyLocked` hands `desiredPowerPlan` to
+    /// `PowerPlanHolder` on every event, so a renewal that reset the mode
+    /// would flip the global setting on for a session that never asked.
+    func testRenewingALeaseDoesNotChangeThePowerPlan() {
+        var engine = SessionEngine()
+        let session = make(.lease(expires: t0.addingTimeInterval(60)), wakeMode: .system)
+        engine.startSession(session, now: t0, liveAgentConnections: 1)
+        let before = engine.desiredPowerPlan
+        XCTAssertFalse(before.sleepDisabled, "a .system session must not set the global override")
+
+        _ = engine.renewLease(id: session.id, until: t0.addingTimeInterval(120), now: t0)
+        XCTAssertEqual(engine.desiredPowerPlan, before, "a renewal must not change the power plan")
+    }
+
     // MARK: - Fix 2: renewLease must not launder a non-lease kind, or accept an unbounded deadline
 
     func testRenewLeaseRejectsNonLeaseKind() {

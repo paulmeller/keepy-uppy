@@ -63,6 +63,21 @@ predates the detached-session sub-cap that replaced it.
 - [ ] Deleting the app while a session is active restores sleep
 - [ ] Two terminals opening 25 sessions each are individually capped at 20 and rate-limited within each connection
 
+**Wake modes (`on`'s second axis):**
+
+Only the first item here is checkable from a test suite; the rest are the
+whole reason `SleepDisabled` and `IOPMAssertion` are both held, and neither
+mechanism's real behaviour is observable without a physical lid and a real
+idle timer.
+
+- [ ] `keepy-uppy on --display-may-sleep --keep-display-awake` is refused with a message naming both flags, and starts nothing
+- [ ] `keepy-uppy on` with no wake-mode flag still keeps the Mac awake with the lid **closed** — the pre-existing default must be unchanged
+- [ ] `keepy-uppy on --display-may-sleep` keeps the machine running while the display goes dark on its normal idle timer (check with `pmset -g assertions`: `PreventUserIdleSystemSleep` held, `PreventUserIdleDisplaySleep` not)
+- [ ] …and that session does **not** survive closing the lid — assertions never do; only the global setting does
+- [ ] `keepy-uppy on --keep-display-awake` also holds the display on (`PreventUserIdleDisplaySleep` in `pmset -g assertions`), and likewise does not survive a lid close
+- [ ] With a `--display-may-sleep` session and a default (clamshell) session running at once, the lid-closed guarantee is back — the daemon unions the two, it does not pick one
+- [ ] Ending only the clamshell session of that pair drops the lid-closed guarantee but leaves the machine awake with the display free to sleep
+
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary
 - [x] A non-agent client's condition report is rejected and logged
