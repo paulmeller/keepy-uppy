@@ -26,6 +26,19 @@ predates the detached-session sub-cap that replaced it.
 - [ ] Daemon and agent both register and appear as "Keepy Uppy" in Login Items
 - [ ] Approving once is enough; no later prompts
 
+**Settings → General (the default wake mode):**
+
+The picker's *copy* is pinned by `SessionDisplayTests`; how it lays out, and
+what changing it does to a menu and to a session already running, is not
+observable from any test.
+
+- [ ] Under "Default session" there is a "Keeps this Mac awake" picker offering exactly three options — "Even with the lid closed", "Only with the lid open", "Only with the lid open, screen on" — and the footer text under it changes as you move between them
+- [ ] Both footer paragraphs (the changing explanation, then "Sessions you start from the menu from now on use this…") wrap and stay readable at the Settings window's default width with the longest option selected — they are the two longest strings in the window and neither is truncated or clipped
+- [ ] Pick "Only with the lid open", open the menu: every "Keep awake …" row now ends "(lid open only)". Start one, and its stop row reads "Stop this session (lid open only)" with the machine-wide line "Closing the lid will still let this Mac sleep." above it
+- [ ] Change the picker back to "Even with the lid closed" while that session is still running: the running session's tag and the lid line do **not** change (a mode is fixed when the session starts — that is exactly what "from now on" in the footer is warning about), and the next session started from the menu has no tag
+- [ ] With the picker on "Only with the lid open", let a **trigger** fire: the session it starts is still lid-safe, so the "Closing the lid…" line is absent while it runs. Triggers deliberately ignore this preference
+- [ ] The longest rows this menu can produce are not truncated: with two of your own "Only with the lid open, screen on" sessions live, a stop row reads `Stop “7h 59m left” (screen on, lid open only)`, and a `keepy-uppy on --while-app com.apple.dt.Xcode --keep-display-awake` session alongside them reads `While Xcode is running — started elsewhere (screen on, lid open only)`
+
 **Settings → Safety:**
 - [ ] Settings → Safety: lowering the battery cutoff and confirming (via `keepy-uppy status`) the daemon picks it up within ~5s without restarting anything
 
@@ -79,6 +92,16 @@ idle timer.
 - [ ] Ending only the clamshell session of that pair drops the lid-closed guarantee but leaves the machine awake with the display free to sleep
 - [ ] Either wake-mode flag prints a one-line note naming that flag and saying it does not keep the Mac awake with the lid closed — and it goes to **stderr**: `keepy-uppy on --for 30s --keep-display-awake 2>/dev/null` prints only "Started session …", and `1>/dev/null` prints only the note
 - [ ] `keepy-uppy sessions` shows each session's mode, so a `--display-may-sleep` session is distinguishable from a default one (`status` and `status --json` are deliberately unchanged — both still say "keeping awake" for every mode)
+- [ ] With only a `--display-may-sleep` session live, `keepy-uppy status --json` still prints exactly `{"keepingAwake": true}` and `keepy-uppy sessions` prints only session rows — a script written before wake modes existed must not start finding a note or a new field on stdout
+
+The rest are about the two mechanisms *behind* the modes. Neither is visible
+from any client's output, and both have failure modes that look exactly like
+success until the machine is on battery in a bag.
+
+- [ ] The headline claim, unattended and on battery: `keepy-uppy on --for 8h` with no flag, then unplug the charger, start a long build, shut the lid and walk away. The build is still running — not resumed on opening — when you come back, and `pmset -g log | grep -i "entering sleep"` shows nothing from that window. This is the harder version of the lid check above: nothing in the suite can reach it, and it is the whole reason `SleepDisabled` is held at all
+- [ ] `pmset -g | grep -i sleepdisabled` reads `1` while any default-mode session is live, and `0` once the last one ends (immediately on `keepy-uppy off`, within one 5s tick if it ended on its own clock). This one has no refcount of its own — a stuck `1` leaves the Mac unable to sleep at all, and nothing in the UI would say so
+- [ ] `pmset -g assertions` attributes `PreventUserIdleSystemSleep` to Keepy Uppy while any session is live, whatever its mode, and lists nothing of ours once the last session ends — a leaked assertion is invisible in `pmset -g` and survives every client quitting
+- [ ] Kill `KeepyUppyHelper` from Activity Monitor mid-session: `pmset -g assertions` is clean immediately (assertions are per-process, and `powerd` reaps a dead holder's), and `SleepDisabled` is back to `0` a moment later, when launchd restarts the helper and its startup clears it unconditionally. Sessions are in-memory, so the menu should show "Not keeping awake" rather than a session it can no longer honour
 
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary

@@ -94,17 +94,28 @@ above:
 
 ```sh
 keepy-uppy on --for 8h                       # lid can be shut (the default)
-keepy-uppy on --for 8h --display-may-sleep   # stays running, screen goes dark
-keepy-uppy on --for 8h --keep-display-awake  # screen stays lit too
+keepy-uppy on --for 8h --display-may-sleep   # lid open only
+keepy-uppy on --for 8h --keep-display-awake  # lid open only, screen stays lit
 ```
 
-The default is the strongest and stays that way: with no flag, the Mac keeps
-running with the lid closed. **Both flags trade that away.** Closing the lid
-puts a laptop to sleep under either of them — macOS only honours a lid-closed
-override for the whole machine, not per session, so a session that is polite
-about your screen cannot also survive a lid close. Pick the default for a
-headless box or a docked laptop you'll shut; pick a flag when the Mac is open
-in front of you and you'd rather it behaved normally in every other respect.
+**Only the default survives a lid close**, and that is the entire difference
+between it and `--display-may-sleep`: both leave your screen free to go dark on
+its usual idle timer. `--keep-display-awake` reads like the strongest of the
+three and isn't — it adds a lit screen and gives up the closed lid just the
+same. Neither name says so, which is why `on` says it on stderr the moment you
+type one: a session in either mode does not keep this Mac awake with the lid
+closed.
+
+Sessions combine rather than compete, and the strongest request wins, so a
+`--display-may-sleep` session running beside a default one doesn't make the Mac
+unsafe to shut. The lid-closed guarantee lasts exactly as long as the last
+default session does. `keepy-uppy sessions` prints every live session's mode,
+and the menu bar tags the ones that aren't holding the lid.
+
+Pick the default for a headless box or a docked laptop you'll shut; pick a flag
+when the Mac is open in front of you and you'd rather it behaved normally in
+every other respect. Settings → General picks the mode for sessions you start
+from the menu bar.
 
 CLI sessions outlive the shell that started them. Menu-bar sessions end when
 you quit the app. That's deliberate — one is for automation, the other is for
@@ -137,7 +148,7 @@ Four executables, split by privilege:
 
 | | runs as | does |
 |---|---|---|
-| `KeepyUppyHelper` | root `LaunchDaemon` | owns the sleep setting; enforces every guard |
+| `KeepyUppyHelper` | root `LaunchDaemon` | owns the power state; enforces every guard |
 | `KeepyUppyAgent` | per-user `LaunchAgent` | watches what only a login session can see |
 | `keepy-uppy` | you | the command line |
 | `Keepy Uppy.app` | you | optional menu bar |
@@ -160,7 +171,7 @@ another user's.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **340 unit tests**.
+by **362 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -186,7 +197,7 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed, notarized, 340 tests, and a privilege
+**v0.1 — new, and moving fast.** Signed, notarized, 362 tests, and a privilege
 boundary that's been through three adversarial review passes. What it hasn't
 had yet is months on other people's hardware. If something misbehaves, an issue
 with the daemon log is genuinely useful:
