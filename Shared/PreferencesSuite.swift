@@ -17,25 +17,109 @@ import Foundation
 /// bug already shipped here once and had to be root-caused empirically
 /// (final whole-branch review, Item 5).
 enum PreferencesSuite {
+    /// The suite the shipping app, daemon, agent and CLI all use.
+    ///
     /// Deliberately identical to the app target's `PRODUCT_BUNDLE_IDENTIFIER`
     /// (see `project.yml`) — that is what makes `defaults` below need its
-    /// fallback.
-    static let name = "au.com.workwireless.keepy-uppy"
+    /// fallback, and what made the test target destructive until `name`
+    /// below stopped resolving to it.
+    static let productionName = "au.com.workwireless.keepy-uppy"
+
+    /// The suite *this process* reads and writes: `productionName`
+    /// everywhere except inside `xcodebuild test`.
+    ///
+    /// The exception is not a convenience. It is the fix for a test target
+    /// that was deleting the real user's preferences on every run, and the
+    /// mechanism is worth stating because nothing about it is visible at the
+    /// call sites. `Keepy UppyTests` is hosted by the app (`project.yml`
+    /// gives it the app as a dependency, so xcodegen sets `TEST_HOST`), which
+    /// means the test process *is* a "Keepy Uppy" with
+    /// `PRODUCT_BUNDLE_IDENTIFIER au.com.workwireless.keepy-uppy`. Two
+    /// consequences then compound: `UserDefaults(suiteName:)` returns nil for
+    /// a suite named after the calling process's own bundle id, so `defaults`
+    /// fell through to `.standard` — and `.standard`, in that process, *is*
+    /// the shipping app's preference domain. Every `save()` a test made
+    /// landed on the live user's file, and every `setUp`'s
+    /// `removePersistentDomain(forName: PreferencesSuite.name)` wiped it:
+    /// their default session kind, default wake mode, safety configuration
+    /// and every trigger rule they had. Verified before the fix by writing a
+    /// value into that domain by hand and watching a full suite run remove
+    /// it.
+    ///
+    /// Redirecting the *name* rather than injecting a `UserDefaults` into
+    /// each store is what makes this total. `SafetyConfigStore` reaches its
+    /// suite three different ways — `UserDefaults`,
+    /// `CFPreferencesCopyValue(_:_:_:_:)` by user name, and a plist path
+    /// built from this string — and only a change to the name moves all
+    /// three together. An injected instance would have moved the first and
+    /// left the other two reading the real user's file.
+    ///
+    /// Derived from the environment rather than from `NSClassFromString(
+    /// "XCTestCase")` because an app test host runs its own `main` *before*
+    /// the test bundle is injected: a `@AppStorage(store:
+    /// PreferencesSuite.defaults)` property built during app launch would
+    /// resolve this `static let` while XCTest is still not loaded and cache
+    /// the production name for the rest of the run — the same silent
+    /// too-early-resolution shape as the bug it is fixing. The environment
+    /// variables below are set by the test runner before the process starts,
+    /// so they cannot be read too early.
+    static let name: String = isRunningTests ? "\(productionName).tests" : productionName
+
+    /// Whether this process was launched by XCTest.
+    ///
+    /// Three variables rather than one because they are set by different
+    /// runners (`xcodebuild test`, `swift test`, a direct `xctest` invocation)
+    /// and the cost of a false negative here is a destroyed preferences file,
+    /// while the cost of a false positive is a test-suite-shaped preferences
+    /// file nothing reads. `PreferencesSuiteIsolationTests` fails loudly if
+    /// this ever answers `false` under test, and every `setUp` that clears the
+    /// suite refuses to clear `productionName`, so a regression here cannot
+    /// silently resume deleting the user's data.
+    static var isRunningTests: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["XCTestConfigurationFilePath"] != nil
+            || environment["XCTestBundlePath"] != nil
+            || environment["XCTestSessionIdentifier"] != nil
+    }
 
     /// `UserDefaults(suiteName:)` returns `nil` when `suiteName` equals the
     /// *calling process's own* bundle identifier (an Apple-documented special
-    /// case, not a bug in this code) — and `name` is exactly the app
-    /// target's bundle identifier. So from the app process, where all the
+    /// case, not a bug in this code) — and in the shipping app `name` is
+    /// exactly that identifier. So from the app process, where all the
     /// Settings UI runs, the suite-named lookup is nil and `.standard` is the
     /// correct fallback: for this exact degenerate case `.standard` resolves
     /// to the identical underlying preferences file the suite-named lookup
     /// would have used, so the daemon (bundle id `...helper`, unaffected by
     /// this case), agent, and CLI still read back whatever the app wrote.
-    /// Confirmed empirically via `SafetyConfigStoreTests`, which runs inside
-    /// the app process as its test host and silently no-ops on save/load
-    /// without this fallback.
+    ///
+    /// Under test the fallback is unreachable and that is the point: `name`
+    /// is `...keepy-uppy.tests`, which is nobody's bundle identifier, so the
+    /// suite-named lookup succeeds and writes land in a suite of the tests'
+    /// own.
     static var defaults: UserDefaults {
         UserDefaults(suiteName: name) ?? .standard
+    }
+
+    /// Deletes every value in the suite *this* process uses, and reports
+    /// whether it was allowed to.
+    ///
+    /// The refusal is the whole point. Three `setUp`s clear the suite between
+    /// tests, and for months they did it by naming `PreferencesSuite.name`
+    /// directly — which was the shipping domain, so the line that existed to
+    /// isolate the tests was the line destroying the user's data. Routing
+    /// them through here means the check is made once, at the only place that
+    /// deletes anything, and a `false` return fails the test rather than
+    /// removing a file: if `isRunningTests` ever stops detecting the runner,
+    /// the suite goes red instead of going quiet.
+    ///
+    /// Named for testing and used only from tests, but deliberately not
+    /// `#if DEBUG`-gated: a guard that compiles out is a guard that stops
+    /// protecting exactly when someone changes the configuration.
+    @discardableResult
+    static func removeAllValuesForTesting() -> Bool {
+        guard name != productionName else { return false }
+        UserDefaults.standard.removePersistentDomain(forName: name)
+        return true
     }
 
     // MARK: - Reading another user's copy of this suite (root daemon only)

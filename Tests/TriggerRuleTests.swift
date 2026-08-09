@@ -4,17 +4,16 @@ import XCTest
 final class TriggerRuleTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        // `UserDefaults(suiteName:)` returns nil when `suiteName` equals the
-        // *calling process's own* bundle identifier — which is exactly the
-        // case here, since this test host is the "Keepy Uppy" app itself
-        // (PRODUCT_BUNDLE_IDENTIFIER `au.com.workwireless.keepy-uppy`,
-        // identical to the suite name string). `TriggerStore` works around
-        // this by falling back to `.standard`, which for this exact
-        // degenerate case resolves to the identical underlying preferences
-        // file — so clearing `.standard`'s domain here really does reset
-        // it (mirrors `SafetyConfigStoreTests.setUp()`, which needed the
-        // same fix to avoid the prior run's saved rules leaking through).
-        UserDefaults.standard.removePersistentDomain(forName: PreferencesSuite.name)
+        // This line used to read `UserDefaults.standard.removePersistentDomain(
+        // forName: PreferencesSuite.name)`, which in this process deleted the
+        // *live user's* trigger rules, safety config and defaults on every
+        // run — the test host is the app itself, so that domain was the
+        // shipping one. `PreferencesSuite.name` now redirects under XCTest
+        // and this helper refuses to clear the production suite; see
+        // `PreferencesSuiteIsolationTests` for the guarantee stated as a test.
+        XCTAssertTrue(PreferencesSuite.removeAllValuesForTesting(),
+                      "refused to clear the suite — it is the shipping one, so these tests would "
+                      + "be writing to the real user's preferences")
     }
 
     struct FakeAppRunning: AppRunningObserving {

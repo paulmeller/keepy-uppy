@@ -4,10 +4,11 @@ import XCTest
 final class SessionCompletionTests: XCTestCase {
     override func setUp() {
         super.setUp()
-        // Same fallback-domain reasoning as TriggerRuleTests.setUp() — this
-        // test host is the app process itself, so `.standard` is where
-        // `SessionCompletionStore` actually lands.
-        UserDefaults.standard.removePersistentDomain(forName: PreferencesSuite.name)
+        // Same reasoning as TriggerRuleTests.setUp(): naming the suite
+        // directly here used to clear the shipping app's preference domain,
+        // because this test host *is* the shipping app.
+        XCTAssertTrue(PreferencesSuite.removeAllValuesForTesting(),
+                      "refused to clear the suite — it is the shipping one")
     }
 
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
