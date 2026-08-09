@@ -62,8 +62,11 @@ func appDisplayName(bundleID: String) -> String {
 /// been typed into it.
 ///
 /// These strings used to be the raw values of a parallel enum,
-/// `AddTriggerSheet.ConditionKind`, which is exactly the arrangement that let
-/// three `SessionKind` cases become unreachable from every client. They are here
+/// `AddTriggerSheet.ConditionKind` — the same arrangement as the one that left
+/// three `SessionKind` cases unreachable from every client. (That was
+/// `CLICommand.OnOption` and `DefaultSessionKind`, a different pair of lists
+/// entirely; this picker never caused it. The resemblance is the point, not a
+/// shared history.) They are here
 /// instead for the reason `wakeModeSettingsTitle` is: user-facing copy belongs
 /// on this side of the boundary, and a raw value is a wire name that `Shared/`
 /// compiles into the daemon and the CLI, neither of which should carry Settings

@@ -131,6 +131,16 @@ final class TriggerCopyTests: XCTestCase {
     /// fourth. "While" is licensed by `bindsSessionLifetime` and by nothing
     /// else: a title saying "while" for a condition whose session outlives it
     /// promises a stop that never comes.
+    ///
+    /// Machine-dependent in principle, and knowingly so. `.appLaunched`'s
+    /// sample resolves its bundle ID through `NSWorkspace` (`appDisplayName`),
+    /// so the title carries whatever *this* Mac calls `com.apple.dt.Xcode` —
+    /// "Xcode" where it is installed, the raw bundle ID where it is not. A
+    /// sample whose locally-installed app name contained "while" would fail
+    /// here on one machine and pass on every other. None does today, and
+    /// threading a fake resolver through the copy functions buys less than it
+    /// costs; this note is so that a failure nobody else can reproduce is
+    /// looked for in the right place.
     func testOnlyABindingConditionsTitleMaySayWhile() {
         for kind in TriggerConditionKind.allCases {
             let title = triggerConditionTitle(kind.sampleCondition).lowercased()
@@ -167,11 +177,30 @@ final class TriggerCopyTests: XCTestCase {
         let labels = TriggerConditionKind.allCases.map(triggerConditionKindLabel)
         for (kind, label) in zip(TriggerConditionKind.allCases, labels) {
             XCTAssertFalse(label.isEmpty, "\(kind) has no label, so its picker row would be blank")
-            XCTAssertFalse(label.contains(kind.rawValue),
+            XCTAssertFalse(squashed(label).contains(squashed(kind.rawValue)),
                            "\(kind.rawValue) is a wire name, not a thing to show a user: \(label)")
         }
         XCTAssertEqual(Set(labels).count, labels.count,
                        "two conditions sharing a label are indistinguishable in the picker")
+    }
+
+    /// Lowercased with everything that is not a letter or a digit removed, so
+    /// the leak check above sees a wire name however it was prettified on the
+    /// way into a label. It was a plain case-sensitive `contains`, which
+    /// matches only a verbatim paste: `wifiSSID` against a label reading
+    /// "Wi-Fi SSID" slipped through it on both the capitalisation and the
+    /// hyphen, and Plan 5's six conditions are exactly the ones with names
+    /// like that.
+    ///
+    /// It remains a heuristic and is deliberately a cheap one. It cannot see a
+    /// label that paraphrases rather than pastes ("A wireless network is
+    /// joined" for `wifiNetwork`), and it sits one character away from a false
+    /// alarm already: `externalDisplayConnected` misses "An external display
+    /// connects" only because the label ends "connects". A label that close to
+    /// its own case name deserves a second look anyway, so that is the right
+    /// side to err on — but read the label before believing the message.
+    private func squashed(_ text: String) -> String {
+        text.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
     /// The labels the picker shipped with, pinned. The parallel enum they came

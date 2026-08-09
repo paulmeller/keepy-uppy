@@ -170,6 +170,91 @@ final class TriggerRuleTests: XCTestCase {
         XCTAssertTrue(fire([r], process: FakeProcessRunning(running: ["claude"], reading: .undetermined)).isEmpty)
     }
 
+    // MARK: - Both halves of the contract, over every condition there is
+    //
+    // Every firing test above names one condition, and so does every clause of
+    // `testUndeterminedNeverFiresAnyCondition`. A fifth condition therefore gets
+    // neither: its arm in `triggersToFire` can `return false` and its
+    // `.undetermined` handling can be anything at all with the whole suite
+    // green — which a reviewer demonstrated by adding a condition, stubbing its
+    // arm, and watching 382 tests pass. The two loops below close that, over
+    // `TriggerConditionKind.allCases`, which a new condition cannot stay out of:
+    // `sampleCondition` is an exhaustive switch, so the case cannot be added
+    // without also handing these tests a condition to try it with.
+    //
+    // They are kept alongside the per-condition tests, not instead of them:
+    // those pin specifics (which bundle ID, which process name, the de-dup by
+    // trigger id) that a loop over stand-in samples cannot.
+
+    /// Every observer answering `.present`, whatever it is asked about — the one
+    /// `ObserverSet` under which *every* condition must fire.
+    ///
+    /// The backing sets are deliberately empty: the `reading` override is what
+    /// answers, so an arm that consults something other than the reading it was
+    /// handed fails here instead of passing by accident.
+    ///
+    /// `ObserverSet` gives no member a default, on purpose (see its doc
+    /// comment), which is also what keeps this helper honest: a seventh observer
+    /// stops it compiling until somebody states what "present" means for it,
+    /// rather than leaving the loops below quietly testing a stale bundle.
+    private var everyObserverPresent: ObserverSet {
+        ObserverSet(appRunning: FakeAppRunning(running: [], reading: .present),
+                    display: FakeDisplay(external: false, reading: .present),
+                    processRunning: FakeProcessRunning(running: [], reading: .present),
+                    acPower: .present,
+                    // No trigger condition consults the CPU sample today;
+                    // `.busy(fraction: 1)` is that reading's analogue of
+                    // `.present` for the day one does.
+                    cpuBusy: .busy(fraction: 1))
+    }
+
+    /// The same bundle with every observation failed.
+    private var everyObserverUndetermined: ObserverSet {
+        ObserverSet(appRunning: FakeAppRunning(running: [], reading: .undetermined),
+                    display: FakeDisplay(external: false, reading: .undetermined),
+                    processRunning: FakeProcessRunning(running: [], reading: .undetermined),
+                    acPower: .undetermined,
+                    cpuBusy: .undetermined)
+    }
+
+    /// A condition whose firing arm cannot fire is a trigger that ships dead:
+    /// it appears in the picker, the user creates a rule with it, and nothing
+    /// ever happens — no error, no session, nothing to notice. The general form
+    /// of `testAppLaunchedFiresWhenRunning` and its three siblings.
+    ///
+    /// A future condition that reads something `ObserverSet` does not carry at
+    /// all would fail here too. That is the right prompt rather than a
+    /// nuisance: the tick's set of facts is what both `triggersToFire` and
+    /// `sessionsToEnd` are given, and a condition evaluated from outside it is a
+    /// condition the evidence loop cannot reason about.
+    func testEveryConditionFiresWhenItsObserverIsConfidentlyPresent() {
+        for kind in TriggerConditionKind.allCases {
+            let r = rule(kind.sampleCondition)
+            XCTAssertEqual(
+                triggersToFire([r], activeSessions: [], observers: everyObserverPresent).map(\.id), [r.id],
+                "\(kind) does not fire on a confident positive — its arm in triggersToFire is dead")
+        }
+    }
+
+    /// The safety half, and the one `testUndeterminedNeverFiresAnyCondition`
+    /// cannot extend to a condition nobody has written yet: an observation that
+    /// failed says nothing about the world, so it must start nothing. Every
+    /// observer is `.undetermined` at once, so whichever one a new condition
+    /// reads, it reads a failure.
+    ///
+    /// The mirror of `sessionsToEnd`'s rule, and the more expensive half to get
+    /// wrong in the other direction: a `sysctl` race that answered `false` 15%
+    /// of the time under load once read as "the process exited" and ended live
+    /// sessions mid-build.
+    func testNoConditionFiresWhenEveryObservationFailed() {
+        for kind in TriggerConditionKind.allCases {
+            let r = rule(kind.sampleCondition)
+            XCTAssertTrue(
+                triggersToFire([r], activeSessions: [], observers: everyObserverUndetermined).isEmpty,
+                "\(kind) fires on an observation that failed")
+        }
+    }
+
     // MARK: - Process-name validation
 
     func testAPlainNameIsAcceptedWhateverItsLength() {
