@@ -16,10 +16,17 @@ enum StopTarget: Equatable {
 }
 
 enum CLICommand: Equatable {
-    /// `kind` and `wakeMode` are two independent axes, and every combination
-    /// of them is legal: `kind` says *when the session ends*, `wakeMode` says
-    /// *how it keeps the Mac awake while it lasts*.
-    case on(kind: SessionKind, persistence: SessionPersistence, wakeMode: WakeMode)
+    /// `kind` and `power` are independent axes, and every combination of them
+    /// is legal: `kind` says *when the session ends*, `power` says *what it
+    /// asks of the machine while it lasts*.
+    ///
+    /// `power` is a whole `PowerRequest` rather than a wake mode and a flag
+    /// beside it, for the reason `PowerPlan.reduce` takes one: a case that
+    /// carries the axes separately is a case somebody rebuilds with one of them,
+    /// and the omission is silent. It also means the *next* axis costs nothing
+    /// at this layer — every pattern match that binds the request keeps working,
+    /// and every one that names an axis stops compiling until it is answered.
+    case on(kind: SessionKind, persistence: SessionPersistence, power: PowerRequest)
     case off(StopTarget)
     case status(json: Bool)
     case sessions
@@ -240,9 +247,34 @@ private enum OnOption: String, CaseIterable {
     }
 }
 
+/// `on`'s third axis, named once so the parser, the usage line, the rejection
+/// message and the Settings copy that points at it cannot drift apart.
+///
+/// It is not a wake mode and not an end condition, so it belongs to neither
+/// exhaustive list — see `onUsage` for what that costs.
+let keepDisksAwakeFlag = "--keep-disks-awake"
+
+/// **This line's structural guarantee is now partial, and that is a deliberate
+/// trade rather than an oversight.**
+///
+/// The first two fragments are built from exhaustive lists (`OnOption.allCases`
+/// and `WakeMode.selectingFlags`), which is what
+/// `OnOption.usageFragment`'s doc comment buys: "a flag cannot be added and left
+/// out of it". `--keep-disks-awake` is in neither list — it is not an end
+/// condition and not a wake mode — so it is the **first hand-concatenated
+/// fragment**, and for it the guarantee drops from structural ("no flag can be
+/// omitted") to per-flag ("a test covers this one"). That test is
+/// `CLIDiskAxisParsingTests.testTheUsageLineNamesTheDiskFlag`, and it is not a
+/// nice-to-have.
+///
+/// If a **second** such flag ever arrives, that is the signal to give this
+/// category its own `CaseIterable` list and restore the structural guarantee.
+/// Building that list now, for one member, would be ceremony around a single
+/// string.
 private let onUsage = "usage: keepy-uppy on ["
     + OnOption.allCases.map(\.usageFragment).joined(separator: " | ")
     + "] [" + WakeMode.selectingFlags.joined(separator: " | ") + "]"
+    + " [" + keepDisksAwakeFlag + "]"
 
 /// One left-to-right pass over the arguments, rather than one `contains` scan
 /// per option.
@@ -260,17 +292,33 @@ private let onUsage = "usage: keepy-uppy on ["
 /// behaviour — accept, start a clamshell session — differs from what was asked
 /// for in the direction the user cannot see.
 ///
-/// `on` is the only verb with two independent option groups, which is why it
-/// holds two `ExclusiveChoice`s: a wake-mode flag must not consume the end
-/// condition slot, and neither may be given twice.
+/// `on` is the only verb with independent option groups, which is why it holds
+/// three `ExclusiveChoice`s: neither a wake-mode flag nor the disk flag may
+/// consume the end-condition slot, and none of the three may be given twice.
+///
+/// Three groups rather than one is the whole point of the disk flag being a
+/// separate slot: `--display-may-sleep --keep-disks-awake` is a coherent request
+/// ("let the screen sleep, keep the backup drive spun up") and is accepted,
+/// where `--display-may-sleep --keep-display-awake` is a contradiction and is
+/// not. Folding it into the wake-mode group would refuse the first as if it were
+/// the second.
 private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParseError> {
     var scanner = ArgumentScanner(args, verb: "on", usage: onUsage)
     var endCondition = ExclusiveChoice<SessionKind>(group: OnOption.allCases.map(\.rawValue))
     var wakeMode = ExclusiveChoice<WakeMode>(group: WakeMode.selectingFlags)
+    // A single-flag group, in the shape `parseStatus` uses for `--json`: only
+    // the duplicate branch is reachable, which is correct — repeating a flag is
+    // the one way to give two of a group of one.
+    var keepDisksAwake = ExclusiveChoice<Bool>(group: [keepDisksAwakeFlag])
 
     while let token = scanner.next() {
         if let mode = WakeMode.selectedBy(flag: token) {
             if let error = wakeMode.choose(mode, by: token) { return .failure(error) }
+            continue
+        }
+
+        if token == keepDisksAwakeFlag {
+            if let error = keepDisksAwake.choose(true, by: token) { return .failure(error) }
             continue
         }
 
@@ -337,8 +385,17 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
         if let error = endCondition.choose(kind, by: token) { return .failure(error) }
     }
 
+    // The two absent-flag directions point opposite ways, and both are
+    // load-bearing. No wake-mode flag means `.clamshell`, the strongest mode,
+    // because that is what every `keepy-uppy on` written before those flags
+    // existed already got and anything else silently weakens them. No disk flag
+    // means `false`, the weakest state, because nothing written before this flag
+    // existed asked for it and inventing a machine-wide held assertion for a
+    // script that never requested one is over-application.
     return .success(.on(kind: endCondition.value ?? .indefinite,
-                        persistence: .detached, wakeMode: wakeMode.value ?? .clamshell))
+                        persistence: .detached,
+                        power: PowerRequest(wakeMode: wakeMode.value ?? .clamshell,
+                                            keepsDisksAwake: keepDisksAwake.value ?? false)))
 }
 
 // MARK: - The wake-mode surface
@@ -436,6 +493,29 @@ extension WakeMode {
         case .system: return "system (this session does not survive a lid close; display may sleep)"
         case .systemAndDisplay: return "systemAndDisplay (this session does not survive a lid close; display stays on)"
         }
+    }
+}
+
+extension PowerRequest {
+    /// How a whole request reads in a `keepy-uppy sessions` row.
+    ///
+    /// The disk clause exists for the reason `wakeMode.sessionListDescription`
+    /// does, one axis over: `status` answers a boolean that is true for every
+    /// request, and the menu bar shows the same filled balloon either way, so
+    /// without this line a `--keep-disks-awake` session is indistinguishable
+    /// from one without it in **every** output the product has — which is the
+    /// exact invisibility the `wake=` field was added to fix.
+    ///
+    /// Present only when the session asked for it: "annotate the exception, not
+    /// the rule". An absent clause is unambiguous here — this listing is prose
+    /// for a person, and `status --json` is what a script reads.
+    ///
+    /// It is deliberately *not* the menu's decision. A menu row is a short
+    /// label competing for space with three others; this is a diagnostic line
+    /// whose whole job is to say what each session asked for, and what it asked
+    /// for is a fact about the request rather than a claim about the machine.
+    var sessionListDescription: String {
+        wakeMode.sessionListDescription + (keepsDisksAwake ? "; attached disks held awake" : "")
     }
 }
 

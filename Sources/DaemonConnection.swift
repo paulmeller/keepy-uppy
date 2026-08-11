@@ -167,7 +167,7 @@ final class DaemonConnection: ObservableObject {
     /// *named* and cannot force it to be named with the value the caller asked
     /// for, which is what `DaemonConnectionRequestTests` checks.
     nonisolated static func requestedSession(
-        kind: SessionKind, wakeMode: WakeMode,
+        kind: SessionKind, power: PowerRequest,
         persistence: SessionPersistence, origin: SessionOrigin, now: Date = Date()
     ) -> Session {
         // `ownerUID: 0` and the `nil` trigger id are the request's placeholders:
@@ -175,18 +175,23 @@ final class DaemonConnection: ObservableObject {
         // a trigger-originated session.
         Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "app"), ownerUID: 0,
                 persistence: persistence, origin: origin, startedAt: now,
-                triggerID: nil, wakeMode: wakeMode, keepsDisksAwake: false)
+                triggerID: nil, wakeMode: power.wakeMode,
+                keepsDisksAwake: power.keepsDisksAwake)
     }
 
-    /// `wakeMode` has **no default**, unlike `persistence` and `origin`, and
-    /// that asymmetry is deliberate: the two defaulted fields are visible in
-    /// the UI if they are wrong, whereas a session that quietly stopped being
-    /// lid-safe looks exactly like one that still is.
+    /// `power` has **no default**, unlike `persistence` and `origin`, and that
+    /// asymmetry is deliberate: the two defaulted parameters are visible in the
+    /// UI if they are wrong, whereas a session that quietly stopped being
+    /// lid-safe — or quietly started holding every attached disk out of idle —
+    /// looks exactly like one that did not.
+    ///
+    /// One `PowerRequest` rather than a parameter per axis, for the reason
+    /// `PowerPlan.reduce` takes one: a caller cannot supply half of it.
     @discardableResult
-    func startSession(kind: SessionKind, wakeMode: WakeMode,
+    func startSession(kind: SessionKind, power: PowerRequest,
                       persistence: SessionPersistence = .clientBound,
                       origin: SessionOrigin = .manual) async -> Bool {
-        let session = Self.requestedSession(kind: kind, wakeMode: wakeMode,
+        let session = Self.requestedSession(kind: kind, power: power,
                                             persistence: persistence, origin: origin)
         guard let data = try? JSONEncoder().encode(session) else { return false }
         let ok: Bool? = await call { proxy, reply in

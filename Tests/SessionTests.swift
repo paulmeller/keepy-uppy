@@ -268,16 +268,25 @@ final class SessionAuthorizationTests: XCTestCase {
 /// — this exercises the serialization path, which is the only part of the
 /// claim that could be false.
 final class SessionOverXPCTransportTests: XCTestCase {
-    /// Echoes back the `wakeMode` it decoded, as `startSession`'s "session
-    /// id" reply. Every other method is an unused stub: `HelperProtocol` is
-    /// an `@objc` protocol, so conformance must be complete even though this
-    /// test sends exactly one message.
+    /// Echoes back the **whole `PowerRequest`** it decoded, as `startSession`'s
+    /// "session id" reply. Every other method is an unused stub:
+    /// `HelperProtocol` is an `@objc` protocol, so conformance must be complete
+    /// even though this test sends exactly one message.
+    ///
+    /// Both axes in one string, rather than the wake mode alone: the claim under
+    /// test is that `Session` crossing as JSON carries a client's *request*, and
+    /// a reply that mentioned one axis would pass while the other was dropped on
+    /// the wire — which is exactly the failure a new field can have.
     private final class EchoingHelper: NSObject, HelperProtocol {
+        static func echo(_ power: PowerRequest) -> String {
+            "\(power.wakeMode.rawValue)/disks=\(power.keepsDisksAwake)"
+        }
+
         func startSession(_ sessionJSON: Data, reply: @escaping (String?, String?) -> Void) {
             guard let session = try? JSONDecoder().decode(Session.self, from: sessionJSON) else {
                 return reply(nil, "invalid session payload")
             }
-            reply(session.wakeMode.rawValue, nil)
+            reply(Self.echo(session.power), nil)
         }
 
         /// The one other method here that is not a stub. `reset` acts on
@@ -311,10 +320,17 @@ final class SessionOverXPCTransportTests: XCTestCase {
         }
     }
 
-    /// Every mode, not just one: this is the check that the enum's *values*
-    /// survive, so testing only `.system` would pass even if every payload
-    /// arrived as the same mode.
-    func testEveryWakeModeSurvivesARealXPCRoundTrip() throws {
+    /// Every mode crossed with both disk answers, not one of each: this is the
+    /// check that the *values* survive, so testing only `.system` would pass
+    /// even if every payload arrived as the same mode, and testing only
+    /// `keepsDisksAwake: true` would pass against a decoder that hard-coded it.
+    ///
+    /// This is also Plan 6 Task 6's proof that the disk axis needs **no protocol
+    /// change**: `HelperProtocol.startSession(_ sessionJSON: Data, …)` takes a
+    /// blob, so a new `Session` field rides along — a claim about the transport
+    /// that the in-process encode/decode tests cannot make, because they never
+    /// touch NSXPC.
+    func testEveryPowerRequestSurvivesARealXPCRoundTrip() throws {
         let listener = NSXPCListener.anonymous()
         // `NSXPCListener.delegate` is weak — see Helper/main.swift's comment
         // on the same trap. A delegate created inline would be deallocated
@@ -330,29 +346,33 @@ final class SessionOverXPCTransportTests: XCTestCase {
         connection.resume()
         defer { connection.invalidate() }
 
-        for mode in WakeMode.allCases {
-            let replied = expectation(description: "reply for \(mode.rawValue)")
+        let requests = WakeMode.allCases.flatMap { mode in
+            [false, true].map { PowerRequest(wakeMode: mode, keepsDisksAwake: $0) }
+        }
+        for request in requests {
+            let described = EchoingHelper.echo(request)
+            let replied = expectation(description: "reply for \(described)")
             // The error handler and the reply block arrive on different
             // queues and either may be the one that runs; the expectation
             // tolerates both rather than trapping on over-fulfilment.
             replied.assertForOverFulfill = false
             var echoed: String?
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                XCTFail("XPC error for \(mode.rawValue): \(error.localizedDescription)")
+                XCTFail("XPC error for \(described): \(error.localizedDescription)")
                 replied.fulfill()
             } as? HelperProtocol
             let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "cli-501"),
                                   ownerUID: 501, persistence: .detached, origin: .manual,
-                                  startedAt: Date(), triggerID: nil, wakeMode: mode,
-                                  keepsDisksAwake: false)
+                                  startedAt: Date(), triggerID: nil, wakeMode: request.wakeMode,
+                                  keepsDisksAwake: request.keepsDisksAwake)
             let payload = try JSONEncoder().encode(session)
             proxy?.startSession(payload) { decoded, _ in
                 echoed = decoded
                 replied.fulfill()
             }
             wait(for: [replied], timeout: 10)
-            XCTAssertEqual(echoed, mode.rawValue,
-                           "wakeMode \(mode.rawValue) did not survive the XPC round trip")
+            XCTAssertEqual(echoed, described,
+                           "\(described) did not survive the XPC round trip")
         }
     }
 

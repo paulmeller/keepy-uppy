@@ -69,12 +69,12 @@ final class CLICommandParsingTests: XCTestCase {
     /// read as whatever it is. `on --while-vpn --keep-display-awake` is a VPN
     /// session in the screen-on mode, not a VPN session watching a flag.
     func testWhileVPNDoesNotSwallowTheNextToken() {
-        guard case .success(.on(let kind, _, let mode)) =
+        guard case .success(.on(let kind, _, let power)) =
                 parseCLIArguments(["on", "--while-vpn", "--keep-display-awake"]) else {
             return XCTFail("expected .on")
         }
         XCTAssertEqual(kind, .whileVPNActive)
-        XCTAssertEqual(mode, .systemAndDisplay)
+        XCTAssertEqual(power.wakeMode, .systemAndDisplay)
     }
 
     func testOnRejectsMultipleEndConditions() {
@@ -192,24 +192,24 @@ final class CLIWakeModeParsingTests: XCTestCase {
     /// line, every `ssh mac-mini 'keepy-uppy on --for 8h'`. Absence meaning
     /// anything else would silently weaken all of them.
     func testBareOnIsClamshell() {
-        guard case .success(.on(_, _, let wakeMode)) = parseCLIArguments(["on"]) else {
+        guard case .success(.on(_, _, let power)) = parseCLIArguments(["on"]) else {
             return XCTFail("expected .on")
         }
-        XCTAssertEqual(wakeMode, .clamshell)
+        XCTAssertEqual(power.wakeMode, .clamshell)
     }
 
     func testDisplayMaySleepSelectsSystemMode() {
-        guard case .success(.on(_, _, let wakeMode)) = parseCLIArguments(["on", "--display-may-sleep"]) else {
+        guard case .success(.on(_, _, let power)) = parseCLIArguments(["on", "--display-may-sleep"]) else {
             return XCTFail("expected .on")
         }
-        XCTAssertEqual(wakeMode, .system)
+        XCTAssertEqual(power.wakeMode, .system)
     }
 
     func testKeepDisplayAwakeSelectsSystemAndDisplayMode() {
-        guard case .success(.on(_, _, let wakeMode)) = parseCLIArguments(["on", "--keep-display-awake"]) else {
+        guard case .success(.on(_, _, let power)) = parseCLIArguments(["on", "--keep-display-awake"]) else {
             return XCTFail("expected .on")
         }
-        XCTAssertEqual(wakeMode, .systemAndDisplay)
+        XCTAssertEqual(power.wakeMode, .systemAndDisplay)
     }
 
     /// `WakeMode` is a flat three-case enum: one session holds exactly one
@@ -226,21 +226,21 @@ final class CLIWakeModeParsingTests: XCTestCase {
     /// not consume the single end-condition slot, and must not stop `--for`
     /// from also being given.
     func testAWakeModeFlagIsNotAnEndCondition() {
-        guard case .success(.on(let kind, _, let wakeMode)) =
+        guard case .success(.on(let kind, _, let power)) =
                 parseCLIArguments(["on", "--for", "2h", "--display-may-sleep"]) else {
             return XCTFail("expected .on — a wake-mode flag is not an end condition")
         }
         guard case .duration = kind else { return XCTFail("expected .duration") }
-        XCTAssertEqual(wakeMode, .system)
+        XCTAssertEqual(power.wakeMode, .system)
     }
 
     func testAWakeModeFlagCombinesWithAConditionEndCondition() {
-        guard case .success(.on(let kind, _, let wakeMode)) =
+        guard case .success(.on(let kind, _, let power)) =
                 parseCLIArguments(["on", "--while-process", "claude", "--keep-display-awake"]) else {
             return XCTFail("expected .on")
         }
         XCTAssertEqual(kind, .whileProcessRunning(processName: "claude"))
-        XCTAssertEqual(wakeMode, .systemAndDisplay)
+        XCTAssertEqual(power.wakeMode, .systemAndDisplay)
     }
 
     /// A wake-mode flag must not weaken the end-condition rejection either:
@@ -258,8 +258,8 @@ final class CLIWakeModeParsingTests: XCTestCase {
     func testEveryWakeModeIsReachableFromTheCommandLine() {
         let invocations = [[], ["--display-may-sleep"], ["--keep-display-awake"]]
         let reachable = Set(invocations.compactMap { flags -> WakeMode? in
-            guard case .success(.on(_, _, let wakeMode)) = parseCLIArguments(["on"] + flags) else { return nil }
-            return wakeMode
+            guard case .success(.on(_, _, let power)) = parseCLIArguments(["on"] + flags) else { return nil }
+            return power.wakeMode
         })
         XCTAssertEqual(reachable, Set(WakeMode.allCases))
     }
@@ -268,10 +268,88 @@ final class CLIWakeModeParsingTests: XCTestCase {
     /// distinct invocations must not collapse onto two modes.
     func testEachInvocationSelectsADistinctMode() {
         let modes = [[], ["--display-may-sleep"], ["--keep-display-awake"]].compactMap { flags -> WakeMode? in
-            guard case .success(.on(_, _, let wakeMode)) = parseCLIArguments(["on"] + flags) else { return nil }
-            return wakeMode
+            guard case .success(.on(_, _, let power)) = parseCLIArguments(["on"] + flags) else { return nil }
+            return power.wakeMode
         }
         XCTAssertEqual(Set(modes).count, modes.count, "two invocations selected the same mode")
+    }
+}
+
+/// `on`'s third axis: whether the session also holds attached disks out of
+/// idle. An axis the daemon can hold and no client can ask for is dead code
+/// that looks like a feature — three `SessionKind`s accumulated exactly that
+/// way — and this is what stops the fourth.
+final class CLIDiskAxisParsingTests: XCTestCase {
+    /// Absence means `false`, matching the decode-time direction `Session`
+    /// chose and for the same reason: nobody asked for it. Note this is the
+    /// *opposite* direction from the wake-mode default, which is absence →
+    /// strongest, because there absence would silently weaken every invocation
+    /// written before the flags existed. Here there is nothing to weaken.
+    func testKeepDisksAwakeIsSelectableAndAbsenceMeansFalse() {
+        guard case .success(.on(_, _, let power)) = parseCLIArguments(["on"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertFalse(power.keepsDisksAwake, "nobody asked for the disks to be held")
+
+        guard case .success(.on(_, _, let asked)) =
+                parseCLIArguments(["on", "--keep-disks-awake"]) else {
+            return XCTFail("expected .on")
+        }
+        XCTAssertTrue(asked.keepsDisksAwake)
+    }
+
+    /// It is a **third axis, not a wake mode**, so it must not join the
+    /// wake-mode `ExclusiveChoice`. `--display-may-sleep --keep-disks-awake` is
+    /// a coherent request — "let the screen sleep, keep the backup drive spun
+    /// up" — where `--display-may-sleep --keep-display-awake` is a contradiction
+    /// and stays refused. Over `allCases`, so a fourth mode inherits it.
+    func testTheDiskFlagCombinesWithEveryWakeModeFlag() {
+        for mode in WakeMode.allCases {
+            let flags = (mode.selectingFlag.map { [$0] } ?? []) + ["--keep-disks-awake"]
+            guard case .success(.on(let kind, _, let power)) =
+                    parseCLIArguments(["on"] + flags) else {
+                return XCTFail("'on \(flags.joined(separator: " "))' must be accepted")
+            }
+            XCTAssertEqual(power.wakeMode, mode, flags.joined(separator: " "))
+            XCTAssertTrue(power.keepsDisksAwake, flags.joined(separator: " "))
+            XCTAssertEqual(kind, .indefinite,
+                           "the disk flag must not consume the end-condition slot")
+        }
+    }
+
+    /// A single-flag `ExclusiveChoice`, in the shape `--json` uses: only the
+    /// duplicate branch is reachable, which is correct, because repeating a
+    /// flag is the one way to give two of a group of one.
+    func testTheDiskFlagStillCannotBeGivenTwice() {
+        guard case .failure(let error) =
+                parseCLIArguments(["on", "--keep-disks-awake", "--keep-disks-awake"]) else {
+            return XCTFail("expected failure — the flag may only be given once")
+        }
+        XCTAssertTrue(error.message.contains("--keep-disks-awake"),
+                      "the message must name the flag repeated: \(error.message)")
+        for untyped in WakeMode.selectingFlags {
+            XCTAssertFalse(error.message.contains(untyped),
+                           "the message names \(untyped), which the user never typed: \(error.message)")
+        }
+    }
+
+    /// **This test carries more weight than the usage-line test above it.**
+    ///
+    /// `onUsage` is otherwise built entirely from two exhaustive lists
+    /// (`OnOption.allCases` and `WakeMode.selectingFlags`), and
+    /// `OnOption.usageFragment`'s doc comment states what that buys: "a flag
+    /// cannot be added and left out of it". `--keep-disks-awake` belongs to
+    /// neither list — it is not an end condition and not a wake mode — so it is
+    /// the first hand-concatenated fragment, and for this one flag the
+    /// guarantee drops from structural to "a test covers it". This is that
+    /// test. It is not a nice-to-have: a flag missing from the only list of
+    /// `on`'s options a user ever sees is a flag nobody finds.
+    func testTheUsageLineNamesTheDiskFlag() {
+        guard case .failure(let error) = parseCLIArguments(["on", "--frobnicate"]) else {
+            return XCTFail("expected an unknown option to be refused")
+        }
+        XCTAssertTrue(error.message.contains("--keep-disks-awake"),
+                      "'on''s usage line does not mention --keep-disks-awake: \(error.message)")
     }
 }
 
@@ -480,11 +558,11 @@ final class CLIOnTokenisingTests: XCTestCase {
     func testOptionsAndWakeModeFlagsCombineInEitherOrder() {
         for args in [["--keep-display-awake", "--while-app", "com.apple.dt.Xcode"],
                      ["--while-app", "com.apple.dt.Xcode", "--keep-display-awake"]] {
-            guard case .success(.on(let kind, _, let wakeMode)) = parseCLIArguments(["on"] + args) else {
+            guard case .success(.on(let kind, _, let power)) = parseCLIArguments(["on"] + args) else {
                 return XCTFail("expected .on for \(args)")
             }
             XCTAssertEqual(kind, .whileAppRunning(bundleID: "com.apple.dt.Xcode"))
-            XCTAssertEqual(wakeMode, .systemAndDisplay)
+            XCTAssertEqual(power.wakeMode, .systemAndDisplay)
         }
     }
 }
@@ -685,10 +763,10 @@ final class WakeModeCLISurfaceTests: XCTestCase {
         for mode in WakeMode.allCases {
             guard let flag = mode.selectingFlag else { continue }
             XCTAssertEqual(WakeMode.selectedBy(flag: flag), mode)
-            guard case .success(.on(_, _, let parsed)) = parseCLIArguments(["on", flag]) else {
+            guard case .success(.on(_, _, let power)) = parseCLIArguments(["on", flag]) else {
                 return XCTFail("'on \(flag)' should parse")
             }
-            XCTAssertEqual(parsed, mode)
+            XCTAssertEqual(power.wakeMode, mode)
         }
     }
 
@@ -754,6 +832,27 @@ final class WakeModeCLISurfaceTests: XCTestCase {
             XCTAssertTrue(mode.sessionListDescription.contains("this session"),
                           "a concurrent clamshell session changes what is true of the Mac but not of "
                           + "this one, so the row has to say which it means: \(mode.sessionListDescription)")
+        }
+    }
+
+    /// The same invisibility argument, one axis over: without this clause a
+    /// `--keep-disks-awake` session prints exactly like one without it, in the
+    /// one listing whose job is to say what each session asked for.
+    ///
+    /// Annotating the exception, so the common row is byte-for-byte what it was
+    /// — stated as an equality rather than a substring, so a clause leaking onto
+    /// every row fails here.
+    func testASessionRowSaysWhenTheSessionAlsoHoldsDisksAwake() {
+        for mode in WakeMode.allCases {
+            let plain = PowerRequest(wakeMode: mode, keepsDisksAwake: false)
+            XCTAssertEqual(plain.sessionListDescription, mode.sessionListDescription,
+                           "a session that asked nothing of the disks reads exactly as before")
+
+            let holding = PowerRequest(wakeMode: mode, keepsDisksAwake: true)
+            XCTAssertTrue(holding.sessionListDescription.hasPrefix(mode.sessionListDescription),
+                          "the mode still leads: \(holding.sessionListDescription)")
+            XCTAssertTrue(holding.sessionListDescription.contains("disks"),
+                          holding.sessionListDescription)
         }
     }
 }

@@ -95,9 +95,11 @@ if case .finished(let tool) = command {
 guard let proxy = connect() else { fail("could not connect to the Keepy Uppy daemon") }
 
 switch command {
-case .on(let kind, let persistence, let wakeMode):
-    // `wakeMode` needs no new XPC method and no new parameter: `Session` is
-    // what crosses the boundary, as JSON, and it carries the field. See
+case .on(let kind, let persistence, let power):
+    // Neither power axis needs a new XPC method or a new parameter: `Session`
+    // is what crosses the boundary, as JSON, and it carries both fields —
+    // proved over a real NSXPC connection by
+    // `testEveryPowerRequestSurvivesARealXPCRoundTrip`, not assumed. See
     // `HelperProtocol.startSession` for which fields of this payload the
     // daemon actually honours — `owner` below is not one of them.
     // `ownerUID: 0` is a placeholder in exactly the sense `ownerID` above is —
@@ -107,7 +109,8 @@ case .on(let kind, let persistence, let wakeMode):
     // named at every construction site, on purpose.
     let session = Session(id: UUID(), kind: kind, owner: ownerID, ownerUID: 0,
                           persistence: persistence, origin: .manual, startedAt: Date(),
-                          triggerID: nil, wakeMode: wakeMode, keepsDisksAwake: false)
+                          triggerID: nil, wakeMode: power.wakeMode,
+                          keepsDisksAwake: power.keepsDisksAwake)
     guard let data = try? JSONEncoder().encode(session) else { fail("internal error encoding session") }
     proxy.startSession(data) { sessionID, error in
         if let sessionID {
@@ -125,7 +128,18 @@ case .on(let kind, let persistence, let wakeMode):
             // describes something that does not exist — two lines on stderr,
             // one saying the request failed and one qualifying a guarantee
             // the user never received.
-            if let caveat = wakeMode.lidCloseCaveat {
+            //
+            // `--keep-disks-awake` deliberately prints nothing. It takes
+            // nothing away, which is the entire reason `lidCloseCaveat` exists,
+            // and its real limitation ("system-wide, and an enclosure with its
+            // own spin-down firmware still decides for itself") is wrong on a
+            // Mac with only internal storage — a note that is sometimes wrong
+            // is worse than none, and one that fires on every use of a flag
+            // people put in a nightly backup script is a note people learn to
+            // skip. That sentence lives where the choice is made by somebody
+            // reading rather than scripting: `keepDisksAwakeSettingsFootnote`,
+            // and the docs.
+            if let caveat = power.wakeMode.lidCloseCaveat {
                 FileHandle.standardError.write("keepy-uppy: note: \(caveat)\n".data(using: .utf8)!)
             }
         } else {
@@ -180,13 +194,16 @@ case .sessions:
         } else {
             for session in sessions {
                 // `wake=` is here because nothing else reports it. `status`
-                // answers a boolean that is true for every mode — deliberately
-                // unchanged, scripts parse it — and the menu bar shows the
-                // same filled balloon either way, so before this line a
-                // `--display-may-sleep` session was indistinguishable from a
-                // lid-safe one in every output the product has.
+                // answers a boolean that is true for every request —
+                // deliberately unchanged, scripts parse it — and the menu bar
+                // shows the same filled balloon either way, so before this line
+                // a `--display-may-sleep` session was indistinguishable from a
+                // lid-safe one in every output the product has. It reads the
+                // whole `PowerRequest` for the same reason: a
+                // `--keep-disks-awake` session would otherwise be invisible in
+                // exactly the same way.
                 print("\(session.id)  \(session.kind)  origin=\(session.origin.rawValue)"
-                      + "  wake=\(session.wakeMode.sessionListDescription)")
+                      + "  wake=\(session.power.sessionListDescription)")
             }
         }
         semaphore.signal()

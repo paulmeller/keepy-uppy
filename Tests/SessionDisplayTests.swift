@@ -610,9 +610,12 @@ final class MenuCopyTests: XCTestCase {
         // "annotate the exception, not the rule" claim, stated as an equality
         // rather than a substring so a tag leaking onto the common case fails
         // here.
-        XCTAssertEqual(menuStartLabel(.indefinite, wakeMode: .clamshell), "Keep awake indefinitely")
-        XCTAssertEqual(menuStartLabel(.oneHour, wakeMode: .clamshell), "Keep awake for 1 hour")
-        XCTAssertEqual(menuStartLabel(.eightHours, wakeMode: .clamshell), "Keep awake for 8 hours")
+        XCTAssertEqual(menuStartLabel(.indefinite, wakeMode: .clamshell, keepsDisksAwake: false),
+                       "Keep awake indefinitely")
+        XCTAssertEqual(menuStartLabel(.oneHour, wakeMode: .clamshell, keepsDisksAwake: false),
+                       "Keep awake for 1 hour")
+        XCTAssertEqual(menuStartLabel(.eightHours, wakeMode: .clamshell, keepsDisksAwake: false),
+                       "Keep awake for 8 hours")
     }
 }
 
@@ -739,10 +742,10 @@ final class WakeModeMenuCopyTests: XCTestCase {
     /// the CLI's stderr note: warn where the mistake is being made.
     func testTheStartRowsSayWhatTheStoredDefaultWillActuallyStart() {
         for kind in DefaultSessionKind.allCases {
-            XCTAssertEqual(menuStartLabel(kind, wakeMode: .clamshell),
+            XCTAssertEqual(menuStartLabel(kind, wakeMode: .clamshell, keepsDisksAwake: false),
                            "Keep awake \(kind.durationPhrase)",
                            "the common case gains nothing")
-            let tagged = menuStartLabel(kind, wakeMode: .system)
+            let tagged = menuStartLabel(kind, wakeMode: .system, keepsDisksAwake: false)
             XCTAssertTrue(tagged.hasPrefix("Keep awake"), "still verb-first: \(tagged)")
             XCTAssertTrue(tagged.contains("lid"), tagged)
         }
@@ -851,6 +854,11 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
     func testTheKeyIsNamedOnceAndIsNotTheSessionKindKey() {
         XCTAssertEqual(DefaultWakeModePreference.key, "defaultWakeMode")
         XCTAssertNotEqual(DefaultWakeModePreference.key, "defaultSessionKind")
+    }
+
+    func testTheDiskPreferenceIsNotTheWakeModeKey() {
+        XCTAssertNotEqual(DefaultWakeModePreference.key, DefaultKeepDisksAwakePreference.key,
+                          "two preferences sharing a key is two controls fighting over one value")
     }
 
     func testThePickerOffersEveryModeAndLeadsWithTheDefault() {
@@ -989,9 +997,175 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
         XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("command line"),
                       wakeModeSettingsScopeNote)
         // Trigger-started sessions are built by `Agent/EvidenceLoopRunner.swift`
-        // with no `wakeMode:` at all, so they are `.clamshell` whatever this
-        // preference says. Stated as the positive fact, which is the one that
-        // stays true under the union.
+        // with an explicit `wakeMode: .clamshell`, so they are lid-safe whatever
+        // this preference says. Stated as the positive fact, which is the one
+        // that stays true under the union.
         XCTAssertTrue(wakeModeSettingsScopeNote.contains("lid closed"), wakeModeSettingsScopeNote)
+    }
+}
+
+/// The stored disk default, and the pane that writes it.
+///
+/// It takes the **naming discipline** from `DefaultWakeModePreference` — the key
+/// named once, the fallback named once — because that is what stops two files
+/// that never call each other from disagreeing on a string, which is not a
+/// compile error and not a crash but a Settings pane that appears to work while
+/// the menu reads the old value.
+///
+/// It deliberately does **not** take that type's unrecognised-value machinery,
+/// and there is no test for one here. `DefaultWakeModePreference` needs it
+/// because a `String` read back from `UserDefaults` can be a string matching no
+/// `WakeMode` case, so "unrecognised stored value → fall back" is a real state.
+/// A `Bool` has no such state: `UserDefaults.bool(forKey:)` returns `false` for
+/// an absent key and for a non-boolean value alike, and there is no third thing
+/// it can be. Writing `defaults.set("banana", forKey:)` to manufacture one would
+/// be a test of `UserDefaults`, not of this type.
+final class DefaultKeepDisksAwakePreferenceTests: XCTestCase {
+    func testTheKeyIsNamedOnceAndIsItsOwn() {
+        XCTAssertEqual(DefaultKeepDisksAwakePreference.key, "defaultKeepDisksAwake")
+        for other in ["defaultSessionKind", DefaultWakeModePreference.key] {
+            XCTAssertNotEqual(DefaultKeepDisksAwakePreference.key, other,
+                              "two preferences sharing a key is two controls fighting over one value")
+        }
+    }
+
+    /// Absent means off, matching the decode-time direction `Session` chose and
+    /// the CLI's absent-flag direction, for the same reason in all three places:
+    /// nobody asked for it, and inventing a machine-wide held assertion for
+    /// somebody who never opened this pane is over-application — a Mac whose
+    /// disks never spin down, for a reason nothing on screen explains.
+    ///
+    /// Note this is the *opposite* direction from `DefaultWakeModePreference`'s
+    /// fallback, which is the strongest mode. That asymmetry is deliberate and
+    /// is the same one `Session.init(from:)` documents: absence must not weaken
+    /// a promise anybody already relies on, and must not manufacture one nobody
+    /// asked for.
+    func testTheFallbackIsOffAndIsNamedOnce() {
+        XCTAssertFalse(DefaultKeepDisksAwakePreference.fallback)
+    }
+}
+
+/// The Settings copy for the disk toggle. Two true things and no third one.
+final class KeepDisksAwakeCopyTests: XCTestCase {
+    /// The promise: attached disks stay spun up while the session runs. That is
+    /// what the assertion actually buys, and it is why anyone would turn this
+    /// on.
+    func testTheFooterSaysWhatItActuallyDoes() {
+        let footnote = keepDisksAwakeSettingsFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("disks") || footnote.contains("drive"), footnote)
+        XCTAssertTrue(footnote.contains("session"),
+                      "it is a property of a running session, not of the Mac forever: \(footnote)")
+    }
+
+    /// The limitation, in the same breath as the promise, because the name
+    /// promises more than the mechanism can deliver: the assertion is
+    /// system-wide (`.superpowers/sdd/plan6-drive-alive-research.md` grepped
+    /// four `pwr_mgt` headers for a per-device assertion and found a decade-dead
+    /// notification API and nothing else), and it suspends macOS's `disksleep`
+    /// timer without any authority over an enclosure's own firmware.
+    ///
+    /// This is the sentence that has to be *here* rather than on stderr. A note
+    /// printed on every use of a flag people put in backup scripts is a note
+    /// people learn to skip, and "your enclosure may ignore this" is wrong on a
+    /// Mac with only internal storage — a note that is sometimes wrong is worse
+    /// than none, which is the scoping argument `lidCloseCaveat` already
+    /// settled. Settings is where the choice is made once, by somebody reading.
+    func testTheFooterSaysWhatItCannotDo() {
+        let footnote = keepDisksAwakeSettingsFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("system-wide") || footnote.contains("every"),
+                      "the assertion cannot be scoped to one drive, and the copy must not "
+                      + "let anyone believe otherwise: \(footnote)")
+        XCTAssertTrue(footnote.contains("firmware") || footnote.contains("enclosure"),
+                      "an enclosure that decides for itself still decides for itself: \(footnote)")
+    }
+
+    /// It must not claim to *wake* a drive. The header is explicit — "this
+    /// assertion doesn't increase a disk's power state (it just prevents that
+    /// device from idling)" — so a drive already parked when the session starts
+    /// stays parked, and Keepy Uppy deliberately does not do the I/O the header
+    /// suggests for getting them back.
+    func testTheFooterDoesNotPromiseToSpinAParkedDriveUp() {
+        let footnote = keepDisksAwakeSettingsFootnote.lowercased()
+        for overclaim in ["wakes", "spins up", "spin up", "wake up"] where footnote.contains(overclaim) {
+            XCTFail("the assertion prevents idling; it does not spin a parked drive up: \(footnote)")
+        }
+    }
+
+    /// Whose sessions this governs, said the way the wake-mode picker's scope
+    /// note says it: the menu's future sessions, not the command line's and not
+    /// a trigger's. Cross-checked against what the other two clients actually
+    /// do rather than against a sentence somebody wrote.
+    func testTheScopeNoteSaysWhichSessionsThisGoverns() {
+        XCTAssertTrue(keepDisksAwakeSettingsScopeNote.contains("menu"),
+                      keepDisksAwakeSettingsScopeNote)
+        XCTAssertTrue(keepDisksAwakeSettingsScopeNote.contains("from now on"),
+                      "a session's request is fixed when it starts; this cannot reach a running "
+                      + "one: " + keepDisksAwakeSettingsScopeNote)
+        XCTAssertTrue(keepDisksAwakeSettingsScopeNote.contains(keepDisksAwakeFlag),
+                      "the command line asks per session, and the note should name the flag: "
+                      + keepDisksAwakeSettingsScopeNote)
+    }
+}
+
+/// What the menu says about the disk axis — and, more to the point, where it
+/// deliberately says nothing.
+final class MenuDiskAxisCopyTests: XCTestCase {
+    /// **Nothing on a live session's row.** `menuWakeModeTag`'s rule is
+    /// "annotate the exception, not the rule", and its doc comment adds the
+    /// stricter one this follows: a row describes **this session**, never the
+    /// machine. The lid tag survives that rule because a session really does
+    /// individually give up surviving a lid close. The disk assertion has no
+    /// per-session meaning at all — it does nothing *to* the session, only to
+    /// the machine, and the machine holds it if **any** live session asked. So a
+    /// per-session disk badge would be a machine claim on a row that means "this
+    /// session", which is precisely the error the lid tag was scoped to avoid.
+    ///
+    /// This is also the answer to "why does my session's row not say it is
+    /// holding disks awake": because the row cannot say it truthfully, and
+    /// `pmset -g assertions` can.
+    func testALiveSessionsRowSaysNothingAboutDisks() {
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        for mode in WakeMode.allCases {
+            for disks in [false, true] {
+                let session = Session(id: UUID(), kind: .indefinite,
+                                      owner: ClientID(rawValue: "app-501"), ownerUID: 501,
+                                      persistence: .clientBound, origin: .manual, startedAt: t0,
+                                      triggerID: nil, wakeMode: mode, keepsDisksAwake: disks)
+                for row in [menuStopLabel(for: session, isOnlyOneOfMine: true, now: t0),
+                            menuStopLabel(for: session, isOnlyOneOfMine: false, now: t0),
+                            menuForeignSessionLabel(for: session, now: t0)] {
+                    XCTAssertFalse(row.lowercased().contains("disk"),
+                                   "\(mode.rawValue)/disks=\(disks): a row describes one session, "
+                                   + "and this axis has no per-session meaning: \(row)")
+                }
+            }
+        }
+    }
+
+    /// **Something on a start row, and only when the stored default is on.**
+    /// The argument is the one that put the wake-mode tag on `menuStartLabel`:
+    /// these rows are a promise about what the button is *about to do*, the
+    /// stored default is what it will do, and it costs nothing in the
+    /// overwhelmingly common case because the tag is empty when the default is
+    /// off.
+    func testTheStartRowsSayWhenTheStoredDefaultHoldsDisksAwake() {
+        for kind in DefaultSessionKind.allCases {
+            let off = menuStartLabel(kind, wakeMode: .clamshell, keepsDisksAwake: false)
+            let on = menuStartLabel(kind, wakeMode: .clamshell, keepsDisksAwake: true)
+            XCTAssertFalse(off.lowercased().contains("disk"),
+                           "the default is off, so the common row carries nothing extra: \(off)")
+            XCTAssertTrue(on.lowercased().contains("disk"),
+                          "a stored default that holds disks awake must be named on the button "
+                          + "that acts on it: \(on)")
+        }
+    }
+
+    /// Two tags, one parenthetical. A row reading "… (lid open only) (disks
+    /// stay awake)" is the accumulation the menu was rebuilt to remove.
+    func testTwoTagsShareOneParentheticalRatherThanStackingUp() {
+        let both = menuStartLabel(.indefinite, wakeMode: .system, keepsDisksAwake: true)
+        XCTAssertEqual(both.filter { $0 == "(" }.count, 1, both)
+        XCTAssertTrue(both.contains("lid open only"), both)
+        XCTAssertTrue(both.lowercased().contains("disk"), both)
     }
 }

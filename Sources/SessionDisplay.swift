@@ -488,13 +488,49 @@ func menuForeignSessionLabel(for session: Session, now: Date) -> String {
         + menuWakeModeSuffix(session.wakeMode)
 }
 
-/// The stored default is what these rows will actually start, so a default
-/// that is not `.clamshell` is named on the button that acts on it — the same
-/// argument that put the CLI's caveat on stderr at the moment the flag is
+/// The stored defaults are what these rows will actually start, so a default
+/// that is not the ordinary one is named on the button that acts on it — the
+/// same argument that put the CLI's caveat on stderr at the moment the flag is
 /// typed, rather than in a README. It costs nothing in the overwhelmingly
-/// common case, where the tag is empty.
-func menuStartLabel(_ kind: DefaultSessionKind, wakeMode: WakeMode) -> String {
-    "Keep awake \(kind.durationPhrase)" + menuWakeModeSuffix(wakeMode)
+/// common case, where both tags are empty.
+///
+/// **Both tags share one parenthetical.** "Keep awake for 1 hour (lid open only)
+/// (disks stay awake)" is the accumulation this menu was rebuilt to remove;
+/// "(lid open only, disks stay awake)" is one qualifier about one button.
+func menuStartLabel(_ kind: DefaultSessionKind, wakeMode: WakeMode,
+                    keepsDisksAwake: Bool) -> String {
+    let tags = [menuWakeModeTag(wakeMode), menuDiskTag(keepsDisksAwake)].compactMap { $0 }
+    guard !tags.isEmpty else { return "Keep awake \(kind.durationPhrase)" }
+    return "Keep awake \(kind.durationPhrase) (\(tags.joined(separator: ", ")))"
+}
+
+/// What a **start** row says about the stored disk default, or `nil` when it is
+/// off — which is the default, so most menus never see it.
+///
+/// It appears on start rows and **nowhere else**, and the asymmetry with
+/// `menuWakeModeTag` is the decision worth writing down, because "why does my
+/// live session's row not say it is holding disks awake?" is a question somebody
+/// will ask.
+///
+/// A start row is a promise about what the button is *about to do*, and the
+/// stored default is exactly what it will do. A session row is a description of
+/// **one session**, and `menuWakeModeTag`'s rule is that such a row may never
+/// make a claim about the machine. The lid tag survives that rule because a
+/// session really does individually give up surviving a lid close. This axis has
+/// no per-session meaning at all: holding disks out of idle does nothing *to*
+/// the session, only to the machine, and the machine holds the assertion if
+/// **any** live session asked. A per-session disk badge would therefore be a
+/// machine claim on a row that means "this session" — the exact error the lid
+/// tag was scoped to avoid. `pmset -g assertions` is where the machine-wide
+/// truth lives, and it names the row and the holder.
+///
+/// There is deliberately no machine-wide disk line beside `menuLidCaveat`
+/// either. That line exists because a lid close *loses work* when nothing holds
+/// it; disks spinning is a battery cost with no work at risk, and a permanent
+/// second line in the status region for it fails the same "annotate the
+/// exception, not the rule" test.
+func menuDiskTag(_ keepsDisksAwake: Bool) -> String? {
+    keepsDisksAwake ? "disks stay awake" : nil
 }
 
 // MARK: - Wake mode
@@ -665,3 +701,72 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
 /// a nudge rather than the guard; it is here because it costs three words and
 /// the failure it heads off is the one that loses work.
 let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."
+
+// MARK: - The stored disk default
+
+/// The preference the Settings toggle writes and the menu reads.
+///
+/// It takes the **naming discipline** from `DefaultWakeModePreference` — the key
+/// named once, the fallback named once — and nothing else. The reason that
+/// discipline exists is that two files which never call each other agree on a
+/// string, and a typo in either is not a compile error and not a crash: it is a
+/// Settings pane that appears to work while the menu goes on reading the old
+/// value.
+///
+/// It deliberately has **no unrecognised-value machinery**, because a `Bool`
+/// cannot have one. `DefaultWakeModePreference.mode(rawValue:)` exists because a
+/// `String` read back from `UserDefaults` can match no `WakeMode` case;
+/// `UserDefaults.bool(forKey:)` returns `false` for an absent key and for a
+/// non-boolean value alike, and there is no third thing it can be. A
+/// `keepsDisksAwake(rawValue:)` here would be a fallback for a state that does
+/// not exist.
+///
+/// The fallback is `false` — the opposite direction from
+/// `DefaultWakeModePreference`'s, on purpose, and the same direction as
+/// `Session`'s decode default and the CLI's absent flag. Absence must not
+/// *weaken* a promise anybody already relies on (hence `.clamshell` there), and
+/// must not *manufacture* one nobody asked for (hence `false` here).
+enum DefaultKeepDisksAwakePreference {
+    static let key = "defaultKeepDisksAwake"
+
+    /// Used both as the `@AppStorage` starting value and as the answer for
+    /// anyone who has never opened this pane.
+    static let fallback = false
+}
+
+/// The toggle's label. Names the effect, not the mechanism: "assertion" and
+/// "PreventDiskIdle" are `pmset` vocabulary.
+let keepDisksAwakeSettingsTitle = "Keep attached disks awake"
+
+/// The footer, saying both true things — what it does, and what it cannot do.
+///
+/// The limitation is not optional garnish. "Keep attached disks awake" reads
+/// like a promise about *your* drive, and the mechanism cannot make one: the
+/// assertion is system-wide, there is no per-device assertion in public API at
+/// all, and what it suspends is macOS's own `disksleep` timer, which an
+/// enclosure's firmware neither reads nor obeys. See
+/// `.superpowers/sdd/plan6-drive-alive-research.md`, which grepped four
+/// `pwr_mgt` headers for a device-scoped assertion and found one hit: a
+/// notification API deprecated in 10.9.
+///
+/// It also does not claim to *wake* anything. Apple's own doc comment: "This
+/// assertion doesn't increase a disk's power state (it just prevents that device
+/// from idling)" — a drive already parked when the session starts stays parked,
+/// and Keepy Uppy does not do the I/O the header suggests for getting it back,
+/// because reading arbitrary user volumes from a background daemon is a
+/// different feature with a different risk profile.
+///
+/// This sentence lives here rather than on the CLI's stderr deliberately. See
+/// `CLI/main.swift`'s note beside `lidCloseCaveat` for the argument: a warning
+/// that fires on every use of a scriptable flag is one people learn to skip, and
+/// this one is wrong on a Mac with only internal storage.
+let keepDisksAwakeSettingsFootnote = "Attached disks stay spun up while the session runs, so an external drive doesn't park itself mid-job. It's system-wide rather than per-drive — every attached disk, not one you pick — and it can't overrule a drive's own firmware: an enclosure that decides for itself when to spin down still will. A drive that's already parked when a session starts stays parked."
+
+/// Whose sessions this governs, and when — the same three facts
+/// `wakeModeSettingsScopeNote` states for the picker directly above it, because
+/// the two controls answer the same question about the same thing and a reader
+/// must not have to infer that the scope carries over.
+///
+/// "from now on" is not filler here either: a session's request is fixed when it
+/// starts, and nothing in this pane reaches a running one.
+let keepDisksAwakeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line asks per session with \(keepDisksAwakeFlag), and an automatic trigger never asks for it."

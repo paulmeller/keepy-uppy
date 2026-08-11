@@ -51,7 +51,9 @@ final class DaemonConnectionFailurePathTests: XCTestCase {
         let daemon = DaemonConnection()
         daemon.start()
         await expectCompletion("startSession() returned") {
-            _ = await daemon.startSession(kind: .indefinite, wakeMode: .clamshell)
+            _ = await daemon.startSession(
+                kind: .indefinite,
+                power: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
         }
     }
 
@@ -75,23 +77,32 @@ final class DaemonConnectionFailurePathTests: XCTestCase {
 /// The XPC round trip itself is not testable here (nothing registers the
 /// privileged daemon, and the ad-hoc-signed test host is refused by a real one
 /// at the code-signing gate), but the *payload* is — and the payload is where
-/// this app's one remaining silent-default trap lived. `Session` has exactly
-/// three fields with memberwise defaults; dropping any of them from a
-/// construction site compiles, passes, and is invisible in every surface the
-/// product has. It has happened three times in this repo.
+/// this app's one remaining silent-default trap lived. `Session` used to have
+/// exactly three fields with memberwise defaults; dropping any of them from a
+/// construction site compiled, passed, and was invisible in every surface the
+/// product has. It happened three times in this repo. It has none now — but the
+/// compiler can only force a field to be *named* here, not to be named with the
+/// value the caller asked for, which is what these tests check.
 final class DaemonConnectionRequestTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
     /// The regression this closes literally: `startSession` built its `Session`
     /// without `wakeMode:`, so Settings and the menu could offer a choice that
     /// was thrown away one line before it reached the wire.
-    func testTheRequestCarriesEveryWakeModeItIsGiven() {
+    ///
+    /// Every mode crossed with both disk answers, because the second axis can
+    /// fail in exactly the same way — a Settings toggle whose value is dropped
+    /// one line before the wire looks identical to one nobody switched on.
+    func testTheRequestCarriesEveryPowerRequestItIsGiven() {
         for mode in WakeMode.allCases {
-            let request = DaemonConnection.requestedSession(
-                kind: .indefinite, wakeMode: mode, persistence: .clientBound,
-                origin: .manual, now: t0)
-            XCTAssertEqual(request.wakeMode, mode,
-                           "the app asked for \(mode.rawValue) and sent \(request.wakeMode.rawValue)")
+            for disks in [false, true] {
+                let power = PowerRequest(wakeMode: mode, keepsDisksAwake: disks)
+                let request = DaemonConnection.requestedSession(
+                    kind: .indefinite, power: power, persistence: .clientBound,
+                    origin: .manual, now: t0)
+                XCTAssertEqual(request.power, power,
+                               "the app asked for \(power) and sent \(request.power)")
+            }
         }
     }
 
@@ -120,7 +131,8 @@ final class DaemonConnectionRequestTests: XCTestCase {
     func testTheRequestIsExactlyTheClientChosenFieldsAndNothingElse() {
         let until = t0.addingTimeInterval(3600)
         let request = DaemonConnection.requestedSession(
-            kind: .duration(until: until), wakeMode: .systemAndDisplay,
+            kind: .duration(until: until),
+            power: PowerRequest(wakeMode: .systemAndDisplay, keepsDisksAwake: true),
             persistence: .detached, origin: .trigger, now: t0)
 
         // `id`, `owner`, `ownerUID` and `startedAt` are all overwritten by the
@@ -141,7 +153,7 @@ final class DaemonConnectionRequestTests: XCTestCase {
                                         owner: ClientID(rawValue: "app"), ownerUID: 0,
                                         persistence: .detached, origin: .trigger, startedAt: t0,
                                         triggerID: nil, wakeMode: .systemAndDisplay,
-                                        keepsDisksAwake: false))
+                                        keepsDisksAwake: true))
     }
 }
 

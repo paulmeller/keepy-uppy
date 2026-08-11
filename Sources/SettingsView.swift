@@ -44,6 +44,8 @@ struct GeneralSettingsTab: View {
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
     @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
     private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
+    @AppStorage(DefaultKeepDisksAwakePreference.key, store: PreferencesSuite.defaults)
+    private var defaultKeepDisksAwake: Bool = DefaultKeepDisksAwakePreference.fallback
 
     private var defaultWakeMode: WakeMode {
         DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
@@ -95,6 +97,29 @@ struct GeneralSettingsTab: View {
                     Text(wakeModeSettingsExplanation(defaultWakeMode))
                         .settingsFootnote()
                     Text(wakeModeSettingsScopeNote)
+                        .settingsFootnote()
+                }
+            }
+
+            // Directly beneath the picker above, and that adjacency is the
+            // decision — not the tab. The two controls answer the same question
+            // about the same thing: what the menu's "Keep awake…" rows will
+            // start. One says how it holds the Mac awake, the other whether it
+            // also holds attached disks out of idle. They are one idea, in this
+            // order, and wherever the picker goes this goes with it.
+            //
+            // Its own Section, for the reason the picker has one: the footer
+            // has to carry both what this does and what it cannot do, and a
+            // second row inside the picker's Section would put that sentence
+            // under the wake-mode explanation, where it reads as a claim about
+            // the modes.
+            Section {
+                Toggle(keepDisksAwakeSettingsTitle, isOn: $defaultKeepDisksAwake)
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(keepDisksAwakeSettingsFootnote)
+                        .settingsFootnote()
+                    Text(keepDisksAwakeSettingsScopeNote)
                         .settingsFootnote()
                 }
             }

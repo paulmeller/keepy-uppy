@@ -14,6 +14,13 @@ struct MenuContent: View {
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
     @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
     private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
+    /// A `Bool` needs no raw-value dance and no fallback function: an absent key
+    /// and a non-boolean value both read `false`, which is the fallback. The key
+    /// and that fallback are still named once, in
+    /// `DefaultKeepDisksAwakePreference`, because a string literal repeated here
+    /// is how this pane and Settings would come to disagree.
+    @AppStorage(DefaultKeepDisksAwakePreference.key, store: PreferencesSuite.defaults)
+    private var defaultKeepDisksAwake: Bool = DefaultKeepDisksAwakePreference.fallback
 
     /// Settings' General tab writes the raw value; an unrecognised one (an
     /// enum case removed in a later version, say) falls back rather than
@@ -29,6 +36,13 @@ struct MenuContent: View {
     /// than the user asked for, and looks identical in every surface.
     private var defaultWakeMode: WakeMode {
         DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
+    }
+
+    /// The whole request these rows will start, assembled once. Every start
+    /// button reads this rather than passing axes individually, so a row cannot
+    /// start a session with one of them left behind.
+    private var defaultPower: PowerRequest {
+        PowerRequest(wakeMode: defaultWakeMode, keepsDisksAwake: defaultKeepDisksAwake)
     }
 
     /// The identity the daemon stamps on sessions this app starts, derived the
@@ -101,21 +115,24 @@ struct MenuContent: View {
         // anyone does here, and it used to take three interactions: open the
         // menu, hover "Start…", wait, then pick. The stored default leads.
         //
-        // Still one row per duration, deliberately: the stored wake mode
+        // Still one row per duration, deliberately: the stored power request
         // applies to all of them, so this stays a list of *when it ends* and
-        // does not become a 4×3 grid. Changing how it keeps the Mac awake is a
-        // Settings decision made once, not a per-start choice.
-        Button(menuStartLabel(defaultKind, wakeMode: defaultWakeMode)) {
+        // does not become a 4×3 grid — let alone a 4×3×2 one now that there is a
+        // third axis. What a session asks of the machine is a Settings decision
+        // made once, not a per-start choice.
+        Button(menuStartLabel(defaultKind, wakeMode: defaultWakeMode,
+                              keepsDisksAwake: defaultKeepDisksAwake)) {
             Task {
                 await daemon.startSession(kind: defaultKind.sessionKind(now: Date()),
-                                          wakeMode: defaultWakeMode)
+                                          power: defaultPower)
             }
         }
         ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
-            Button(menuStartLabel(kind, wakeMode: defaultWakeMode)) {
+            Button(menuStartLabel(kind, wakeMode: defaultWakeMode,
+                                  keepsDisksAwake: defaultKeepDisksAwake)) {
                 Task {
                     await daemon.startSession(kind: kind.sessionKind(now: Date()),
-                                              wakeMode: defaultWakeMode)
+                                              power: defaultPower)
                 }
             }
         }
