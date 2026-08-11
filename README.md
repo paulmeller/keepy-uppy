@@ -139,12 +139,37 @@ when the Mac is open in front of you and you'd rather it behaved normally in
 every other respect. Settings → General picks the mode for sessions you start
 from the menu bar.
 
+One more flag, on an axis of its own — it combines with any wake mode and any
+`--while-…`:
+
+```sh
+keepy-uppy on --for 8h --keep-disks-awake    # …and keep attached disks spun up
+```
+
+It holds off macOS's spin-down timer for as long as the session runs, so an
+external drive doesn't park itself in the middle of a backup. It's system-wide
+rather than per-drive — there's no per-device version of it in the API at all —
+and it can't overrule an enclosure that decides for itself when to spin down. A
+disk already parked when the session starts stays parked.
+
+**Network shares aren't covered, and can't be.** macOS offers nothing at any
+layer that says "keep this SMB or AFP mount alive"; the only thing that works
+is touching a file on the share every few minutes, which needs a Files and
+Folders permission for a feature whose whole point is running while you're
+away. So the flag means disks attached to this Mac, and nothing here pretends
+otherwise.
+
+The same switch sits under the mode picker in Settings, for the sessions you
+start from the menu. A trigger's session always keeps this Mac awake with the
+lid closed and never asks for disks, so a rule you saved before either axis
+existed still does exactly what it always did.
+
 **It can't stop your Mac asking for a password.** macOS only lets a
 configuration profile change when the lock kicks in, and an app isn't allowed to
 install one — the setting is yours to change in System Settings → Lock Screen.
 
-*Both flags and that picker are on `main` only — the current download predates
-them. See [Status](#status).*
+*All three flags, the picker and that switch are on `main` only — the current
+download predates them. See [Status](#status).*
 
 CLI sessions outlive the shell that started them. Menu-bar sessions end when
 you quit the app. That's deliberate — one is for automation, the other is for
@@ -240,10 +265,16 @@ can't influence — which is how `keepy-uppy off` stops the session an earlier
 `keepy-uppy on` started, while still refusing to touch another client's or
 another user's.
 
+**Where a behaviour lives follows from who enforces it.** The daemon serves
+every logged-in user, so anything the daemon has to act on travels on the
+session itself — which is why the wake mode and the disk switch are fields on a
+session and not settings. A preference is for what a per-user process does with
+it; it isn't something the daemon could ever see, let alone enforce.
+
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **553 unit tests**.
+by **580 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -269,7 +300,7 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 553 tests on `main`, and
+**v0.1 — new, and moving fast.** Signed and notarized, 580 tests on `main`, and
 a privilege boundary that's been through three adversarial review passes. What
 it hasn't had yet is months on other people's hardware, and four claims above
 have never been watched happen on a real machine:
@@ -286,11 +317,12 @@ thing. [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the
 list of what only hardware can settle.
 
 **Most of this page is `main`, not the download.** The build on
-[Releases](../../releases) is **v0.1.0**, and `main` is more than forty commits
+[Releases](../../releases) is **v0.1.0**, and `main` is more than fifty commits
 past it — its own notes say 182 tests. It knows `--for`, `--until`,
 `--while-app` and three trigger conditions, and that is the lot: no
 `--while-process` and no `keepy-uppy finished`, so none of the AI-coding-agent
-wiring above; no wake modes and no picker in Settings; and none of
+wiring above; no wake modes, no `--keep-disks-awake`, and neither of the
+Settings controls that go with them; and none of
 `--while-display`, `--while-ac-power`, `--while-cpu-busy`, `--while-volume`,
 `--while-subnet`, `--while-vpn` or `--while-usb`, nor the six trigger
 conditions that arrived with them. Nothing since has been notarized into a

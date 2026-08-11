@@ -198,6 +198,21 @@ success until the machine is on battery in a bag.
 - [ ] `pmset -g assertions` attributes `PreventUserIdleSystemSleep` to Keepy Uppy while any session is live, whatever its mode, and lists nothing of ours once the last session ends — a leaked assertion is invisible in `pmset -g` and survives every client quitting
 - [ ] Kill `KeepyUppyHelper` from Activity Monitor mid-session: `pmset -g assertions` is clean immediately (assertions are per-process, and `powerd` reaps a dead holder's), and `SleepDisabled` is back to `0` a moment later, when launchd restarts the helper and its startup clears it unconditionally. Sessions are in-memory, so the menu should show "Not keeping awake" rather than a session it can no longer honour
 
+**Plan 6 behaviours (disks, display):**
+
+The screensaver question this plan opened is **the item above** — "The open
+question this checklist exists to close", under Wake modes. It is not repeated
+here, and running it is what finishes `wakeModeSettingsExplanation`'s copy for
+"Only with the lid open, screen on" in one direction or the other.
+
+- [ ] `keepy-uppy on --keep-disks-awake`, then `pmset -g assertions`: a `PreventDiskIdle` row appears at 1, with `Keepy Uppy` named as the owning process underneath. (`pmset` suppresses the row while the level is 0 and prints it once it is not — so its absence beforehand and presence now is the whole check. No C API needed.)
+- [ ] ...and the row goes away within a moment of that session ending; two sessions wanting it means the last one to end is what releases it
+- [ ] `--keep-disks-awake` combines with `--display-may-sleep` and with `--keep-display-awake`; it is a third axis, not a wake mode, and no combination is refused
+- [ ] An external drive that would otherwise spin down stays spun up through a long idle period with such a session live (an enclosure with its own firmware timer may still spin down — that is the documented limitation, not a bug)
+- [ ] A network share is NOT kept alive, and the README says so — this item exists to confirm we did not quietly ship a half-working touch
+- [ ] With a `--keep-disks-awake` session live, `keepy-uppy status --json` still prints exactly `{"keepingAwake": true}` — a script written before this plan must not start finding a new field, and `sessions` is where the axis is reported (`wake=…; attached disks held awake`)
+- [ ] Settings → General's "Keep attached disks awake" switch is what a menu-started session uses, and the menu's start rows carry `(disks stay awake)` while it is on — a live session's own row deliberately does not, because the assertion is machine-wide and `pmset -g assertions` is where that truth lives
+
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary
 - [x] A non-agent client's condition report is rejected and logged
