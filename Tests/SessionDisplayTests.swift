@@ -1658,6 +1658,194 @@ final class CLIInstallCopyTests: XCTestCase {
     }
 }
 
+// MARK: - Notifications
+
+/// The Settings surface for the two notifications, and the sentence a refused
+/// grant gets.
+///
+/// Spec §4: ask lazily, at first use; degrade honestly; never require it. **A
+/// refused grant must not silently mean "nothing happens with no visible
+/// reason"** — the discipline Plan 5 designed for a refused Location grant,
+/// applied a second time so that both read the same. (Notifications are the
+/// only other grant in this project. Plan 6's Accessibility surface went with
+/// the jiggler when it was cut, and the notification grant is not TCC at all —
+/// `tccd`'s own service-string table has no entry for it, so the
+/// helper-attributed-to-the-enclosing-bundle finding from Plan 6 does not
+/// govern here. What governs is that the agent's `bundleIdentifier` is its own,
+/// which would make an agent-held centre a second, separately-refusable client
+/// in System Settings.)
+final class NotificationAuthorizationCopyTests: XCTestCase {
+    /// Written over the enum rather than over the three states anybody thought
+    /// of. A `switch` that misses one is a blank line under a toggle.
+    func testEveryAuthorizationStateHasASentence() {
+        var sentences: Set<String> = []
+        for state in NotificationAuthorization.allCases {
+            let sentence = notificationAuthorizationSentence(state)
+            XCTAssertGreaterThan(sentence.count, 30, "\(state) has no real sentence: \(sentence)")
+            XCTAssertTrue(sentence.hasSuffix("."), "\(state): \(sentence)")
+            XCTAssertFalse(sentence.contains("UNAuthorization"),
+                           "\(state) names the framework's vocabulary: \(sentence)")
+            sentences.insert(sentence)
+        }
+        XCTAssertEqual(sentences.count, NotificationAuthorization.allCases.count,
+                       "two states sharing a sentence is a state the user cannot act on")
+    }
+
+    /// **The one that matters.** A toggle that is ON while the grant is denied
+    /// must say so — the "on but doing nothing" failure, in the one place this
+    /// project still has a grant to be refused.
+    func testAnEnabledToggleWithADeniedGrantReportsThatItIsNotWorking() {
+        guard let note = notificationStatusNote(state: .denied, anyToggleOn: true) else {
+            return XCTFail("a denied grant under an enabled toggle must say something")
+        }
+        let sentence = note.sentence.lowercased()
+        XCTAssertTrue(sentence.contains("system settings"),
+                      "it has to name where the fix is: \(sentence)")
+        XCTAssertTrue(sentence.contains("won't") || sentence.contains("nothing"),
+                      "it has to say the toggle above it is not doing anything: \(sentence)")
+        XCTAssertTrue(note.offersSystemSettings,
+                      "naming System Settings without offering to open it is half the affordance")
+    }
+
+    /// Nothing switched on is not a problem, and a pane that reports one is a
+    /// nag. This is the difference between "degrade honestly" and "ask again".
+    func testNothingIsReportedWhileBothTogglesAreOff() {
+        for state in NotificationAuthorization.allCases {
+            XCTAssertNil(notificationStatusNote(state: state, anyToggleOn: false),
+                         "\(state) is nobody's problem while nothing is switched on")
+        }
+    }
+
+    /// A working grant under an enabled toggle says nothing either: the toggle
+    /// being on is already the report.
+    func testAWorkingGrantSaysNothing() {
+        XCTAssertNil(notificationStatusNote(state: .authorized, anyToggleOn: true))
+    }
+
+    /// Every other state under an enabled toggle *is* reported, written over
+    /// the enum so a sixth state cannot arrive and be silently treated as fine.
+    func testEveryStateThatIsNotWorkingIsReported() {
+        for state in NotificationAuthorization.allCases where state != .authorized {
+            XCTAssertNotNil(notificationStatusNote(state: state, anyToggleOn: true),
+                            "\(state) leaves a toggle on with nothing to explain it")
+        }
+    }
+
+    /// ..."you have not been asked yet" is a different sentence from "you said
+    /// no", because the action that fixes them is different: one is a toggle in
+    /// this pane, the other is a switch in System Settings.
+    func testNotDeterminedAndDeniedReadDifferently() {
+        let notDetermined = notificationAuthorizationSentence(.notDetermined)
+        let denied = notificationAuthorizationSentence(.denied)
+        XCTAssertNotEqual(notDetermined, denied)
+        XCTAssertTrue(denied.lowercased().contains("system settings"), denied)
+        XCTAssertFalse(notDetermined.lowercased().contains("system settings"),
+                       "nobody has been asked yet, so System Settings is not where the fix is: "
+                       + notDetermined)
+        // ...and the affordance follows the fix rather than being offered on
+        // every non-working state alike.
+        XCTAssertEqual(notificationStatusNote(state: .denied, anyToggleOn: true)?.offersSystemSettings,
+                       true)
+        XCTAssertEqual(
+            notificationStatusNote(state: .notDetermined, anyToggleOn: true)?.offersSystemSettings,
+            false, "the fix for “not asked yet” is in this pane, not in that one")
+    }
+
+    /// The deep link, pinned. Verified against this machine rather than
+    /// remembered: `/System/Library/ExtensionKit/Extensions/NotificationsSettings.appex`
+    /// carries `CFBundleIdentifier = com.apple.Notifications-Settings.extension`
+    /// and `allowsXAppleSystemPreferencesURLScheme = true` on macOS 26.2
+    /// (25C56). A deep link that lands on the wrong pane is worse than a
+    /// sentence telling the user where to go.
+    func testTheSystemSettingsLinkNamesTheNotificationsPane() {
+        XCTAssertEqual(notificationSettingsURL,
+                       "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        XCTAssertNotNil(URL(string: notificationSettingsURL),
+                        "a URL the app cannot even parse opens nothing at all")
+    }
+}
+
+/// The two toggles' labels and the section's footer.
+final class NotificationSettingsCopyTests: XCTestCase {
+    /// The stop toggle is scoped to the user's own sessions, exactly as the
+    /// banner it switches on is. `listSessions` is unfiltered and a Mac can
+    /// have two people logged in, so "when this Mac stops being kept awake" is
+    /// a machine claim this event cannot make — the same union-sensitivity
+    /// argument as `menuLidCaveat`.
+    func testTheToggleLabelsAreDistinctAndTheStopOneIsScopedToYourSessions() {
+        XCTAssertNotEqual(notifyWhenStoppedTitle, notifyWhenTriggerStartsTitle)
+        XCTAssertTrue(notifyWhenStoppedTitle.lowercased().contains("yours")
+                        || notifyWhenStoppedTitle.lowercased().contains("your"),
+                      "another account's session may still hold the Mac awake: "
+                      + notifyWhenStoppedTitle)
+        XCTAssertTrue(notifyWhenTriggerStartsTitle.lowercased().contains("trigger"),
+                      notifyWhenTriggerStartsTitle)
+    }
+
+    /// Limitation 1, stated in the copy rather than discovered. The app is the
+    /// notifier — it has the UI that can ask, the run loop that can present and
+    /// a lifetime the user understands, none of which is true of the UI-less
+    /// agent — so a session that ends overnight with the menu bar app quit
+    /// produces no notification. That is the correct trade and it has to be
+    /// said, because the alternative is a user concluding the feature is broken.
+    func testTheFooterSaysNothingIsAnnouncedWhileTheAppIsNotRunning() {
+        let footnote = notificationsSectionFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("running") || footnote.contains("quit"), footnote)
+        XCTAssertTrue(footnote.contains("keepy uppy") || footnote.contains("menu bar"), footnote)
+    }
+
+    /// Limitation 2, and the one most likely to be filed as a bug. Task 6's
+    /// suppression makes "stopping a session yourself here is not announced"
+    /// true; the second half follows from the app being unable to tell a
+    /// `keepy-uppy off` from an expiry or a safety stop. Said plainly, because
+    /// a user who has just learned that clicking Stop produces no banner and
+    /// then gets one for typing `off` will otherwise read it as a defect.
+    func testTheFooterSaysWhichStopsAreAnnouncedAndWhichAreNot() {
+        let footnote = notificationsSectionFootnote
+        XCTAssertTrue(footnote.contains("keepy-uppy off") || footnote.lowercased().contains("terminal"),
+                      "the command-line stop is the one that surprises people: " + footnote)
+        XCTAssertTrue(footnote.lowercased().contains("yourself")
+                        || footnote.lowercased().contains("you stop"),
+                      "the suppression has to be stated, not merely implemented: " + footnote)
+    }
+
+    /// The footer must not imply the app knows why anything ended, in the one
+    /// place where explaining the command-line case invites exactly that.
+    func testTheFooterDoesNotClaimTheAppCanTellWhyASessionEnded() {
+        let footnote = notificationsSectionFootnote.lowercased()
+        for overclaim in ["knows why", "tells you why", "the reason it stopped"]
+        where footnote.contains(overclaim) {
+            XCTFail("nothing outside the daemon knows why a session ended: " + footnote)
+        }
+    }
+
+    /// **Signposted in both directions.** The three ways of being told a
+    /// session ended are now split across two tabs, and an unsignposted split
+    /// is how a user concludes a feature was removed. One-directional
+    /// signposting only helps the user who happened to start on the right tab.
+    func testTheTwoTabsSignpostEachOther() {
+        XCTAssertTrue(notificationsTriggersSignpost.contains("Triggers"),
+                      notificationsTriggersSignpost)
+        XCTAssertTrue(notificationsTriggersSignpost.contains("On Session End"),
+                      notificationsTriggersSignpost)
+        XCTAssertTrue(sessionEndActionsNotificationsSignpost.contains("General"),
+                      sessionEndActionsNotificationsSignpost)
+        XCTAssertTrue(sessionEndActionsNotificationsSignpost.contains("Notifications"),
+                      sessionEndActionsNotificationsSignpost)
+    }
+
+    /// The Triggers footer keeps saying what it always said — this task adds a
+    /// line beside it, it does not replace one.
+    func testTheSessionEndActionsFootnoteStillSaysWhatItFiresFor() {
+        let footnote = sessionEndActionsFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("script"), footnote)
+        XCTAssertTrue(footnote.contains("webhook"), footnote)
+        XCTAssertTrue(footnote.contains("any"),
+                      "it fires for every session ending, not only trigger-started ones: "
+                      + footnote)
+    }
+}
+
 /// **Every preference the app has, written and read back.**
 ///
 /// This exists because of what the five-tab restructure could break without
@@ -1736,6 +1924,20 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
                         ?? DefaultKeepDisksAwakePreference.fallback) == true
                 }
             ),
+            // General — the two notification toggles. `true` for both, which is
+            // the opposite of their fallback, so neither can pass by accident.
+            PreferenceUnderTest(
+                name: SessionNotificationPreference.stopKey,
+                write: { self.defaults.set(true, forKey: SessionNotificationPreference.stopKey) },
+                readsBackWhatWasWritten: { SessionNotificationPreference.load().onStop }
+            ),
+            PreferenceUnderTest(
+                name: SessionNotificationPreference.triggerStartKey,
+                write: {
+                    self.defaults.set(true, forKey: SessionNotificationPreference.triggerStartKey)
+                },
+                readsBackWhatWasWritten: { SessionNotificationPreference.load().onTriggerStart }
+            ),
             // Safety & Guards — every field of it, through its own store.
             PreferenceUnderTest(
                 name: "safetyConfig",
@@ -1805,6 +2007,8 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
     /// tests above are read together with this one.
     func testAnUnwrittenSuiteReadsBackTheDocumentedDefaults() {
         XCTAssertNil(defaults.string(forKey: "defaultSessionKind"))
+        XCTAssertEqual(SessionNotificationPreference.load(),
+                       SessionNotificationPreferences(onStop: false, onTriggerStart: false))
         XCTAssertEqual(
             DefaultWakeModePreference.mode(
                 rawValue: defaults.string(forKey: DefaultWakeModePreference.key) ?? ""),

@@ -113,8 +113,17 @@ struct TriggersSettingsTab: View {
             } header: {
                 Text("On Session End")
             } footer: {
-                Text("Runs the script and/or POSTs to the webhook whenever any keep-awake session ends — manual, timed, trigger-started, or stopped by a safety guard.")
-                    .settingsFootnote()
+                // Two lines, and the second one is the return half of a
+                // two-way signpost: the three ways of being told a session
+                // ended now live on two tabs, and General → Notifications
+                // points back here. One-directional signposting only helps the
+                // reader who happened to start on the right tab.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(sessionEndActionsFootnote)
+                        .settingsFootnote()
+                    Text(sessionEndActionsNotificationsSignpost)
+                        .settingsFootnote()
+                }
             }
         }
         .formStyle(.grouped)

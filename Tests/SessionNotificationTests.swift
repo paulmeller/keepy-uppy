@@ -424,6 +424,31 @@ final class SessionNotificationPreferenceTests: XCTestCase {
         XCTAssertTrue(loaded.onTriggerStart)
     }
 
+    /// A stored value that is not a boolean falls back to off rather than to
+    /// anything else.
+    ///
+    /// `DefaultKeepDisksAwakePreference` deliberately has no test like this and
+    /// says so: `UserDefaults.bool(forKey:)` answers `false` for an absent key
+    /// and for a non-boolean alike, so manufacturing one would be a test of
+    /// `UserDefaults`. This is different, and the difference is
+    /// `SessionNotificationPreference.load()` — the coercion is **this
+    /// project's**, `object(forKey:) as? Bool ?? fallback`, so what is pinned
+    /// here is which way that `??` falls. Off, in both directions: absence must
+    /// not manufacture a notification nobody asked for, and — the reason this
+    /// matters more here than anywhere else in the pane — a stored value that
+    /// read as "on" would make the app ask a user for a notification grant they
+    /// never requested.
+    func testAnUnusableStoredValueFallsBackToOff() {
+        for junk in ["banana", "true", "1"] {
+            PreferencesSuite.defaults.set(junk, forKey: SessionNotificationPreference.stopKey)
+            PreferencesSuite.defaults.set(junk,
+                                          forKey: SessionNotificationPreference.triggerStartKey)
+            let loaded = SessionNotificationPreference.load()
+            XCTAssertFalse(loaded.onStop, "stored \"\(junk)\" must fall back")
+            XCTAssertFalse(loaded.onTriggerStart, "stored \"\(junk)\" must fall back")
+        }
+    }
+
     /// Which toggle governs which event, exhaustively — so the pair cannot be
     /// wired up crossed, which is a Settings pane where turning one thing on
     /// silently enables the other.

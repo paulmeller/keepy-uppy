@@ -411,6 +411,141 @@ func backgroundServicesFootnote(_ state: OnboardingService.State) -> String {
     }
 }
 
+// MARK: - Notifications
+
+/// The two toggles in General → Notifications.
+///
+/// The stop toggle is **scoped to the user's own sessions**, and that is not
+/// pedantry: `listSessions` is unfiltered and a Mac can have more than one
+/// person logged in, so "when this Mac stops being kept awake" is a claim about
+/// the machine that this event cannot make — another account's session may be
+/// holding it awake at the exact moment yours ends. The same union-sensitivity
+/// argument as `menuLidCaveat`, and the label is worded so that it matches the
+/// banner it switches on (`sessionNotificationCopy(for: .stoppedBeingKeptAwake)`)
+/// rather than promising something wider than the banner delivers.
+let notifyWhenStoppedTitle = "When nothing of yours is keeping this Mac awake"
+
+let notifyWhenTriggerStartsTitle = "When a trigger starts a session"
+
+/// What the grant is, in one sentence per state.
+///
+/// Written over `NotificationAuthorization`, which is this project's own enum
+/// precisely so that this can be an exhaustive `switch` — see that type for why
+/// `.ephemeral` is absent (it is `API_UNAVAILABLE(macos)`) and `.unknown` is
+/// present. A state without a sentence is a blank line under a toggle.
+///
+/// Each sentence names **the action that fixes it**, and the actions genuinely
+/// differ: "you have not been asked" is fixed by the toggle in this very pane,
+/// while "you said no" is fixed in System Settings and nowhere else. Copy that
+/// treated the two as one would send half its readers to a pane with nothing to
+/// change.
+func notificationAuthorizationSentence(_ state: NotificationAuthorization) -> String {
+    switch state {
+    case .notDetermined:
+        return "macOS hasn't been asked whether Keepy Uppy may notify you. Switching one of these on is what asks, and it only happens once."
+    case .denied:
+        return "macOS is blocking Keepy Uppy's notifications, so nothing will appear until you allow them in System Settings → Notifications."
+    case .authorized:
+        return "macOS is letting Keepy Uppy notify you."
+    case .provisional:
+        return "Keepy Uppy's notifications are being delivered quietly: they go straight to Notification Center, with no banner. You can change that in System Settings → Notifications."
+    case .unknown:
+        // Not a hypothetical to be shrugged at: `@unknown default` in
+        // `NotificationAuthorization.init(_:)` is where a status added by a
+        // future macOS lands, and the alternative to this sentence is a toggle
+        // that is on with nothing beneath it.
+        return "macOS reported a notification setting this version of Keepy Uppy doesn't recognise, so it can't say whether these will appear. Check Keepy Uppy in System Settings → Notifications."
+    }
+}
+
+/// A sentence, and whether to offer the button beside it.
+///
+/// One value rather than two functions, on `CLIInstallPrompt`'s precedent: the
+/// two decisions travel together, and a caller cannot take the sentence and
+/// forget the affordance or offer the affordance without the sentence.
+struct NotificationStatusNote: Equatable {
+    let sentence: String
+    /// `false` where System Settings is not where the fix is — offering to open
+    /// a pane that has nothing to change on it is worse than offering nothing.
+    let offersSystemSettings: Bool
+}
+
+/// What the pane says beneath the toggles, or `nil` when it should say nothing.
+///
+/// **`nil` while both toggles are off**, whatever the grant is. A user who has
+/// not asked for notifications does not have a problem, and a pane that reports
+/// one anyway is a nag — the difference between "degrade honestly" and "ask
+/// again". `nil` when the grant is working, too: the toggle being on is already
+/// the report.
+///
+/// Everything else is reported. That is the "on but doing nothing" failure
+/// Plan 5 designed this affordance for, in the one place this project still has
+/// a grant that can be refused: a toggle switched on, a banner that never
+/// arrives, and nothing anywhere to say why.
+func notificationStatusNote(state: NotificationAuthorization,
+                            anyToggleOn: Bool) -> NotificationStatusNote? {
+    guard anyToggleOn else { return nil }
+    switch state {
+    case .authorized:
+        return nil
+    case .notDetermined:
+        // The fix is the toggle that was just switched on — the request either
+        // has not completed or did not happen. System Settings may not even
+        // have a Keepy Uppy row yet, since one appears when an app first asks.
+        return NotificationStatusNote(sentence: notificationAuthorizationSentence(state),
+                                      offersSystemSettings: false)
+    case .denied, .provisional, .unknown:
+        return NotificationStatusNote(sentence: notificationAuthorizationSentence(state),
+                                      offersSystemSettings: true)
+    }
+}
+
+/// The Notifications pane of System Settings.
+///
+/// **Verified on this machine rather than remembered.** `/System/Library/
+/// ExtensionKit/Extensions/NotificationsSettings.appex`'s `Info.plist` carries
+/// `CFBundleIdentifier = com.apple.Notifications-Settings.extension` and
+/// `allowsXAppleSystemPreferencesURLScheme = true`, on macOS 26.2 (25C56) — so
+/// the pane exists under exactly this identifier and opts in to this scheme. A
+/// deep link that lands on the wrong pane is worse than a sentence telling the
+/// user where to go, which is why this was checked before it shipped.
+let notificationSettingsURL = "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+
+/// **The two limitations, said once each, where the choice is made.**
+///
+/// 1. *Nothing is announced while Keepy Uppy is not running.* The app is the
+///    notifier — it has the UI that can ask for the grant, the run loop that
+///    can present, and a lifetime the user already understands — and none of
+///    those is true of the UI-less LaunchAgent. So a `keepy-uppy` session that
+///    ends overnight with the menu bar app quit produces no banner. That is the
+///    honest trade rather than a defect: the alternative is a background agent
+///    asking for a grant as a second, separately-refusable notification client.
+///
+/// 2. *Stopping a session yourself here is not announced, and stopping one from
+///    a Terminal is.* The first is Task 6's suppression, without which the
+///    commonest banner in the product would be the app explaining a click back
+///    to the person who made it. The second follows from what the app cannot
+///    see: a `keepy-uppy off` is indistinguishable from an expiry, a condition
+///    ending or a safety guard, because no reason ever crosses XPC. Said
+///    plainly, because somebody who has just learned that clicking Stop is
+///    silent and then gets a banner for typing `off` will otherwise file it.
+let notificationsSectionFootnote = "Keepy Uppy has to be running to tell you anything — a session that ends while the menu bar app is quit ends without a word. Stopping a session yourself in this menu is never announced, but stopping one with keepy-uppy off in a Terminal is: from here that looks the same as a session expiring or a safety guard ending it."
+
+/// Half of a **two-way** signpost. The three ways of being told a session ended
+/// are split across two tabs, and an unsignposted split is how somebody
+/// concludes a feature was removed. `sessionEndActionsNotificationsSignpost` is
+/// the other half, and it exists because one-directional signposting only helps
+/// the reader who happened to start on the right tab.
+let notificationsTriggersSignpost = "To run a script or POST to a webhook when a session ends instead, see Settings → Triggers, under On Session End."
+
+/// The Triggers tab's "On Session End" footer, moved here from
+/// `TriggersSettingsTab` so that it is testable beside the line that now points
+/// at it. The words are unchanged.
+let sessionEndActionsFootnote = "Runs the script and/or POSTs to the webhook whenever any keep-awake session ends — manual, timed, trigger-started, or stopped by a safety guard."
+
+/// The other half of the two-way signpost. See `notificationsTriggersSignpost`.
+let sessionEndActionsNotificationsSignpost = "To be told on screen instead, see Settings → General, under Notifications."
+
 // MARK: - Menu bar
 
 /// The menu's first line: what is happening, in one glance, with no jargon.
