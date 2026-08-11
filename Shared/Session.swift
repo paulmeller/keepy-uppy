@@ -86,6 +86,47 @@ enum SessionKind: Equatable, Codable {
         case whileOnSubnet = "while-on-subnet"
         case whileVPNActive = "while-vpn-active"
         case whileUSBDevicePresent = "while-usb-device-present"
+
+        /// A representative `SessionKind` of this family. Associated values are
+        /// stand-ins chosen to be recognisable in a failure message, never
+        /// matched against anything live.
+        ///
+        /// The precedent, and the argument, are `TriggerConditionKind.
+        /// sampleCondition`'s: it is the bridge from "every kind there is" to
+        /// "a value to try it with", which is what lets a guard be written over
+        /// `allCases` instead of over a hand-written list a fourteenth kind
+        /// would silently not appear in. It lives here rather than in the test
+        /// for the same reason that one does — **two lists that must agree are
+        /// one list** — and being an exhaustive `switch` it stops compiling the
+        /// moment a case is added to `Family`, which is precisely when somebody
+        /// needs to be asked what a sample of it looks like.
+        ///
+        /// The deadline is a **parameter** rather than a baked-in constant,
+        /// where `sampleCondition` needed none. Three families
+        /// (`.duration`, `.untilTime`, `.lease`) carry a `Date`, and this
+        /// project injects time rather than reading it — a `Date()` in
+        /// `Shared/` would make every test using this non-deterministic, and a
+        /// fixed 1970 literal would hand callers a deadline that is always in
+        /// the past, which is a different lie. The caller has a clock; it can
+        /// say which one.
+        func sampleKind(deadline: Date) -> SessionKind {
+            switch self {
+            case .indefinite: return .indefinite
+            case .duration: return .duration(until: deadline)
+            case .untilTime: return .untilTime(deadline)
+            case .lease: return .lease(expires: deadline)
+            case .whileAppRunning: return .whileAppRunning(bundleID: "com.apple.dt.Xcode")
+            case .whileExternalDisplay: return .whileExternalDisplay
+            case .whileOnACPower: return .whileOnACPower
+            case .whileCPUBusy: return .whileCPUBusy(threshold: 0.3)
+            case .whileProcessRunning: return .whileProcessRunning(processName: "claude")
+            case .whileVolumeMounted: return .whileVolumeMounted(name: "Backup")
+            case .whileOnSubnet: return .whileOnSubnet(cidr: "192.168.1.0/24")
+            case .whileVPNActive: return .whileVPNActive
+            case .whileUSBDevicePresent:
+                return .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f)
+            }
+        }
     }
 
     /// This kind's family, dropping its associated value. Exhaustive, so a new

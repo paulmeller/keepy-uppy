@@ -565,6 +565,91 @@ final class TriggerRuleTests: XCTestCase {
         }
     }
 
+    /// The mirror of `testNoConditionFiresWhenEveryObservationFailed` above, on
+    /// the half that matters more. An observer that cannot answer must not be
+    /// able to put a Mac to sleep — and that has to be true for **every** kind
+    /// there is, including the one somebody adds next year, not only for the
+    /// nine that happen to have their own test today.
+    ///
+    /// Carried-over debt from Plan 5's whole-plan review, and it is worth being
+    /// precise about why it is here, because the obvious justification is
+    /// false: **Plan 6 adds nothing that ends a session.** This is not forced by
+    /// that plan's content. It is here because the guard is small, because it is
+    /// on the more dangerous half of the loop, and because a known open defect
+    /// that everybody agrees about and nobody closes is exactly how the CPU
+    /// observer survived four plans.
+    ///
+    /// The gap it closes: `triggersToFire` — the *starting* direction — has had
+    /// a generalised guard over `TriggerConditionKind.allCases` since Plan 5, so
+    /// a tenth condition inherits the guarantee for free. `sessionsToEnd` — the
+    /// *ending* direction, the one that puts a Mac to sleep mid-build — had only
+    /// per-kind tests: `testUndeterminedNeverEndsAProcessSession`,
+    /// `testAVolumeReadThatFailedNeverEndsASession`,
+    /// `testANetworkReadThatFailedNeverEndsASession` and six more, nine in all,
+    /// each written *after* somebody thought of it. A fourteenth `SessionKind`
+    /// inherited nothing.
+    ///
+    /// Written over `SessionKind.Family.allCases` for the reason the CLI
+    /// bijection test is: `SessionKind` cannot be `CaseIterable` (four cases
+    /// carry values), so `Family` is the only trustworthy list of every kind
+    /// there is, and a fourteenth kind cannot stay out of it — `SessionKind.
+    /// family` is an exhaustive switch.
+    ///
+    /// **It lives in this file, not beside its nine ending-direction siblings in
+    /// `EvidenceLoopTests`.** `everyObserverUndetermined` is `private` to this
+    /// class, so the alternative was either dropping that `private` or copying
+    /// the fixture — and a second `ObserverSet` full of `.undetermined`s is the
+    /// two-lists-that-must-agree drift this project forbids: it would silently
+    /// stop covering a tenth observer the day one is added to only one copy.
+    /// Reusing it as-is costs one visibility decision nobody has to make, and it
+    /// puts the two halves of one guarantee next to each other, which is an
+    /// argument in its own right.
+    ///
+    /// `.lease`, `.duration` and `.untilTime` are deadline-driven and
+    /// `sessionsToEnd` returns them untouched. That is correct behaviour, so the
+    /// loop confirms it rather than excluding it — **and that turns out to be
+    /// the half that was actually uncovered**, not the hypothetical fourteenth
+    /// kind. Measured while writing this, by injecting the regression twice and
+    /// running the whole suite each time:
+    ///
+    /// * Make `.whileVolumeMounted` end on `.undetermined` → this test fails
+    ///   naming `while-volume-mounted` at run 2 of 4, and so does its per-kind
+    ///   sibling `testAVolumeReadThatFailedNeverEndsASession`. Belt and braces.
+    /// * Move `.whileOnACPower` out of the untouched arm and end it on a failed
+    ///   read → **this test is the only one in 557 that fails.** Nothing else in
+    ///   the suite covers the five kinds `sessionsToEnd` is supposed to return
+    ///   untouched, because every per-kind sibling was written for a kind the
+    ///   agent evaluates.
+    ///
+    /// So this is not only insurance against a kind nobody has written yet. It
+    /// closes a live gap: the daemon-evaluated kinds could have been given an
+    /// ending arm by accident, and no test would have said a word.
+    func testNoSessionEndsWhenEveryObservationFailed() {
+        var evidence = SessionEvidence()
+        let start = Date(timeIntervalSince1970: 2_000_000)
+        for family in SessionKind.Family.allCases {
+            let session = Session(id: UUID(),
+                                  kind: family.sampleKind(deadline: start.addingTimeInterval(86_400)),
+                                  owner: ClientID(rawValue: "cli-501"),
+                                  persistence: .clientBound, origin: .manual, startedAt: start)
+            // More runs than `negativesBeforeEnding`, because the bug this
+            // guards against is a *stream* of failed reads accumulating into an
+            // end — which is what the process observer's sysctl race actually
+            // did. The clock advances a minute a run, so the four runs span
+            // longer than `.whileCPUBusy`'s 120s sustained-quiet window: a CPU
+            // arm that mistook "cannot read the CPU" for "the CPU went quiet"
+            // would have had time to trip.
+            for run in 0..<(SessionEvidence.negativesBeforeEnding + 2) {
+                let now = start.addingTimeInterval(Double(run) * 60)
+                XCTAssertTrue(
+                    sessionsToEnd([session], observers: everyObserverUndetermined,
+                                  evidence: &evidence, now: now).isEmpty,
+                    "\(family.rawValue) ends a session on observations that all failed "
+                    + "(run \(run + 1) of \(SessionEvidence.negativesBeforeEnding + 2))")
+            }
+        }
+    }
+
     // MARK: - Process-name validation
 
     func testAPlainNameIsAcceptedWhateverItsLength() {
