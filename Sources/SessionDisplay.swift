@@ -621,7 +621,30 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
     case .system:
         return "Holds off idle sleep while the lid is open and leaves the screen free to sleep, which is usually what a long unattended job wants. A session in this mode does not survive a lid close; only the default does."
     case .systemAndDisplay:
-        return "Keeps the screen lit as well as holding off idle sleep, for a dashboard or a progress window you want to be able to glance at. A session in this mode does not survive a lid close; only the default does."
+        // "for a dashboard or a progress window you want to be able to glance
+        // at" used to end the first sentence, and it was a promise about what
+        // you can *see* that nothing underwrites. The mechanism is
+        // `kIOPMAssertPreventUserIdleDisplaySleep`, whose header promises
+        // exactly two things — the display does not dim, the display does not
+        // turn off on the idle timer — both of them facts about the panel's
+        // power state. A screensaver leaves the panel lit and the dashboard
+        // invisible, which satisfies every measured effect of the assertion
+        // and defeats the promise entirely.
+        //
+        // Measured in `.superpowers/sdd/plan6-display-sleep-research.md`:
+        // `HIDIdleTime` — the free, unprivileged HID idle counter — climbed
+        // 43.275 s over 43 wall-clock seconds *while the assertion was held*.
+        // So the assertion demonstrably does not stop the idle clock.
+        //
+        // What it does NOT say, deliberately: that a screensaver can still
+        // start. That is an inference about `loginwindow`, whose behaviour
+        // nobody here has observed, and it fails in the expensive direction —
+        // a published "we cannot do this" that turns out to be wrong is a
+        // capability we told people we lacked. The sentence to add if the
+        // manual checklist item ever confirms it is written out in that
+        // research document, ready to drop in immediately below. Removing an
+        // unsupported claim needs no new evidence; adding a negative one does.
+        return "Holds the screen on as well as holding off idle sleep: the display won't dim or sleep on its idle timer while a session in this mode runs. A session in this mode does not survive a lid close; only the default does."
     }
 }
 

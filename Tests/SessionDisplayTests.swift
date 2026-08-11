@@ -884,6 +884,87 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
         }
     }
 
+    /// Plan 6 Task 1. The mechanism behind `.systemAndDisplay` is
+    /// `kIOPMAssertPreventUserIdleDisplaySleep`, and its header promises
+    /// exactly two things: the display does not dim, and it does not turn off
+    /// on the idle-activity timer. Both are facts about the panel's **power
+    /// state**. Neither is a promise about what is *drawn* on it.
+    ///
+    /// The shipped copy used to end this mode's first sentence with "for a
+    /// dashboard or a progress window you want to be able to glance at" — a
+    /// promise about visibility that no measurement underwrites, and one a
+    /// screensaver defeats while satisfying every measured effect of the
+    /// assertion. See `.superpowers/sdd/plan6-display-sleep-research.md`:
+    /// `HIDIdleTime` climbed 43.275 s over 43 wall-clock seconds *while the
+    /// assertion was held*, so the assertion does not stop the idle clock.
+    ///
+    /// Written over `allCases` rather than against `.systemAndDisplay`
+    /// literally, so a fourth mode cannot reintroduce the promise quietly, and
+    /// asserting the *distinction* rather than pinning the sentence, so a
+    /// rewording that keeps faith with the measurement doesn't fail for
+    /// nothing.
+    func testNoModePromisesTheScreenStaysWatchableRatherThanMerelyLit() {
+        // Vocabulary of *visibility*, which is what the assertion does not
+        // buy — as distinct from vocabulary of the panel being powered, which
+        // is what it does.
+        let unsupported = ["glance", "watch", "visible", "dashboard", "read the screen"]
+        for mode in WakeMode.allCases {
+            let explanation = wakeModeSettingsExplanation(mode).lowercased()
+            for word in unsupported {
+                XCTAssertFalse(explanation.contains(word),
+                               "\(mode.rawValue)'s explanation promises “\(word)” — a claim about "
+                               + "what you can see. The assertion holds the display's power state, "
+                               + "not its contents: \(explanation)")
+            }
+        }
+    }
+
+    /// The companion guard, and the more important of the two: the copy must
+    /// stay **silent** on screensavers, not take a side.
+    ///
+    /// Claiming suppression would be false — `HIDIdleTime` runs at full speed
+    /// under the assertion. Claiming the opposite ("it cannot stop a
+    /// screensaver") would be an inference about `loginwindow`, which nobody
+    /// here has observed, published as a limitation. The measurement that
+    /// settles it is a manual-checklist item that runs after this ships, so
+    /// until then neither sentence may appear in any mode's copy.
+    ///
+    /// This pins the *absence* of a claim; it does not pin the claim.
+    func testNoModeCopyTakesASideOnScreensaversWhileThatIsStillUnmeasured() {
+        for mode in WakeMode.allCases {
+            for text in [wakeModeSettingsExplanation(mode), menuWakeModeTag(mode) ?? "",
+                         wakeModeSettingsTitle(mode)] {
+                XCTAssertFalse(text.lowercased().contains("screensaver"),
+                               "\(mode.rawValue): unmeasured, so unsaid — \(text)")
+                XCTAssertFalse(text.lowercased().contains("screen saver"),
+                               "\(mode.rawValue): unmeasured, so unsaid — \(text)")
+            }
+        }
+        XCTAssertFalse(wakeModeSettingsScopeNote.lowercased().contains("screensaver"),
+                       wakeModeSettingsScopeNote)
+    }
+
+    /// The claim each mode's copy *is* allowed to make about the screen, pinned
+    /// against `holdsDisplayAwake` rather than against a list of case names —
+    /// the same discipline as `testOnlyTheScreenHoldingModeMentionsTheScreen`
+    /// on the menu tag, applied to the longer Settings sentence.
+    ///
+    /// A mode that holds the display says so; a mode that does not says the
+    /// screen is free to sleep. "Both modes leave the screen alone" and "both
+    /// modes hold it" are each a single edit away and each silently wrong, and
+    /// this is what catches them.
+    func testEachModesScreenClaimMatchesWhetherItActuallyHoldsTheDisplay() {
+        for mode in WakeMode.allCases {
+            let explanation = wakeModeSettingsExplanation(mode).lowercased()
+            XCTAssertTrue(explanation.contains("screen") || explanation.contains("display"),
+                          "\(mode.rawValue) says nothing about the screen at all: \(explanation)")
+            let saysFreeToSleep = explanation.contains("free to sleep")
+            XCTAssertEqual(saysFreeToSleep, !mode.holdsDisplayAwake,
+                           "\(mode.rawValue)'s explanation disagrees with `holdsDisplayAwake`: "
+                           + explanation)
+        }
+    }
+
     /// The pane sets a default for one client among four, and only for that
     /// client's *future* sessions. Someone reading it must not conclude that a
     /// `keepy-uppy on` in a terminal, or a trigger firing while they are away,
