@@ -92,6 +92,31 @@ if case .finished(let tool) = command {
     exit(0)
 }
 
+// `setup` and `reset` need this process to be able to see the `.app` bundle it
+// was shipped in, and through a link on the `PATH` it cannot — `Bundle.main`
+// resolves to the *link's* directory, measured, while `bundleIdentifier` goes on
+// reporting correctly, so the process looks like it still has an identity right
+// up until `SMAppService` goes looking for a plist. See `CLIBundleGuard` for the
+// measurement, for why the obvious recovery is impossible rather than merely
+// costly, and for why `reset` is the dangerous half: it catches the resulting
+// throw and prints "Daemon: not registered" with exit status 0 — a clean
+// uninstall report about a daemon that is still registered and still running.
+//
+// Here, above `connect()`, deliberately. The refusal must not depend on
+// reaching the daemon, and `reset`'s whole purpose is to work when the daemon
+// cannot be reached: routed through the connection instead, an unreachable
+// daemon would land in `finish(.unreachable)` and go straight to the unregister
+// that cannot work. Nothing below this line runs for a refused verb, including
+// the XPC connection itself.
+if let verb = CLIBundleGuard.appBundleVerb(command),
+   let refusal = CLIBundleGuard.refusal(
+       verb: verb,
+       bundlePath: Bundle.main.bundlePath,
+       resolvedExecutablePath: CLIBundleGuard.resolvedExecutablePath(),
+       exists: { FileManager.default.fileExists(atPath: $0) }) {
+    fail(refusal)
+}
+
 guard let proxy = connect() else { fail("could not connect to the Keepy Uppy daemon") }
 
 switch command {

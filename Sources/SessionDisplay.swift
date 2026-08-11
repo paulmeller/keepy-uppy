@@ -900,18 +900,197 @@ let keepDisksAwakeSettingsScopeNote = "Sessions you start from the menu from now
 
 // MARK: - The CLI & Advanced pane
 
-/// What the CLI & Advanced tab says while it has no controls in it.
+// `advancedSettingsPlaceholder` lived here — the sentence the tab showed while
+// it had no controls in it, so that an empty pane could not be mistaken for one
+// that failed to draw. The tab has a control now, and a placeholder that says
+// "nothing to set up here yet" above an Install button is worse than no
+// placeholder at all. Its two tests went with it.
+
+/// The one-line answer to "is `keepy-uppy` on my `PATH`?", for each of the five
+/// things that can be at that path.
 ///
-/// The tab exists before its contents on purpose: three later tasks each need
-/// it, and creating it three times is how one tab ends up with three different
-/// section orders. That leaves one release-shaped question — what a user who
-/// opens it sees — and "nothing at all" is the wrong answer twice over: an
-/// empty pane is indistinguishable from a pane that failed to draw, and it does
-/// not say where the settings they were looking for actually are.
+/// Every sentence names the path. The pane is read by somebody who is about to
+/// go and look, and "Installed" on its own does not say *where* — which is the
+/// entire question when the machine has two copies of the app, or a Homebrew
+/// build, or a link left behind by a version that was dragged to the Trash.
 ///
-/// Deliberately names no feature it cannot yet deliver. "Command-line and other
-/// advanced settings" is a restatement of the tab's own label, which is a
-/// promise the tab bar already makes; a list of specific unbuilt features would
-/// be a roadmap in a shipping build, and the one item in it most likely to be
-/// cut is the one that would look most like a broken promise.
-let advancedSettingsPlaceholder = "Nothing to set up here yet. Command-line and other advanced settings will live in this tab; everything Keepy Uppy can do today is set up in the other tabs."
+/// The three sentences for states this app will not touch say so in the same
+/// voice and give the reason, because "won't" without a reason reads as a
+/// failure. It is not a failure: another product's binary at that name is that
+/// product's, and a link this app cannot prove is its own is not its to delete.
+func cliInstallStatusSentence(_ state: CLIInstallState, linkPath: String) -> String {
+    switch state {
+    case .notInstalled:
+        return "Not installed. Nothing is at \(linkPath), so typing keepy-uppy in Terminal won't find it."
+    case .installed:
+        return "Installed. \(linkPath) points at this copy of Keepy Uppy."
+    case .linkedElsewhere(let target):
+        return "\(linkPath) already points at \(target), which isn't this copy of Keepy Uppy. Keepy Uppy won't change a link it didn't make."
+    case .dangling(let target):
+        return "\(linkPath) points at \(target), which no longer exists — usually a copy of Keepy Uppy that was moved or deleted. Keepy Uppy won't replace a link it can't prove is its own."
+    case .occupied:
+        return "Something that isn't a symlink is already at \(linkPath). Keepy Uppy won't touch it."
+    }
+}
+
+/// The command a user pastes into a root shell — **the one string in this pane
+/// whose exact characters matter to a machine rather than to a person.**
+///
+/// `mkdir -p` first, because `/usr/local/bin` may be absent and `/usr/local` is
+/// not user-writable either, so the directory cannot be created separately
+/// without the same privilege.
+///
+/// Plain `ln -s`, with no `-f`. It fails loudly if something is already at that
+/// path, which is the correct behaviour and the same rule the app itself
+/// follows: never overwrite silently. The `-f` variant exists in
+/// `cliReplaceCommand` below and is offered only for the one state where this
+/// app has already told the user what is there.
+///
+/// Every path goes through `shellSingleQuoted`. The bundle name contains a
+/// space today and could contain a `$` or a backtick tomorrow, and a shell
+/// splits an unquoted `/Applications/Keepy Uppy.app/…` into two words — which
+/// installs a link named `Keepy` pointing at nothing, from a command the user
+/// ran as root.
+func cliInstallCommand(binaryPath: String, linkPath: String) -> String {
+    let directory = (linkPath as NSString).deletingLastPathComponent
+    return "sudo mkdir -p \(shellSingleQuoted(directory))"
+        + " && sudo ln -s \(shellSingleQuoted(binaryPath)) \(shellSingleQuoted(linkPath))"
+}
+
+/// Replacing a link that points at nothing.
+///
+/// `-h` is not optional garnish next to `-f`: `ln -sf` onto a symlink that
+/// points at a **directory** creates the new link *inside* that directory
+/// instead of replacing it, which for a dangling link is a coin toss decided by
+/// what used to be at the other end.
+func cliReplaceCommand(binaryPath: String, linkPath: String) -> String {
+    "sudo ln -sfh \(shellSingleQuoted(binaryPath)) \(shellSingleQuoted(linkPath))"
+}
+
+func cliRemoveCommand(linkPath: String) -> String {
+    "sudo rm \(shellSingleQuoted(linkPath))"
+}
+
+/// A sentence and, usually, a command: what the pane shows after a click that
+/// did not simply work.
+struct CLIInstallPrompt: Equatable {
+    let note: String
+    /// `nil` when there is nothing safe to hand over.
+    let command: String?
+}
+
+/// What to say after an install attempt, or `nil` when the refreshed status
+/// sentence has already said it.
+///
+/// `.installed` and `.alreadyInstalled` return `nil` on purpose: the sentence
+/// above the button now reads "Installed. … points at this copy of Keepy Uppy",
+/// which is both the outcome and the evidence, and a second line congratulating
+/// the user is noise.
+func cliPrompt(after result: CLIInstallResult) -> CLIInstallPrompt? {
+    switch result {
+    case .installed, .alreadyInstalled:
+        return nil
+    case .needsPrivilege(let command):
+        return CLIInstallPrompt(note: cliNeedsRootToInstallNote, command: command)
+    case .blocked:
+        return CLIInstallPrompt(note: cliPathChangedNote, command: nil)
+    case .createdButNotVerified:
+        return CLIInstallPrompt(note: cliUnverifiedNote, command: nil)
+    }
+}
+
+func cliPrompt(after result: CLIRemoveResult) -> CLIInstallPrompt? {
+    switch result {
+    case .removed, .nothingToRemove:
+        return nil
+    case .needsPrivilege(let command):
+        return CLIInstallPrompt(note: cliNeedsRootToRemoveNote, command: command)
+    case .refused:
+        return CLIInstallPrompt(note: cliPathChangedNote, command: nil)
+    case .removedButStillThere:
+        return CLIInstallPrompt(note: cliUnverifiedNote, command: nil)
+    }
+}
+
+/// Why the button did not work, said as a fact about the directory rather than
+/// as an apology.
+///
+/// It is the **expected** outcome on a stock Mac, not an error: `/usr/local/bin`
+/// is `root:wheel drwxr-xr-x` on every Mac nobody has chowned, so this is the
+/// branch nearly every user reaches. Wording it as a failure would make the
+/// ordinary path read as something going wrong.
+let cliNeedsRootToInstallNote = "That directory belongs to root, so only an administrator can add to it. Paste this into Terminal to finish — it's the same link, made by you rather than by Keepy Uppy:"
+
+let cliNeedsRootToRemoveNote = "That directory belongs to root, so only an administrator can remove from it. Paste this into Terminal:"
+
+/// Offered for a dangling link, which is the one occupied state where nothing
+/// is at risk: the thing the link points at is already gone.
+let cliReplaceDanglingNote = "To point it at this copy instead:"
+
+/// The state changed between the pane reading it and the button being pressed —
+/// another admin, another copy of the app, a Terminal window. Rare, and it must
+/// not be silent, because the button appeared to do nothing.
+let cliPathChangedNote = "Something else is at that path now, so nothing was changed. The line above is what's there."
+
+/// The should-be-unreachable one. It exists because the alternative is
+/// believing a call that returned without throwing, which is the failure this
+/// project has shipped three times.
+let cliUnverifiedNote = "Keepy Uppy made the change and then read the path back, and what's there isn't what it wrote. Nothing further was changed."
+
+/// What installing buys, in the pane that is read immediately before somebody
+/// goes and tries it.
+func cliInstallSectionFootnote(linkPath: String) -> String {
+    "Installing puts a symlink at \(linkPath) — the first entry in every Mac's default PATH — so keepy-uppy works by name in any new Terminal window. Nothing is copied: the link points into this app bundle, so it follows the app when you update it, and breaks if you move it."
+}
+
+/// **The claim this pane is most likely to be read as making, and cannot.**
+///
+/// Task 4's research measured it rather than reasoned about it, by reproducing
+/// sshd's environment exactly — its compiled `PATH`, an otherwise empty
+/// environment, and this user's login shell run non-interactively and
+/// non-login, which is precisely what `ssh host 'cmd'` does:
+///
+///     $ env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$HOME" /bin/zsh -c 'echo $PATH'
+///     /Users/…/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin
+///
+/// No `/usr/local/bin`. `/etc/ssh/sshd_config:6` says sshd was compiled with
+/// that `PATH`; `/etc/zshenv` does not exist; `/etc/zprofile` runs
+/// `path_helper` but is scoped to **login** shells; `PermitUserEnvironment` is
+/// off by default and `AcceptEnv` does not accept `PATH`. So the bare name
+/// fails over ssh today and **still fails after this feature ships**.
+///
+/// (`~/.zshenv` *is* sourced by that shell and can add to the `PATH` — that is
+/// where `.cargo/bin` above comes from. It is the user's file and this app does
+/// not write it, which is why the sentence below offers the two forms that need
+/// nothing edited rather than suggesting an edit.)
+///
+/// The pane says so itself rather than leaving it to the README, because this
+/// is the surface a user reads immediately before trying exactly that command.
+let cliRemoteInvocationNote = "It doesn't make ssh mac-mini 'keepy-uppy on' work. A command sent over ssh runs in a non-login shell whose PATH is /usr/bin:/bin:/usr/sbin:/sbin — /usr/local/bin isn't on it, whatever is installed there. Either of these does work:"
+
+/// The two forms, built rather than written out, so the second one names the
+/// bundle the user is actually running.
+///
+/// Both are quoted by construction. The second nests a double-quoted remote
+/// word inside a single-quoted local one, which is the only arrangement that
+/// survives the space in `Keepy Uppy.app` on both sides of the connection.
+func cliRemoteInvocationForms(binaryPath: String) -> [String] {
+    [
+        // A login shell, so `/etc/zprofile` runs `path_helper` and
+        // `/usr/local/bin` lands on the PATH. Measured working.
+        "ssh mac-mini " + shellSingleQuoted("zsh -lc " + shellDoubleQuoted("keepy-uppy on --for 8h")),
+        // The absolute path, which needs nothing installed at all — the form
+        // `README.md` already gives headless users for `setup`.
+        "ssh mac-mini " + shellSingleQuoted(shellDoubleQuoted(binaryPath) + " on --for 8h"),
+    ]
+}
+
+/// The two verbs the link cannot serve, said here because the alternative is a
+/// user discovering it from a command that appears to have worked.
+///
+/// See `CLIBundleGuard` for the measurement and for the refusal this sentence
+/// is describing. The last clause is the important one: the CLI does not merely
+/// fail through the link, it declines to answer, because the failure mode it is
+/// declining to produce is `reset` reporting "Daemon: not registered" with exit
+/// status 0 while the daemon is still registered and still running.
+let cliSetupThroughLinkNote = "keepy-uppy setup and keepy-uppy reset are the two commands the link can't serve. Both have to find the app bundle they were started from, and a link in /usr/local/bin isn't inside one — so they refuse through the link instead of reporting a result they can't stand behind. Run those with the full path above."

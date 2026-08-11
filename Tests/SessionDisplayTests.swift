@@ -1430,34 +1430,231 @@ final class MenuDiskAxisCopyTests: XCTestCase {
     }
 }
 
-/// The sentence the CLI & Advanced tab shows while it has no controls.
-final class AdvancedSettingsPlaceholderTests: XCTestCase {
-    /// A blank pane is indistinguishable from a pane that failed to draw, and
-    /// the tab ships empty on purpose (three later tasks each need it to
-    /// exist). So it has to say both things: that there is nothing here yet,
-    /// and where the settings somebody came looking for actually are.
-    func testItSaysTheTabIsEmptyAndWhereTheRealSettingsAre() {
-        let sentence = advancedSettingsPlaceholder.lowercased()
-        XCTAssertFalse(sentence.isEmpty)
-        XCTAssertTrue(sentence.contains("yet"),
-                      "empty on purpose and temporarily, which is not what a blank pane says: "
-                      + advancedSettingsPlaceholder)
-        XCTAssertTrue(sentence.contains("tab"),
-                      "it has to point somewhere: " + advancedSettingsPlaceholder)
+/// The copy in the CLI & Advanced tab's first section.
+///
+/// `AdvancedSettingsPlaceholderTests` was here — two tests over the sentence
+/// the tab showed while it had no controls in it. The tab has a control now and
+/// the sentence is gone, so they went with it rather than being weakened into
+/// passing.
+final class CLIInstallCopyTests: XCTestCase {
+    private let link = "/usr/local/bin/keepy-uppy"
+    private let binary = "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy"
+
+    private var everyState: [CLIInstallState] {
+        [.notInstalled, .installed,
+         .linkedElsewhere(target: "/opt/homebrew/bin/keepy-uppy"),
+         .dangling(target: "/Users/x/Downloads/Keepy Uppy.app/Contents/MacOS/keepy-uppy"),
+         .occupied]
     }
 
-    /// It restates the tab's own label and promises nothing else. A list of
-    /// specific unbuilt features would be a roadmap in a shipping build, and
-    /// the item most likely to be cut is the one that would read as a broken
-    /// promise.
-    func testItNamesNoFeatureThatDoesNotExistYet() {
-        let sentence = advancedSettingsPlaceholder.lowercased()
-        for unbuilt in ["hot key", "hotkey", "shortcut", "diagnostic", "install", "symlink",
-                        "coming soon", "todo"] {
-            XCTAssertFalse(sentence.contains(unbuilt),
-                           "\"\(unbuilt)\" is a promise this build cannot keep: "
-                           + advancedSettingsPlaceholder)
+    /// Five states, five different sentences. A pane whose text does not change
+    /// with the state is a pane that is describing something other than this
+    /// Mac.
+    func testEveryStateGetsItsOwnSentence() {
+        let sentences = everyState.map { cliInstallStatusSentence($0, linkPath: link) }
+        XCTAssertEqual(Set(sentences).count, sentences.count, "\(sentences)")
+        for sentence in sentences {
+            XCTAssertFalse(sentence.isEmpty)
+            XCTAssertTrue(sentence.contains(link), "every sentence names the path: \(sentence)")
         }
+    }
+
+    /// "Installed" is a claim about *this* copy, not about some `keepy-uppy`.
+    /// A machine with two copies of the app is the case that makes the
+    /// difference visible, and it is the case the sentence has to survive.
+    func testOnlyTheInstalledSentenceClaimsTheLinkIsThisCopy() {
+        for state in everyState {
+            let sentence = cliInstallStatusSentence(state, linkPath: link)
+            let claims = sentence.lowercased().contains("points at this copy")
+            XCTAssertEqual(claims, state == .installed, sentence)
+        }
+    }
+
+    /// The three states this app will not act on say so *and say why*. "Won't"
+    /// on its own reads as a malfunction.
+    func testTheStatesThisAppWillNotTouchSayThatAndWhy() {
+        for state in [CLIInstallState.linkedElsewhere(target: "/somewhere/else"),
+                      .dangling(target: "/gone"),
+                      .occupied] {
+            let sentence = cliInstallStatusSentence(state, linkPath: link)
+            XCTAssertTrue(sentence.contains("won't"), sentence)
+        }
+    }
+
+    // MARK: The command strings
+
+    /// The whole reason `shellSingleQuoted` exists. Unquoted, a shell splits
+    /// `/Applications/Keepy Uppy.app/…` into two words and `ln -s` makes a link
+    /// called `Keepy` — as root, from a command this pane handed over.
+    func testTheFallbackCommandQuotesAPathWithSpaces() {
+        let command = cliInstallCommand(binaryPath: binary, linkPath: link)
+        XCTAssertTrue(command.contains("'\(binary)'"), command)
+        XCTAssertTrue(command.contains("'\(link)'"), command)
+        XCTAssertTrue(command.contains("'/usr/local/bin'"), command)
+        // Printed, because this assertion is the weak half of the proof and
+        // knows it: it checks that quotes were *written*, not that a shell
+        // parses the result as one word. `CLIInstallationRealFilesystemTests`
+        // hands the string to a real `/bin/sh`; this line is so that the exact
+        // characters of the shipping-layout command are legible in a log
+        // without anyone retyping them.
+        print("shipping-layout command: \(command)")
+    }
+
+    /// `mkdir -p` before the link, because `/usr/local/bin` may be absent and
+    /// `/usr/local` is not user-writable either — so the directory cannot be
+    /// created by a separate unprivileged step.
+    func testTheFallbackCommandCreatesTheDirectoryFirst() {
+        let command = cliInstallCommand(binaryPath: binary, linkPath: link)
+        guard let mkdirRange = command.range(of: "mkdir -p"),
+              let linkRange = command.range(of: "ln -s") else {
+            return XCTFail("both halves have to be there: \(command)")
+        }
+        XCTAssertTrue(mkdirRange.lowerBound < linkRange.lowerBound, command)
+    }
+
+    /// No `-f` on the install command. A plain `ln -s` fails loudly when
+    /// something is already at the path, which is the same rule the app itself
+    /// follows: never overwrite silently.
+    func testTheInstallCommandRefusesToOverwrite() {
+        let command = cliInstallCommand(binaryPath: binary, linkPath: link)
+        XCTAssertFalse(command.contains("ln -sf"), command)
+        XCTAssertFalse(command.contains("ln -sfh"), command)
+        XCTAssertTrue(command.contains("ln -s '"), command)
+    }
+
+    /// And `-h` wherever `-f` appears: `ln -sf` onto a symlink that points at a
+    /// **directory** creates the link inside it instead of replacing it.
+    func testTheReplaceCommandForcesAndDoesNotFollowTheOldLink() {
+        let command = cliReplaceCommand(binaryPath: binary, linkPath: link)
+        XCTAssertTrue(command.contains("ln -sfh"), command)
+    }
+
+    /// Every command is `sudo`-prefixed, because none of them can work without
+    /// it on the directory they target.
+    func testEveryCommandThisPaneHandsOverAsksForRoot() {
+        for command in [cliInstallCommand(binaryPath: binary, linkPath: link),
+                        cliReplaceCommand(binaryPath: binary, linkPath: link),
+                        cliRemoveCommand(linkPath: link)] {
+            XCTAssertTrue(command.hasPrefix("sudo "), command)
+        }
+    }
+
+    // MARK: Quoting, which is the part a shell reads
+
+    /// Total quoting, not "we remembered the space". A file name may legally
+    /// contain a `$`, a backtick, a `"` and a `'`, and all but the last survive
+    /// single quotes untouched.
+    func testSingleQuotingSurvivesEveryCharacterAShellWouldInterpret() {
+        XCTAssertEqual(shellSingleQuoted("/a b"), "'/a b'")
+        XCTAssertEqual(shellSingleQuoted("/a$b`c\"d\\e"), "'/a$b`c\"d\\e'")
+        XCTAssertEqual(shellSingleQuoted("/it's"), "'/it'\\''s'")
+    }
+
+    /// The nested form needs double quotes, which interpret four characters —
+    /// so those four are escaped and nothing else is.
+    func testDoubleQuotingEscapesExactlyWhatDoubleQuotesInterpret() {
+        XCTAssertEqual(shellDoubleQuoted("/a b"), "\"/a b\"")
+        XCTAssertEqual(shellDoubleQuoted("/a$b"), "\"/a\\$b\"")
+        XCTAssertEqual(shellDoubleQuoted("/a`b"), "\"/a\\`b\"")
+        XCTAssertEqual(shellDoubleQuoted("/a\"b"), "\"/a\\\"b\"")
+        XCTAssertEqual(shellDoubleQuoted("/a\\b"), "\"/a\\\\b\"")
+        XCTAssertEqual(shellDoubleQuoted("/it's"), "\"/it's\"")
+    }
+
+    // MARK: What it does and does not buy
+
+    /// **The claim this pane is most likely to be read as making, and cannot.**
+    /// `ssh host 'keepy-uppy on'` runs in a shell whose `PATH` never includes
+    /// `/usr/local/bin` — measured — so it fails today and still fails after
+    /// this ships. The pane is the surface somebody reads immediately before
+    /// trying exactly that.
+    func testThePaneSaysTheLinkDoesNotMakeTheBareNameWorkOverSSH() {
+        let note = cliRemoteInvocationNote.lowercased()
+        XCTAssertTrue(note.contains("ssh"), cliRemoteInvocationNote)
+        XCTAssertTrue(note.contains("doesn't") || note.contains("does not"), cliRemoteInvocationNote)
+        XCTAssertTrue(note.contains("/usr/local/bin"), cliRemoteInvocationNote)
+    }
+
+    /// Saying "that doesn't work" without saying what does is a diagnosis, and
+    /// the user came for an answer. Both measured-working forms are offered.
+    func testItOffersTheTwoFormsThatDoWorkRemotely() {
+        let forms = cliRemoteInvocationForms(binaryPath: binary)
+        XCTAssertEqual(forms.count, 2)
+        XCTAssertEqual(forms[0], "ssh mac-mini 'zsh -lc \"keepy-uppy on --for 8h\"'")
+        XCTAssertEqual(forms[1],
+                       "ssh mac-mini '\"/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy\" on --for 8h'")
+    }
+
+    /// The second form names the bundle the user is actually running, not a
+    /// literal `/Applications`. Somebody running from `~/Downloads` gets a
+    /// command that works for them.
+    func testTheAbsolutePathFormNamesThisBundleRatherThanApplications() {
+        let elsewhere = "/Users/x/Downloads/Keepy Uppy.app/Contents/MacOS/keepy-uppy"
+        let forms = cliRemoteInvocationForms(binaryPath: elsewhere)
+        XCTAssertTrue(forms[1].contains(elsewhere), forms[1])
+        XCTAssertFalse(forms[1].contains("/Applications/"), forms[1])
+    }
+
+    /// The two verbs the link cannot serve, named in the pane rather than left
+    /// to the README — and described as *refusing*, which is what the CLI now
+    /// does, rather than as "may not work".
+    func testThePaneNamesTheTwoVerbsTheLinkCannotServe() {
+        let note = cliSetupThroughLinkNote.lowercased()
+        XCTAssertTrue(note.contains("setup"), cliSetupThroughLinkNote)
+        XCTAssertTrue(note.contains("reset"), cliSetupThroughLinkNote)
+        XCTAssertTrue(note.contains("refuse"), cliSetupThroughLinkNote)
+    }
+
+    /// The footer claims the link follows an app update and breaks on a move,
+    /// which is what a symlink into a bundle actually does — and is the reason
+    /// nothing is copied.
+    func testTheFooterSaysNothingIsCopied() {
+        let footnote = cliInstallSectionFootnote(linkPath: link).lowercased()
+        XCTAssertTrue(footnote.contains(link), footnote)
+        XCTAssertTrue(footnote.contains("nothing is copied"), footnote)
+    }
+
+    // MARK: Prompts
+
+    /// A refused write must produce the command, not a dead end.
+    func testARefusedInstallPromptsWithTheCommand() {
+        let command = cliInstallCommand(binaryPath: binary, linkPath: link)
+        let prompt = cliPrompt(after: CLIInstallResult.needsPrivilege(command: command))
+        XCTAssertEqual(prompt?.command, command)
+        XCTAssertFalse(prompt?.note.isEmpty ?? true)
+    }
+
+    func testARefusedRemovePromptsWithTheCommand() {
+        let command = cliRemoveCommand(linkPath: link)
+        let prompt = cliPrompt(after: CLIRemoveResult.needsPrivilege(command: command))
+        XCTAssertEqual(prompt?.command, command)
+    }
+
+    /// Success says nothing extra: the status sentence above the button is
+    /// already both the outcome and the evidence.
+    func testSuccessAddsNoSecondSentence() {
+        XCTAssertNil(cliPrompt(after: CLIInstallResult.installed))
+        XCTAssertNil(cliPrompt(after: CLIInstallResult.alreadyInstalled))
+        XCTAssertNil(cliPrompt(after: CLIRemoveResult.removed))
+        XCTAssertNil(cliPrompt(after: CLIRemoveResult.nothingToRemove))
+    }
+
+    /// A press that changed nothing must not be silent — and must not hand over
+    /// a command that would clobber whatever appeared at the path.
+    func testABlockedPressSaysSoAndOffersNoCommand() {
+        let prompt = cliPrompt(after: CLIInstallResult.blocked(.occupied))
+        XCTAssertNotNil(prompt)
+        XCTAssertNil(prompt?.command)
+        XCTAssertNil(cliPrompt(after: CLIRemoveResult.refused(.linkedElsewhere(target: "/x")))?.command)
+    }
+
+    /// The should-be-unreachable branch still has words, because the
+    /// alternative is believing a call that returned without throwing.
+    func testAnUnverifiedWriteSaysItReadItBackAndDisagreed() {
+        XCTAssertEqual(cliPrompt(after: CLIInstallResult.createdButNotVerified(.occupied))?.note,
+                       cliUnverifiedNote)
+        XCTAssertEqual(cliPrompt(after: CLIRemoveResult.removedButStillThere(.occupied))?.note,
+                       cliUnverifiedNote)
     }
 }
 
