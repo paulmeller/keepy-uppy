@@ -1169,3 +1169,216 @@ final class MenuDiskAxisCopyTests: XCTestCase {
         XCTAssertTrue(both.lowercased().contains("disk"), both)
     }
 }
+
+/// The sentence the CLI & Advanced tab shows while it has no controls.
+final class AdvancedSettingsPlaceholderTests: XCTestCase {
+    /// A blank pane is indistinguishable from a pane that failed to draw, and
+    /// the tab ships empty on purpose (three later tasks each need it to
+    /// exist). So it has to say both things: that there is nothing here yet,
+    /// and where the settings somebody came looking for actually are.
+    func testItSaysTheTabIsEmptyAndWhereTheRealSettingsAre() {
+        let sentence = advancedSettingsPlaceholder.lowercased()
+        XCTAssertFalse(sentence.isEmpty)
+        XCTAssertTrue(sentence.contains("yet"),
+                      "empty on purpose and temporarily, which is not what a blank pane says: "
+                      + advancedSettingsPlaceholder)
+        XCTAssertTrue(sentence.contains("tab"),
+                      "it has to point somewhere: " + advancedSettingsPlaceholder)
+    }
+
+    /// It restates the tab's own label and promises nothing else. A list of
+    /// specific unbuilt features would be a roadmap in a shipping build, and
+    /// the item most likely to be cut is the one that would read as a broken
+    /// promise.
+    func testItNamesNoFeatureThatDoesNotExistYet() {
+        let sentence = advancedSettingsPlaceholder.lowercased()
+        for unbuilt in ["hot key", "hotkey", "shortcut", "diagnostic", "install", "symlink",
+                        "coming soon", "todo"] {
+            XCTAssertFalse(sentence.contains(unbuilt),
+                           "\"\(unbuilt)\" is a promise this build cannot keep: "
+                           + advancedSettingsPlaceholder)
+        }
+    }
+}
+
+/// **Every preference the app has, written and read back.**
+///
+/// This exists because of what the five-tab restructure could break without
+/// the compiler, the diff, or the eye noticing. Moving a control into a new
+/// `View` and losing its binding on the way — a `@State` where an
+/// `@AppStorage` was, a dropped `store:`, a key literal pasted from the
+/// control above it — produces a pane that compiles, renders correctly, and
+/// silently stops persisting, while a mechanical diff stays clean because the
+/// key is still spelled the same.
+///
+/// It is not a view test and cannot be one: `@AppStorage` only resolves inside
+/// a `View`'s update cycle, so nothing here can prove that
+/// `DisplaySettingsTab`'s toggle is wired to this key rather than to a fresh
+/// local variable. What it does pin is everything underneath that line — that
+/// each key still reads back what was written to it, through the same type the
+/// UI reads it through, and that no two preferences share storage — so a
+/// restructure that lands a real preference on a real key cannot also have
+/// broken the round trip. The wiring itself is checked by reading the diff
+/// (the `@AppStorage` lines moved verbatim) and by the manual checklist.
+final class SettingsPreferenceRoundTripTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        // Same guarantee the other suites take: this refuses to clear the
+        // shipping domain, which this test host would otherwise be.
+        XCTAssertTrue(PreferencesSuite.removeAllValuesForTesting(),
+                      "refused to clear the suite — it is the shipping one")
+    }
+
+    private var defaults: UserDefaults { PreferencesSuite.defaults }
+
+    /// One preference: how the UI writes it, and what the UI reads back.
+    /// Deliberately spelled out per preference rather than derived, because
+    /// the thing being pinned is exactly the pairing of a key with a type.
+    private struct PreferenceUnderTest {
+        let name: String
+        let write: () -> Void
+        let readsBackWhatWasWritten: () -> Bool
+    }
+
+    /// Every preference this app persists, in tab order. Add a row here when a
+    /// task adds a preference; the independence test below is only as complete
+    /// as this list.
+    private var allPreferences: [PreferenceUnderTest] {
+        [
+            // General — the default session kind. Its key is still a literal
+            // in both the pane and the menu (unlike the two below), which is
+            // the shape `DefaultWakeModePreference` exists not to copy.
+            PreferenceUnderTest(
+                name: "defaultSessionKind",
+                write: { self.defaults.set(DefaultSessionKind.fourHours.rawValue,
+                                           forKey: "defaultSessionKind") },
+                readsBackWhatWasWritten: {
+                    DefaultSessionKind(rawValue: self.defaults.string(forKey: "defaultSessionKind") ?? "")
+                        == .fourHours
+                }
+            ),
+            // Display — the wake mode. Not the fallback, so an unwritten
+            // preference cannot pass this by accident.
+            PreferenceUnderTest(
+                name: DefaultWakeModePreference.key,
+                write: { self.defaults.set(WakeMode.systemAndDisplay.rawValue,
+                                           forKey: DefaultWakeModePreference.key) },
+                readsBackWhatWasWritten: {
+                    DefaultWakeModePreference.mode(
+                        rawValue: self.defaults.string(forKey: DefaultWakeModePreference.key) ?? "")
+                        == .systemAndDisplay
+                }
+            ),
+            // Display — the disk axis. `true`, again the opposite of the
+            // fallback.
+            PreferenceUnderTest(
+                name: DefaultKeepDisksAwakePreference.key,
+                write: { self.defaults.set(true, forKey: DefaultKeepDisksAwakePreference.key) },
+                readsBackWhatWasWritten: {
+                    (self.defaults.object(forKey: DefaultKeepDisksAwakePreference.key) as? Bool
+                        ?? DefaultKeepDisksAwakePreference.fallback) == true
+                }
+            ),
+            // Safety & Guards — every field of it, through its own store.
+            PreferenceUnderTest(
+                name: "safetyConfig",
+                write: { SafetyConfigStore.save(Self.distinctiveSafetyConfig) },
+                readsBackWhatWasWritten: { SafetyConfigStore.load() == Self.distinctiveSafetyConfig }
+            ),
+            // Triggers — the rule list.
+            PreferenceUnderTest(
+                name: TriggerStore.key,
+                write: { TriggerStore.save([Self.distinctiveRule]) },
+                readsBackWhatWasWritten: { TriggerStore.load() == [Self.distinctiveRule] }
+            ),
+            // Triggers — "On Session End". A script path and a webhook URL,
+            // which are the two values a user notices losing.
+            PreferenceUnderTest(
+                name: "sessionCompletionConfig",
+                write: { SessionCompletionStore.save(Self.distinctiveCompletionConfig) },
+                readsBackWhatWasWritten: {
+                    SessionCompletionStore.load() == Self.distinctiveCompletionConfig
+                }
+            ),
+        ]
+    }
+
+    private static let distinctiveSafetyConfig = SafetyConfig(
+        thermalSensitivity: .cautious, batteryCutoff: 37, maxSessionDuration: 3 * 3600,
+        lidClosedStricter: false, gracePeriod: 42, cooldown: 43, batteryHysteresis: 7)
+
+    private static let distinctiveRule = TriggerRule(
+        id: UUID(uuidString: "8A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9")!,
+        condition: .processRunning(processName: "claude"),
+        defaultKind: .eightHours, enabled: false)
+
+    private static let distinctiveCompletionConfig = SessionCompletionConfig(
+        scriptPath: "/usr/local/bin/tell-me.sh", webhookURL: "https://example.com/hook")
+
+    /// The round trip itself, one preference at a time: write a value that is
+    /// not the default, read it back through the type the UI reads it through.
+    func testEveryPreferenceRoundTripsThroughItsOwnType() {
+        for preference in allPreferences {
+            XCTAssertFalse(preference.readsBackWhatWasWritten(),
+                           "\(preference.name): the test value equals the unwritten default, so "
+                           + "this test would pass without persisting anything")
+            preference.write()
+            XCTAssertTrue(preference.readsBackWhatWasWritten(),
+                          "\(preference.name) did not survive the round trip")
+        }
+    }
+
+    /// The copy-paste failure a restructure actually makes: a control lands in
+    /// a new file with the key of the control above it, so two settings fight
+    /// over one value. Writing each preference in turn must leave every other
+    /// preference exactly as it was.
+    func testWritingOnePreferenceDisturbsNoOther() {
+        let preferences = allPreferences
+        for preference in preferences { preference.write() }
+        for preference in preferences {
+            XCTAssertTrue(preference.readsBackWhatWasWritten(),
+                          "\(preference.name) lost its value to another preference's write — "
+                          + "two controls are sharing one key")
+        }
+    }
+
+    /// Nothing written: every preference answers with its documented default
+    /// rather than with an empty value. This is what a brand-new user gets,
+    /// and it is the state a mis-keyed control also produces — so the two
+    /// tests above are read together with this one.
+    func testAnUnwrittenSuiteReadsBackTheDocumentedDefaults() {
+        XCTAssertNil(defaults.string(forKey: "defaultSessionKind"))
+        XCTAssertEqual(
+            DefaultWakeModePreference.mode(
+                rawValue: defaults.string(forKey: DefaultWakeModePreference.key) ?? ""),
+            DefaultWakeModePreference.fallback)
+        XCTAssertEqual(
+            defaults.object(forKey: DefaultKeepDisksAwakePreference.key) as? Bool
+                ?? DefaultKeepDisksAwakePreference.fallback,
+            DefaultKeepDisksAwakePreference.fallback)
+        XCTAssertEqual(SafetyConfigStore.load(), .default)
+        XCTAssertEqual(TriggerStore.load(), [])
+        XCTAssertEqual(SessionCompletionStore.load(), SessionCompletionConfig())
+    }
+
+    /// The same guarantee, counted rather than listed: writing every
+    /// preference into an empty suite must leave exactly one key per
+    /// preference behind. Asked of the suite itself rather than of a list of
+    /// key literals on purpose — half of these keys are `private` to their
+    /// store, and a list of copies here would be a second place for them to
+    /// be spelled, which is the failure `PreferencesSuite` exists to prevent.
+    func testEveryPreferenceOccupiesExactlyOneKeyOfItsOwn() {
+        let preferences = allPreferences
+        XCTAssertEqual(storedKeys().count, 0, "setUp should have left an empty suite")
+        for preference in preferences { preference.write() }
+        XCTAssertEqual(storedKeys().count, preferences.count,
+                       "\(preferences.count) preferences wrote \(storedKeys().count) keys "
+                       + "(\(storedKeys().sorted())) — two of them are sharing storage")
+    }
+
+    /// The suite's own keys, and nothing else's: `dictionaryRepresentation()`
+    /// would fold in every global default on the machine.
+    private func storedKeys() -> Set<String> {
+        Set((UserDefaults.standard.persistentDomain(forName: PreferencesSuite.name) ?? [:]).keys)
+    }
+}

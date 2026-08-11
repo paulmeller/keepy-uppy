@@ -16,13 +16,29 @@ private enum SettingsMetrics {
 /// twenty times a minute, all discarded. Tabs own their own state.
 struct SettingsView: View {
     var body: some View {
+        // Five tabs, in the order a new user meets them: what the app does on
+        // its own (General), what starts a session without you (Triggers), what
+        // a session holds awake (Display), what stops one (Safety & Guards),
+        // and what you only go looking for (CLI & Advanced).
+        //
+        // Every symbol here is checked available at this project's 13.0
+        // deployment target rather than assumed — an unavailable SF Symbol
+        // renders as nothing at all, with no warning and no crash, which in a
+        // tab bar is an unlabelled blank where a tab should be. Verified
+        // against CoreGlyphs' `name_availability.plist`: bolt and
+        // exclamationmark.shield are 2019 (macOS 10.15), gearshape, display and
+        // terminal are 2020 (macOS 11.0).
         TabView {
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "gearshape") }
-            SafetySettingsTab()
-                .tabItem { Label("Safety", systemImage: "exclamationmark.shield") }
             TriggersSettingsTab()
                 .tabItem { Label("Triggers", systemImage: "bolt") }
+            DisplaySettingsTab()
+                .tabItem { Label("Display", systemImage: "display") }
+            SafetySettingsTab()
+                .tabItem { Label("Safety & Guards", systemImage: "exclamationmark.shield") }
+            AdvancedSettingsTab()
+                .tabItem { Label("CLI & Advanced", systemImage: "terminal") }
         }
         .frame(minWidth: SettingsMetrics.width, maxWidth: SettingsMetrics.width,
                minHeight: SettingsMetrics.minHeight)
@@ -42,14 +58,6 @@ struct GeneralSettingsTab: View {
     @State private var launchAtLoginEnabled = LoginItemService.status() == .enabled
     @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
-    @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
-    private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
-    @AppStorage(DefaultKeepDisksAwakePreference.key, store: PreferencesSuite.defaults)
-    private var defaultKeepDisksAwake: Bool = DefaultKeepDisksAwakePreference.fallback
-
-    private var defaultWakeMode: WakeMode {
-        DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
-    }
 
     var body: some View {
         Form {
@@ -74,56 +82,18 @@ struct GeneralSettingsTab: View {
                     .settingsFootnote()
             }
 
-            // Directly under "Default session", and not in Safety, because the
-            // two answer the same question about the same thing: what the
-            // menu's "Keep awake…" rows will start. One says when it ends, the
-            // other how it holds the Mac awake. Safety is about limits the
-            // daemon imposes on sessions it did not start, including the CLI's
-            // — this governs only sessions started here, so it would be the
-            // odd one out there.
-            //
-            // Its own Section rather than a second row of the one above so the
-            // footer can change with the selection, which is the arrangement
-            // Safety's thermal picker already uses: three short phrases can
-            // distinguish the options but cannot explain what they cost.
-            Section {
-                Picker("Keeps this Mac awake", selection: $defaultWakeModeRaw) {
-                    ForEach(wakeModeSettingsOrder, id: \.self) { mode in
-                        Text(wakeModeSettingsTitle(mode)).tag(mode.rawValue)
-                    }
-                }
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(wakeModeSettingsExplanation(defaultWakeMode))
-                        .settingsFootnote()
-                    Text(wakeModeSettingsScopeNote)
-                        .settingsFootnote()
-                }
-            }
-
-            // Directly beneath the picker above, and that adjacency is the
-            // decision — not the tab. The two controls answer the same question
-            // about the same thing: what the menu's "Keep awake…" rows will
-            // start. One says how it holds the Mac awake, the other whether it
-            // also holds attached disks out of idle. They are one idea, in this
-            // order, and wherever the picker goes this goes with it.
-            //
-            // Its own Section, for the reason the picker has one: the footer
-            // has to carry both what this does and what it cannot do, and a
-            // second row inside the picker's Section would put that sentence
-            // under the wake-mode explanation, where it reads as a claim about
-            // the modes.
-            Section {
-                Toggle(keepDisksAwakeSettingsTitle, isOn: $defaultKeepDisksAwake)
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(keepDisksAwakeSettingsFootnote)
-                        .settingsFootnote()
-                    Text(keepDisksAwakeSettingsScopeNote)
-                        .settingsFootnote()
-                }
-            }
-
+            // The "Keeps this Mac awake" picker and the "Keep attached disks
+            // awake" toggle used to sit here, in that order, directly under
+            // "Default session" — Plan 4 put the picker here because the two
+            // answer the same question about the same thing, and Plan 6 put the
+            // toggle immediately beneath the picker for the same reason. Plan 7
+            // moved the pair, together and in that order, to
+            // `Sources/DisplaySettingsTab.swift`, where the argument is written
+            // out in full. Nothing about it was withdrawn: "Default session"
+            // says *when* a session ends and those two say *what* it holds
+            // awake, and once there was a tab for the second question the pair
+            // belonged in it rather than in a General tab that is otherwise
+            // about the app rather than about a session.
             Section {
                 LabeledContent("Status") {
                     ServiceStatusBadge(state: onboarding.state)

@@ -770,3 +770,21 @@ let keepDisksAwakeSettingsFootnote = "Attached disks stay spun up while the sess
 /// "from now on" is not filler here either: a session's request is fixed when it
 /// starts, and nothing in this pane reaches a running one.
 let keepDisksAwakeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line asks per session with \(keepDisksAwakeFlag), and an automatic trigger never asks for it."
+
+// MARK: - The CLI & Advanced pane
+
+/// What the CLI & Advanced tab says while it has no controls in it.
+///
+/// The tab exists before its contents on purpose: three later tasks each need
+/// it, and creating it three times is how one tab ends up with three different
+/// section orders. That leaves one release-shaped question — what a user who
+/// opens it sees — and "nothing at all" is the wrong answer twice over: an
+/// empty pane is indistinguishable from a pane that failed to draw, and it does
+/// not say where the settings they were looking for actually are.
+///
+/// Deliberately names no feature it cannot yet deliver. "Command-line and other
+/// advanced settings" is a restatement of the tab's own label, which is a
+/// promise the tab bar already makes; a list of specific unbuilt features would
+/// be a roadmap in a shipping build, and the one item in it most likely to be
+/// cut is the one that would look most like a broken promise.
+let advancedSettingsPlaceholder = "Nothing to set up here yet. Command-line and other advanced settings will live in this tab; everything Keepy Uppy can do today is set up in the other tabs."
