@@ -135,7 +135,7 @@ enum PowerControl {
 // more dangerous one's ceremony, and would hide exactly the asymmetry that has
 // to stay visible.
 
-/// The **only** two assertion types this project may use.
+/// The **only** three assertion types this project may use.
 ///
 /// `kIOPMAssertionTypePreventSystemSleep` is deliberately absent and must stay
 /// absent. Its own header says "Deprecated in 10.9. This assertion is not
@@ -154,6 +154,21 @@ enum PowerAssertionType: String, CaseIterable, Equatable, Hashable {
     /// sleep" — so this one *implies* the other rather than being orthogonal
     /// to it. `PowerPlan.reduce` still holds both explicitly; see there.
     case preventIdleDisplaySleep
+    /// `PreventDiskIdle`. "Prevent attached disks from idling into lower power
+    /// states." Real, undeprecated, and shipped as `caffeinate -m` — unlike
+    /// `kIOPMAssertionTypePreventSystemSleep`, which is four hundred lines
+    /// further down the same header carrying "not supported in any OS X
+    /// releases". Measured moving the system-wide level 0 → 1 → 0 on this
+    /// machine; see `.superpowers/sdd/plan6-drive-alive-research.md`.
+    ///
+    /// Two things this does NOT do, both from Apple's own doc comment, and both
+    /// of which have to reach the user in `Sources/SessionDisplay.swift`: it is
+    /// **system-wide, never per-device** (no public assertion takes a device —
+    /// the same research grepped four `pwr_mgt` headers for one and found
+    /// nothing but a decade-dead notification API), and it "doesn't increase a
+    /// disk's power state" — it suspends macOS's `disksleep` timer and has no
+    /// authority over an external enclosure's own firmware.
+    case preventDiskIdle
 
     /// The IOKit type string.
     ///
@@ -166,6 +181,7 @@ enum PowerAssertionType: String, CaseIterable, Equatable, Hashable {
         switch self {
         case .preventIdleSystemSleep: return kIOPMAssertPreventUserIdleSystemSleep
         case .preventIdleDisplaySleep: return kIOPMAssertPreventUserIdleDisplaySleep
+        case .preventDiskIdle: return kIOPMAssertPreventDiskIdle
         }
     }
 
@@ -189,8 +205,30 @@ enum PowerAssertionType: String, CaseIterable, Equatable, Hashable {
         switch self {
         case .preventIdleSystemSleep: return "Keepy Uppy: keeping the system awake"
         case .preventIdleDisplaySleep: return "Keepy Uppy: keeping the display awake"
+        // "disks", plural and unqualified, because the assertion is
+        // system-wide: there is no public way to scope one to a drive, and a
+        // name reading "keeping this disk awake" in `pmset -g assertions` would
+        // be the first place a user learned otherwise.
+        case .preventDiskIdle: return "Keepy Uppy: keeping attached disks awake"
         }
     }
+}
+
+/// What one session asks of the machine: how it keeps it awake, and whether it
+/// also holds disks out of idle. The input to `PowerPlan.reduce`.
+///
+/// A struct rather than two parameters for the reason `PowerPlanHolder.apply`
+/// takes a whole `PowerPlan` rather than a bare `Set<PowerAssertionType>`: an
+/// entry point that accepts one axis is an entry point somebody calls with one
+/// axis, and the omission is silent. Under-applying now requires *fabricating a
+/// different request*, which is a visible false statement at the call site.
+///
+/// **No member has a default**, following `ObserverSet` and now `Session`. A
+/// fourth axis must be answered for at every construction site rather than
+/// substituted.
+struct PowerRequest: Equatable {
+    let wakeMode: WakeMode
+    let keepsDisksAwake: Bool
 }
 
 /// What the machine's power state should be, given the sessions that are
@@ -232,12 +270,19 @@ struct PowerPlan: Equatable {
     /// No sessions: nothing held, and the Mac may sleep normally again.
     static let sleepAllowed = PowerPlan(assertions: [], sleepDisabled: false)
 
-    /// The reduction: the set of `WakeMode`s wanted across all live sessions
-    /// becomes the assertions to hold and whether the global setting is on.
+    /// The reduction: what every live session asks of the machine
+    /// (`PowerRequest`) becomes the assertions to hold and whether the global
+    /// setting is on.
     ///
     /// It is a **union**, so the strongest request wins on each axis
     /// independently and no session can weaken another's. Order-independent
     /// and duplicate-insensitive by construction.
+    ///
+    /// It takes whole `PowerRequest`s rather than `WakeMode`s and `Bool`s
+    /// because a reduction that accepted one axis is a reduction somebody calls
+    /// with one axis — the argument `PowerPlanHolder.apply` already makes about
+    /// `PowerPlan`, one layer up. A session's request comes from `Session.power`
+    /// as a single value, so no caller ever assembles it field by field.
     ///
     /// Two decisions worth stating outright, because neither is forced:
     ///
@@ -255,14 +300,20 @@ struct PowerPlan: Equatable {
     /// 2. **`.clamshell` does not take the display assertion.** The lid is
     ///    shut; there is no display to hold awake, and asking would be a
     ///    contradiction rather than a harmless no-op.
-    static func reduce<Modes: Sequence>(_ modes: Modes) -> PowerPlan
-    where Modes.Element == WakeMode {
+    ///
+    /// The disk axis is the one that is genuinely independent of the other two:
+    /// every combination is legal, `keepsDisksAwake` is read on its own, and no
+    /// `WakeMode` implies it either way. "Let the screen sleep, keep the backup
+    /// drive spun up" is a coherent request, and so is its opposite.
+    static func reduce<Requests: Sequence>(_ requests: Requests) -> PowerPlan
+    where Requests.Element == PowerRequest {
         var assertions: Set<PowerAssertionType> = []
         var sleepDisabled = false
-        for mode in modes {
+        for request in requests {
             assertions.insert(.preventIdleSystemSleep)
-            if mode.holdsDisplayAwake { assertions.insert(.preventIdleDisplaySleep) }
-            if mode.requiresSleepDisabled { sleepDisabled = true }
+            if request.wakeMode.holdsDisplayAwake { assertions.insert(.preventIdleDisplaySleep) }
+            if request.keepsDisksAwake { assertions.insert(.preventDiskIdle) }
+            if request.wakeMode.requiresSleepDisabled { sleepDisabled = true }
         }
         return PowerPlan(assertions: assertions, sleepDisabled: sleepDisabled)
     }

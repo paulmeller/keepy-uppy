@@ -551,7 +551,10 @@ func menuWakeModeSuffix(_ mode: WakeMode) -> String {
 /// and when the plan does hold the lid (the expected case, which says nothing).
 func menuLidCaveat(for sessions: [Session]) -> String? {
     guard !sessions.isEmpty else { return nil }
-    guard !PowerPlan.reduce(sessions.map(\.wakeMode)).sleepDisabled else { return nil }
+    // `\.power`, the whole request, rather than `\.wakeMode`: this line runs the
+    // daemon's own reduction over the daemon's own input, and the moment it
+    // reconstructs a partial request it stops being the same computation.
+    guard !PowerPlan.reduce(sessions.map(\.power)).sleepDisabled else { return nil }
     return "Closing the lid will still let this Mac sleep."
 }
 

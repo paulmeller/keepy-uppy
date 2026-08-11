@@ -791,7 +791,11 @@ final class WakeModeMenuCopyTests: XCTestCase {
         }
         for modes in combinations {
             let sessions = modes.map { session($0) }
-            let planHoldsTheLid = PowerPlan.reduce(modes).sleepDisabled
+            // Reduced from the same sessions the line is computed from, not from
+            // a parallel list of modes: `menuLidCaveat` maps `\.power`, so
+            // rebuilding requests here by hand would let the two drift on the
+            // disk axis and still agree on the lid.
+            let planHoldsTheLid = PowerPlan.reduce(sessions.map(\.power)).sleepDisabled
             let shown = menuLidCaveat(for: sessions) != nil
             XCTAssertEqual(shown, !modes.isEmpty && !planHoldsTheLid,
                            "\(modes.map(\.rawValue)) — the menu and the daemon disagree about the lid")

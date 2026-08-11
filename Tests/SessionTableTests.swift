@@ -204,23 +204,56 @@ final class SessionTableTests: XCTestCase {
 
     /// `desiredKeepAwake` is now *defined* as "the reduction is non-empty",
     /// while every existing caller reads it as "is any session live". The two
-    /// must agree for every mode — including whichever mode is added next,
-    /// which is why this loops `allCases` instead of naming three.
+    /// must agree for every request a session can make — including whichever
+    /// axis is added next, which is why this loops `allCases` crossed with the
+    /// disk axis instead of naming the combinations.
     func testKeepAwakeIsExactlyTheReductionBeingNonEmpty() {
         for mode in WakeMode.allCases {
-            var table = SessionTable()
-            XCTAssertFalse(table.desiredKeepAwake, "\(mode.rawValue): empty table")
+            for disks in [false, true] {
+                let request = "\(mode.rawValue), keepsDisksAwake=\(disks)"
+                var table = SessionTable()
+                XCTAssertFalse(table.desiredKeepAwake, "\(request): empty table")
 
-            let only = session("01", owner: alice, wakeMode: mode)
-            table.insert(only)
-            XCTAssertTrue(table.desiredKeepAwake,
-                          "\(mode.rawValue) is a live session and must keep the Mac awake")
-            XCTAssertNotEqual(table.desiredPowerPlan, .sleepAllowed, mode.rawValue)
+                let only = session("01", owner: alice, wakeMode: mode, keepsDisksAwake: disks)
+                table.insert(only)
+                XCTAssertTrue(table.desiredKeepAwake,
+                              "\(request) is a live session and must keep the Mac awake")
+                XCTAssertNotEqual(table.desiredPowerPlan, .sleepAllowed, request)
 
-            table.remove(id: only.id)
-            XCTAssertFalse(table.desiredKeepAwake, "\(mode.rawValue): last session removed")
-            XCTAssertEqual(table.desiredPowerPlan, .sleepAllowed, mode.rawValue)
+                table.remove(id: only.id)
+                XCTAssertFalse(table.desiredKeepAwake, "\(request): last session removed")
+                XCTAssertEqual(table.desiredPowerPlan, .sleepAllowed, request)
+            }
         }
+    }
+
+    /// The whole point of the field, at the layer the daemon reads: a session
+    /// that asked for its disks to stay spun up produces a plan that holds the
+    /// assertion, and one that did not produces a plan that does not — with the
+    /// other two axes untouched either way.
+    ///
+    /// `desiredPowerPlan` maps `\.power`, so this is also the test that fails if
+    /// it ever goes back to mapping one axis: a table full of disk-wanting
+    /// sessions would reduce to a plan that holds nothing for them, silently.
+    func testTheDiskAxisReachesTheDaemonsPlan() {
+        var table = SessionTable()
+        table.insert(session("01", owner: alice, wakeMode: .system, keepsDisksAwake: true))
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventDiskIdle],
+                                 sleepDisabled: false))
+
+        // A second session that wants nothing of the disks cannot take the
+        // assertion away from the first — the reduction is a union.
+        let indifferent = session("02", owner: bob, wakeMode: .clamshell, keepsDisksAwake: false)
+        table.insert(indifferent)
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventDiskIdle],
+                                 sleepDisabled: true))
+
+        // …and when the asker leaves, it goes.
+        table.remove(id: table.sessions.first(where: { $0.keepsDisksAwake })!.id)
+        XCTAssertEqual(table.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: true))
     }
 }
 

@@ -290,6 +290,13 @@ struct Session: Equatable, Codable, Identifiable {
     /// the initialiser below.
     let keepsDisksAwake: Bool
 
+    /// This session's power request as one value, for `PowerPlan.reduce`.
+    ///
+    /// The reduction takes whole requests rather than one axis at a time, so
+    /// this is the only place the two are assembled and no caller can pass one
+    /// and forget the other.
+    var power: PowerRequest { PowerRequest(wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake) }
+
     /// This session with its lease deadline moved, and **nothing else**
     /// changed.
     ///

@@ -21,7 +21,7 @@ struct SessionTable {
     var count: Int { storage.count }
 
     /// What the machine's power state should be right now: every live
-    /// session's `WakeMode`, reduced to the two axes the daemon actually
+    /// session's `PowerRequest`, reduced to the axes the daemon actually
     /// drives (`PowerPlan`).
     ///
     /// This is the whole of `DaemonRuntime.applyLocked`'s input — it hands
@@ -34,10 +34,14 @@ struct SessionTable {
     /// A union (see `PowerPlan.reduce`), so the answer cannot depend on
     /// `storage`'s iteration order — a `Dictionary`'s, which is not stable
     /// between runs — and no session can weaken another's request. Lazy, so
-    /// asking for the plan does not materialise an array of modes on every
+    /// asking for the plan does not materialise an array of requests on every
     /// event.
+    ///
+    /// It maps `\.power`, the whole request, rather than one axis: mapping
+    /// `\.wakeMode` was how a session's request could arrive at the daemon with
+    /// an axis missing, and there is now nothing here to leave out.
     var desiredPowerPlan: PowerPlan {
-        PowerPlan.reduce(storage.values.lazy.map(\.wakeMode))
+        PowerPlan.reduce(storage.values.lazy.map(\.power))
     }
 
     /// True exactly when the reduction asks for anything at all.
