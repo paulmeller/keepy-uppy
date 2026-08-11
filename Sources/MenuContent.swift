@@ -45,16 +45,34 @@ struct MenuContent: View {
         PowerRequest(wakeMode: defaultWakeMode, keepsDisksAwake: defaultKeepDisksAwake)
     }
 
-    /// The identity the daemon stamps on sessions this app starts, derived the
-    /// same way the daemon derives it — from the app's role and this user's
-    /// uid. Sessions with any other owner belong to the CLI, the agent, or
-    /// another user, and this app cannot stop them.
-    private var myClientID: ClientID {
-        ClientRole.app.clientID(forUserID: UInt32(getuid()))
+    /// Every live session with the row it has earned, computed once per
+    /// rebuild. The decision itself is `menuSessionGroup` — a pure function in
+    /// `SessionDisplay.swift` rather than a filter written inline here, because
+    /// a view body cannot be tested and this comparison is where a wrong answer
+    /// produces a menu that looks entirely plausible: it used to sort a session
+    /// started by this user's own trigger rule in with strangers' sessions,
+    /// since a trigger is owned by `agent-<uid>` and not `app-<uid>`.
+    private var grouped: [(session: Session, group: MenuSessionGroup)] {
+        let userID = UInt32(getuid())
+        return daemon.sessions.map { ($0, menuSessionGroup(for: $0, userID: userID)) }
     }
 
-    private var mine: [Session] { daemon.sessions.filter { $0.owner == myClientID } }
-    private var others: [Session] { daemon.sessions.filter { $0.owner != myClientID } }
+    /// The sessions this app started, which `SessionIsolation` makes the only
+    /// ones it can stop.
+    private var mine: [Session] { grouped.filter { $0.group == .thisApp }.map(\.session) }
+
+    /// Everything else — this user's own automatic and command-line sessions
+    /// and another account's alike. They share a list because they share a
+    /// fate: shown, never clickable. What they no longer share is a *label*.
+    ///
+    /// `menuStatusLine`'s "yours" still counts `mine` only, so a user with a
+    /// trigger session and an app session reads "2 sessions, 1 yours". That is
+    /// the count of what the menu can act on rather than of what belongs to
+    /// them, and it is left as it was: widening it is a change to a different
+    /// sentence than the one this task was about.
+    private var others: [(session: Session, group: MenuSessionGroup)] {
+        grouped.filter { $0.group != .thisApp }
+    }
 
     var body: some View {
         let now = Date()
@@ -66,7 +84,7 @@ struct MenuContent: View {
         if !daemon.isConnected {
             Text("Not connected to Keepy Uppy daemon")
         } else {
-            Text(menuStatusLine(mine: mine, others: others, now: now))
+            Text(menuStatusLine(mine: mine, others: others.map(\.session), now: now))
 
             // The status region's second line, and the only place the menu
             // speaks about the machine rather than about a session. It is
@@ -82,6 +100,11 @@ struct MenuContent: View {
         if daemon.isConnected && !daemon.sessions.isEmpty {
             Divider()
 
+            // The suffix here is still empty in every case anyone can currently
+            // produce — this app sends `origin: .manual` — and it is kept
+            // because `DaemonConnection.startSession` takes the origin as a
+            // parameter, so an app-started automatic session is one argument
+            // away. Its real caller is the automatic row below.
             ForEach(mine) { session in
                 Button {
                     Task { await daemon.stopSession(session.id) }
@@ -103,9 +126,15 @@ struct MenuContent: View {
             // Shown, never clickable. `stopAllSessions(all: false)` scopes to
             // this client by design (`SessionIsolation`), so offering to stop
             // these would be a button that silently does nothing — the same
-            // failure the old "Stop All" label had.
-            ForEach(others) { session in
-                Text(menuForeignSessionLabel(for: session, now: now))
+            // failure the old "Stop All" label had. That is still true of this
+            // user's own trigger-started session, which the app can now *name*
+            // but still has no authority to end.
+            //
+            // One flat list in the daemon's own order, not three sections: the
+            // rows differ by a clause each, and grouping them would be
+            // structure added to a menu that was rebuilt to have less of it.
+            ForEach(others, id: \.session.id) { row in
+                Text(menuSessionLabel(for: row.session, group: row.group, now: now))
             }
         }
 

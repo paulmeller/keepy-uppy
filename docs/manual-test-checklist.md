@@ -37,29 +37,34 @@ observable from any test.
 - [ ] Pick "Only with the lid open", open the menu: every "Keep awake …" row now ends "(lid open only)". Start one, and its stop row reads "Stop this session (lid open only)" with the machine-wide line "Closing the lid will still let this Mac sleep." above it
 - [ ] Change the picker back to "Even with the lid closed" while that session is still running: the running session's tag and the lid line do **not** change (a mode is fixed when the session starts — that is exactly what "from now on" in the footer is warning about), and the next session started from the menu has no tag
 - [ ] With the picker on "Only with the lid open", let a **trigger** fire: the session it starts is still lid-safe, so the "Closing the lid…" line is absent while it runs. Triggers deliberately ignore this preference
-- [ ] The longest rows this menu can produce are not truncated: with two of your own "Only with the lid open, screen on" sessions live, a stop row reads `Stop “7h 59m left” (screen on, lid open only)`, and a `keepy-uppy on --while-app com.apple.dt.Xcode --keep-display-awake` session alongside them reads `While Xcode is running — started elsewhere (screen on, lid open only)`
+- [ ] The longest rows this menu can produce are not truncated: with two of your own "Only with the lid open, screen on" sessions live, a stop row reads `Stop “7h 59m left” (screen on, lid open only)`, and a `keepy-uppy on --while-app com.apple.dt.Xcode --keep-display-awake` session alongside them reads `While Xcode is running — started from the command line (screen on, lid open only)`
 
 **Settings → Safety:**
 - [ ] Settings → Safety: lowering the battery cutoff and confirming (via `keepy-uppy status`) the daemon picks it up within ~5s without restarting anything
 
 **Settings → Triggers:**
 
-A trigger session is **not** tagged as automatic in the menu, and these items
-are written to match. The daemon stamps `owner` from the accepting listener's
-role, so an agent-started session is owned by `agent-<uid>`, not `app-<uid>` —
-it lands in `MenuContent`'s `others` list, which renders
-`menuForeignSessionLabel` and never `menuAutomaticSuffix`. So it reads
-`… — started elsewhere`, indistinguishable from the CLI's or another user's
-session. That a user cannot tell an automatic session from a foreign one is a
-real gap. Plan 5 was where it was expected to land and did not take it — that
-plan added five conditions and left the labelling exactly as it was — so the
-gap is still open, with five more ways to reach it, and it is still not
-something to fix by editing this list.
+A trigger session **is** tagged as automatic in the menu as of Plan 7 Task 3,
+and these items are written to match. Before it, the daemon's stamping of
+`owner` from the accepting listener's role — an agent-started session is owned
+by `agent-<uid>`, not `app-<uid>` — meant every such session failed
+`MenuContent`'s one equality test and rendered `… — started elsewhere`,
+indistinguishable from the CLI's or another user's. `menuSessionGroup` now
+splits that bucket by `ownerUID` and owner role, so a trigger of your own reads
+`… — started automatically` and a `keepy-uppy on` session of your own reads
+`… — started from the command line`.
 
-- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and shows up in the menu as an unclickable row reading `Indefinite — started elsewhere` (or `Xh Ym left — started elsewhere` for a timed `defaultKind`), and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
+**None of the three gained a stop button, and that half is still open.** This
+app cannot end a session it did not start — `SessionIsolation` scopes every
+stop to the caller's own `ClientID` — so a running trigger session can only be
+ended by `keepy-uppy off --all`, by its condition, or by its duration.
+Disabling the rule does not end a session it already started. That is a
+`SessionIsolation` change (spec §4), not something to fix by editing this list.
+
+- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and shows up in the menu as an unclickable row reading `Indefinite — started automatically` (or `Xh Ym left — started automatically` for a timed `defaultKind`), and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
 - [ ] A trigger does not fire again while its session is still active (leave the triggering app running, confirm no duplicate session appears)
 - [ ] Triggering a real safety stop (or lowering the thermal sensitivity to `cautious` under load) suppresses a trigger from firing again until the configured cooldown elapses, while a manual "Start…" click still works immediately
-- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s and appears in the menu as `While claude is running — started elsewhere` (unclickable and untagged, for the reason above), and that the duration picker plays no part; quitting `claude` ends the session within ~10s (two 5s ticks — `sessionsToEnd` needs `SessionEvidence.negativesBeforeEnding` consecutive confident negatives, so a single bad reading can never end a session)
+- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s and appears in the menu as `While claude is running — started automatically` (unclickable, for the reason above), and that the duration picker plays no part; quitting `claude` ends the session within ~10s (two 5s ticks — `sessionsToEnd` needs `SessionEvidence.negativesBeforeEnding` consecutive confident negatives, so a single bad reading can never end a session)
 - [ ] The Cursor CLI and Pi presets show the generic-name collision warning; the other three presets don't
 - [ ] Typing a *path* (`/opt/homebrew/bin/claude`) rather than a name into the process field is rejected in the sheet with an explanation, rather than being accepted as a rule that could never fire
 - [ ] A process-running rule for a `node`/`bun`-wrapped CLI (`claude`, installed by npm as a `claude` symlink to `claude.exe`) really does fire — this is the case `p_comm` matching alone could not see, since the kernel records `claude.exe` there and only `argv[0]` ever says `claude`
@@ -90,7 +95,7 @@ VPN was out of scope. `.superpowers/sdd/plan5-vpn-research.md` has the
 measurements. These two items are the missing half.
 
 - [ ] With a VPN connected, `keepy-uppy on --while-vpn` starts a session; disconnecting the VPN ends it within ~10s (two 5s ticks), and it does **not** end when the VPN merely reconnects
-- [ ] With no VPN connected, a `vpnActive` trigger does nothing; connecting one starts a session within ~5s reading `While a VPN is connected — started elsewhere`, and it survives a Wi-Fi hop that leaves the tunnel up
+- [ ] With no VPN connected, a `vpnActive` trigger does nothing; connecting one starts a session within ~5s reading `While a VPN is connected — started automatically`, and it survives a Wi-Fi hop that leaves the tunnel up
 - [ ] Turn **iCloud Private Relay on** with no VPN connected, wait a minute, and confirm a `vpnActive` trigger stays quiet and `keepy-uppy on --while-vpn` refuses to stay up. Private Relay adds another `utun` to the eight this Mac already carries, so this is the false-positive check that decides whether the condition is honest rather than merely permanently true
 - [ ] On a Mac with **no VPN configured at all**, a live `--while-vpn` session ends rather than hanging — an empty answer is a confident negative here, deliberately unlike the volume observer's
 - [ ] The Add-trigger sheet's "A VPN is connected" row shows the limitation footnote naming wg-quick/openvpn/Tunnelblick, and a tunnel started by one of those really is *not* detected (this is the stated limitation, not a bug to file)
@@ -157,7 +162,7 @@ and it covers Ethernet on the same network as well.
 - [ ] `keepy-uppy on --while-app <bundle id>` ends within ~5s of quitting that app
 - [ ] `keepy-uppy on --while-display` ends within ~10s of unplugging the external screen, and `keepy-uppy on --while-ac-power` ends within ~5s of the charger coming out — the three kinds these flags reach were evaluated by the daemon and the agent for two plans before any client could ask for one, so this is the first time either path runs against a session a user actually started
 - [ ] `keepy-uppy on --while-ac-power` on battery is refused up front (`conditionNotMet`) rather than starting a session that ends on its own first tick, and `--while-display` / `--while-cpu-busy` with the agent killed are refused with the no-agent message rather than starting a session nothing can ever end
-- [ ] `keepy-uppy on --while-cpu-busy 30` survives a lull shorter than two minutes under a real build, and ends about two minutes after the CPU settles below 30% — and the menu row for it reads `While the CPU is at least 30% busy — started elsewhere`, naming the number that was typed
+- [ ] `keepy-uppy on --while-cpu-busy 30` survives a lull shorter than two minutes under a real build, and ends about two minutes after the CPU settles below 30% — and the menu row for it reads `While the CPU is at least 30% busy — started from the command line`, naming the number that was typed
 - [ ] An external `sudo pmset -a disablesleep 1` does **not** stick: the daemon rewrites the setting from its own session table on every 5s tick, so with no session live `pmset -g | grep -i sleepdisabled` is back to `0` within ~5s and the icon does not latch on. The converse too — clearing it by hand while a default-mode session runs is undone on the next tick, and the session goes on being honoured
 - [ ] `keepy-uppy reset` with a default-mode session live prints how many sessions it ended, and `pmset -g | grep -i sleepdisabled` reads `0` **before** anything is unregistered — the eviction must never be the last thing that touches a Mac still being held awake, because it removes the only process that could ever clear that setting and the setting survives a reboot
 - [ ] `keepy-uppy reset` on a machine with no daemon registered still unregisters cleanly, exits 0, and prints the "did not answer" note on stderr rather than refusing — that half-installed state is what the verb is for. The note reports what `SleepDisabled` actually reads on that machine (the CLI performs that read itself; only the repair needs root), so with the setting left at `1` by hand it must name `sudo pmset -a disablesleep 0` and with the setting off it must not

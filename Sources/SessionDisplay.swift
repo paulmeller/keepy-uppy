@@ -55,11 +55,13 @@ func remainingTimeText(for session: Session, now: Date) -> String {
 /// **Currently unreachable from the app.** Nothing outside the tests calls
 /// this: the menu rebuild replaced the row it used to render
 /// ("Indefinite — Started manually — Stop") with `menuStopLabel`, and the
-/// automatic case is served by `menuAutomaticSuffix` below — which has a
-/// reachability problem of its own, documented there. Kept, not deleted,
-/// because Plan 5 (trigger expansion) is expected to want exactly this string
-/// back; the note is here so a reader does not take its existence as evidence
-/// that anything shows it today.
+/// automatic case is served by `menuAutomaticSuffix` below — which no longer
+/// has a reachability problem of its own, but says the same words as a clause
+/// rather than as a sentence, so this is not the function that grew a caller.
+/// Kept, not deleted, on the same terms as before: something that renders an
+/// origin as a standalone sentence is expected to want exactly this string, and
+/// the note is here so a reader does not take its existence as evidence that
+/// anything shows it today.
 func originText(for session: Session) -> String {
     session.origin == .trigger ? "Started automatically" : "Started manually"
 }
@@ -461,30 +463,155 @@ func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> St
 /// session you started by hand is noise; "started automatically" on one that
 /// appeared by itself is the whole story.
 ///
-/// **It never fires today, on two independent counts, and neither is a bug in
-/// this function.** `MenuContent` appends it only to `mine` — sessions owned by
-/// `app-<uid>` — while the only thing that produces `origin == .trigger` is the
-/// agent, and the daemon stamps `owner` from the accepting listener's role, so
-/// a trigger session is owned by `agent-<uid>` and lands in `others`. Those
-/// rows render `menuForeignSessionLabel`, which has no suffix at all. So an
-/// automatic session reads `Indefinite — started elsewhere`, exactly like the
-/// CLI's or another user's.
+/// **It fired for the first time in Plan 7 Task 3, and the reason it took three
+/// plans is worth keeping.** It was written appended to `mine` alone — sessions
+/// owned by `app-<uid>` — while the only thing that produces
+/// `origin == .trigger` is the agent, and the daemon stamps `owner` from the
+/// accepting listener's role, so a trigger session is owned by `agent-<uid>`
+/// and landed in the other bucket, whose rows had no suffix at all. It was
+/// called on every menu rebuild and returned `""` every time. An automatic
+/// session read `Indefinite — started elsewhere`, character for character like
+/// the CLI's or another user's.
 ///
-/// Kept rather than deleted: a user being unable to tell an automatic session
-/// from a foreign one is a real product gap, and closing it is Plan 5's
-/// (trigger expansion), which will want this string. The note exists so the
-/// next reader does not conclude from the code that the tag already works —
-/// `SessionDisplayTests` covers the function, not its reachability.
+/// `menuSessionGroup` is what closed that: the row for a session this user's
+/// own trigger rule started is built from this function rather than from a
+/// second copy of its three words. It is still belt-and-braces there — that
+/// group is only ever reached with `origin == .trigger` — which is the point:
+/// no row can claim a session was automatic while the session's own field says
+/// otherwise.
+///
+/// It reads as a provenance clause rather than a parenthetical
+/// (`" — started automatically"`, not `" (started automatically)"`) because
+/// every row it now lands in has the shape `"<kind> — <provenance>"`; see
+/// `MenuCopyTests.testTheAutomaticMentionIsShapedLikeEveryOtherProvenanceClause`
+/// for the argument.
 func menuAutomaticSuffix(for session: Session) -> String {
-    session.origin == .trigger ? " (started automatically)" : ""
+    session.origin == .trigger ? " — started automatically" : ""
 }
 
-/// Sessions belonging to the CLI, the agent, or another user. They are shown
-/// — the menu's job is to answer "why is my Mac awake", whoever caused it —
-/// but this app cannot stop them, and a button that silently does nothing is
-/// worse than a line of text.
-func menuForeignSessionLabel(for session: Session, now: Date) -> String {
-    "\(remainingTimeText(for: session, now: now)) — started elsewhere"
+/// Which row a live session gets in the menu, decided in exactly one place.
+///
+/// The menu used to ask one question — "is this session mine?" — and it got the
+/// answer wrong for the only sessions nobody starts by hand. `owner` is
+/// `<role>-<uid>` (`ClientRole.clientID(forUserID:)`), so a session started by a
+/// trigger rule this user wrote is owned by `agent-<uid>`, failed an equality
+/// test against `app-<uid>`, and rendered as "started elsewhere": the same row,
+/// word for word, as a session belonging to another human being on a shared Mac.
+///
+/// **Two independent axes, so four combinations, so every one of them is
+/// written out.** *Whose account* is `ownerUID`, which the daemon fills in from
+/// the peer's audit credentials; *which client* is `owner`, which it stamps from
+/// the listener that accepted the connection. Both are server-derived and
+/// unforgeable — neither is asserted by the client (`ClientRole`'s doc comment;
+/// `HelperService.startSession`). The combination nobody named is "this user's,
+/// not this app's, and not a trigger", and it gets `.yoursOtherClient` rather
+/// than falling into whichever branch happens to be last.
+enum MenuSessionGroup: Equatable, CaseIterable {
+    /// Started by this app, for this user. **The only group with a stop
+    /// button**: `SessionIsolation.authorize` compares `Session.owner` against
+    /// the caller's `ClientID`, so this app can only ever stop these, and a
+    /// button on any other row would be a button that silently does nothing.
+    case thisApp
+    /// This user's, started by one of their own trigger rules.
+    case yoursAutomatic
+    /// This user's, started by `keepy-uppy` in a terminal.
+    case yoursCommandLine
+    /// This user's, from a client this build cannot name — a role added after
+    /// it shipped, or a session whose `owner` and `ownerUID` disagree about
+    /// which user they mean.
+    ///
+    /// **Unreachable today**, in the same sense `menuAutomaticSuffix` was for
+    /// three plans: `ClientRole` has exactly three cases and the daemon derives
+    /// both fields from one connection. It exists so that the reason a
+    /// `cli-<uid>` session says "command line" is that its owner says `cli` —
+    /// not that it was whatever was left over. A partition written as
+    /// "app / trigger / else foreign / else command line" would tell the user
+    /// that a future Shortcuts extension started their session from a terminal
+    /// they never opened.
+    case yoursOtherClient
+    /// Another account's, whichever of its clients started it.
+    case anotherUsers
+}
+
+/// - Parameter userID: `getuid()` in the app; a literal in the tests, which is
+///   the only way to describe a second user at all.
+///
+/// **`origin` is checked, but never on its own.** It is one of the fields
+/// `HelperProtocol.startSession` documents as client-chosen: the daemon
+/// overwrites `id`, `owner`, `ownerUID` and `startedAt` and passes this one
+/// through, so `origin == .trigger` is a session's self-description, not a fact
+/// the daemon established. `owner == agent-<uid>` is the corroborating half, and
+/// it is the unforgeable one. Requiring both costs nothing today — the agent is
+/// the only thing that sends `.trigger`, and it is the only thing that can
+/// connect on the agent service — and it keeps the "started automatically" row
+/// from being something any client of this user can ask for by setting a field.
+///
+/// (Task 3's brief called for `origin` alone, on the argument that it is the
+/// honest field for the question. The research finding earlier in this plan is
+/// the reason it is a conjunction instead: the honest field is also the one
+/// nothing verifies. The two disagree only for sessions no shipped client can
+/// produce, and every one of those has a defined home below.)
+func menuSessionGroup(for session: Session, userID: UInt32) -> MenuSessionGroup {
+    guard session.ownerUID == userID else { return .anotherUsers }
+    // Matched against `ClientRole`'s own formatter rather than by stripping a
+    // `"app-"` prefix here: `Shared/ClientIdentity.swift` owns that format, and
+    // a second place spelling it is a second place to get it wrong.
+    switch ClientRole.allCases.first(where: { $0.clientID(forUserID: userID) == session.owner }) {
+    case .app:
+        return .thisApp
+    case .agent:
+        return session.origin == .trigger ? .yoursAutomatic : .yoursOtherClient
+    case .cli:
+        // Deliberately not conditioned on `origin`. A `cli-<uid>` session did
+        // come from the command line whatever it says about itself, and that is
+        // what this row claims.
+        return .yoursCommandLine
+    case nil:
+        return .yoursOtherClient
+    }
+}
+
+/// The row for a session **this app cannot stop** — every group but `.thisApp`,
+/// which gets a stop button and `menuStopLabel` instead.
+///
+/// One shape, `"<kind> — <provenance>"`, with only the provenance varying: the
+/// kind leads because it is the answer to "why is this Mac awake", and the
+/// provenance is the qualifier. These are shown but never clickable, because
+/// `SessionIsolation` scopes every stop to the caller's own sessions and a
+/// button that silently does nothing is worse than a line of text.
+///
+/// **No row explains why it is not a button.** The absence is the existing,
+/// deliberate signal; a row that states its own limits on every rebuild is the
+/// per-row accumulation the menu was rebuilt to remove. That limitation belongs
+/// in the README.
+func menuSessionLabel(for session: Session, group: MenuSessionGroup, now: Date) -> String {
+    let provenance: String
+    switch group {
+    case .thisApp:
+        // Not a row this function renders. It is answered rather than trapped
+        // because a `fatalError` in a menu rebuild would be a crash on the one
+        // path that has to survive anything the daemon sends, and the kind on
+        // its own is still true of the session.
+        provenance = ""
+    case .yoursAutomatic:
+        provenance = menuAutomaticSuffix(for: session)
+    case .yoursCommandLine:
+        provenance = " — started from the command line"
+    case .yoursOtherClient:
+        // Says only what is known: this user's, and not from anything this
+        // build can name. Guessing "the command line" here is the failure this
+        // group exists to prevent.
+        provenance = " — started by another part of Keepy Uppy"
+    case .anotherUsers:
+        // Was "started elsewhere", back when this row covered another account's
+        // session, this user's own command-line session and this user's own
+        // trigger, and had to be vague enough to be true of all three. Now that
+        // the other two have rows of their own, it can say the thing it means.
+        // It discloses nothing new: the kind text in front of it is that
+        // session's own description and was always shown.
+        provenance = " — started by another user"
+    }
+    return remainingTimeText(for: session, now: now) + provenance
         + menuWakeModeSuffix(session.wakeMode)
 }
 

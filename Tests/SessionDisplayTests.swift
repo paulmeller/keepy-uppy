@@ -598,10 +598,34 @@ final class MenuCopyTests: XCTestCase {
             .contains("automatically"))
     }
 
-    func testForeignSessionsSayWhyTheyCannotBeStopped() {
-        let label = menuForeignSessionLabel(for: session(.indefinite, owner: theirsID), now: t0)
+    /// **The suffix is a provenance clause now, not a parenthetical**, and the
+    /// change is deliberate rather than cosmetic. Plan 7 Task 3 gave it its
+    /// first real caller — the row for a session a trigger rule started, which
+    /// this app cannot stop — and every such row has the shape
+    /// `"<kind> — <provenance>"`. As `" (started automatically)"` it produced
+    /// "Indefinite (started automatically)" beside "Indefinite — started by
+    /// another user", which is two shapes for one list, or forced a second copy
+    /// of the same three words to live in the label function.
+    ///
+    /// Its own contract is untouched: empty for the ordinary case, and the
+    /// exception is what earns a mention.
+    func testTheAutomaticMentionIsShapedLikeEveryOtherProvenanceClause() {
+        let suffix = menuAutomaticSuffix(for: session(.indefinite, owner: mineID, origin: .trigger))
+        XCTAssertEqual(suffix, " — started automatically")
+    }
+
+    func testForeignSessionsSayWhoStartedThemRatherThanThatItWasNotYou() {
+        let label = menuSessionLabel(for: session(.indefinite, owner: theirsID),
+                                     group: .anotherUsers, now: t0)
         XCTAssertFalse(label.hasPrefix("Stop"), "not a button — this app cannot stop it: \(label)")
-        XCTAssertTrue(label.contains("elsewhere"), label)
+        // "started elsewhere" was written when this row covered three unrelated
+        // situations — another account's session, this user's own command-line
+        // session, and this user's own trigger — and it had to be vague enough
+        // to be true of all three. Now that the other two have rows of their
+        // own, the word can say the one thing it actually means. It reveals
+        // nothing the row does not already reveal: the kind text in front of it
+        // is that session's own description, and it was always shown.
+        XCTAssertTrue(label.contains("another user"), label)
     }
 
     func testStartLabelsReadAsInstructionsNotNouns() {
@@ -616,6 +640,237 @@ final class MenuCopyTests: XCTestCase {
                        "Keep awake for 1 hour")
         XCTAssertEqual(menuStartLabel(.eightHours, wakeMode: .clamshell, keepsDisksAwake: false),
                        "Keep awake for 8 hours")
+    }
+}
+
+/// Plan 7 Task 3: the menu's session list answers a **three-way** question, not
+/// a two-way one.
+///
+/// `MenuContent` used to filter on `owner == app-<uid>` and call everything else
+/// "started elsewhere". `owner` is `<role>-<uid>`, so a session started by a
+/// trigger rule the user wrote themselves — owned by `agent-<uid>` — rendered
+/// character for character like a session belonging to another human being on a
+/// shared Mac. The Mac was awake because of the user's own rule and the one
+/// surface whose job is to say why gave them a row about somebody else.
+///
+/// These pin the partition rather than the prose, because a wrong comparison
+/// here produces a menu that looks entirely plausible: every row is present,
+/// every row is well-formed, and one of them is about the wrong person.
+final class MenuSessionGroupingTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+    /// A literal rather than `getuid()`: the partition takes the uid as an
+    /// argument precisely so these can pin both sides of the comparison, and a
+    /// test that asked the machine who it was could not describe a second user
+    /// at all.
+    private let me: UInt32 = 501
+    private let someoneElse: UInt32 = 502
+
+    private func app(_ uid: UInt32) -> ClientID { ClientRole.app.clientID(forUserID: uid) }
+    private func agent(_ uid: UInt32) -> ClientID { ClientRole.agent.clientID(forUserID: uid) }
+    private func cli(_ uid: UInt32) -> ClientID { ClientRole.cli.clientID(forUserID: uid) }
+
+    private func session(owner: ClientID, ownerUID: UInt32, origin: SessionOrigin = .manual,
+                         kind: SessionKind = .indefinite,
+                         wakeMode: WakeMode = .clamshell) -> Session {
+        Session(id: UUID(), kind: kind, owner: owner, ownerUID: ownerUID,
+                persistence: .detached, origin: origin, startedAt: t0, triggerID: nil,
+                wakeMode: wakeMode, keepsDisksAwake: false)
+    }
+
+    /// Partition and label together, which is the only combination the user
+    /// ever sees: a partition that is right and a label that is wrong reads
+    /// exactly like the bug this task closes.
+    private func row(_ session: Session) -> String {
+        menuSessionLabel(for: session, group: menuSessionGroup(for: session, userID: me), now: t0)
+    }
+
+    // MARK: - The three buckets that used to be one
+
+    func testYourOwnTriggerSessionIsNotGroupedWithAnotherUsersSession() {
+        let trigger = session(owner: agent(me), ownerUID: me, origin: .trigger)
+        let stranger = session(owner: cli(someoneElse), ownerUID: someoneElse)
+
+        XCTAssertEqual(menuSessionGroup(for: trigger, userID: me), .yoursAutomatic)
+        XCTAssertEqual(menuSessionGroup(for: stranger, userID: me), .anotherUsers)
+        XCTAssertNotEqual(row(trigger), row(stranger),
+                          "a session your own rule started must not read like one belonging to "
+                          + "somebody else: \(row(trigger))")
+    }
+
+    func testYourOwnCLISessionIsNotGroupedWithAnotherUsersSession() {
+        let terminal = session(owner: cli(me), ownerUID: me)
+        let stranger = session(owner: cli(someoneElse), ownerUID: someoneElse)
+
+        XCTAssertEqual(menuSessionGroup(for: terminal, userID: me), .yoursCommandLine)
+        XCTAssertEqual(menuSessionGroup(for: stranger, userID: me), .anotherUsers)
+        XCTAssertNotEqual(row(terminal), row(stranger))
+        XCTAssertTrue(row(terminal).lowercased().contains("command line"),
+                      "the same binary the user typed into a terminal, named: \(row(terminal))")
+    }
+
+    /// The corroboration rule, as a test. `origin` is one of the fields
+    /// `HelperProtocol.startSession` documents as *client-chosen* — the daemon
+    /// overwrites `id`, `owner`, `ownerUID` and `startedAt` and leaves this one
+    /// alone — so on its own it is a session's self-description. `ownerUID` is
+    /// server-stamped from the peer's audit token, and it is what keeps another
+    /// account's session out of this user's rows however that session describes
+    /// itself.
+    func testAnotherUsersSessionIsStillForeignEvenWhenItsOriginIsTrigger() {
+        let theirs = session(owner: agent(someoneElse), ownerUID: someoneElse, origin: .trigger)
+        XCTAssertEqual(menuSessionGroup(for: theirs, userID: me), .anotherUsers)
+        XCTAssertFalse(row(theirs).contains("automatic"),
+                       "another account's trigger is not this user's automatic session: \(row(theirs))")
+    }
+
+    /// The regression guard. The app's own sessions are still the only ones with
+    /// a stop button, because `SessionIsolation` still forbids the rest — and
+    /// this asserts it against that authority rather than against a second
+    /// hand-written list, so the menu cannot come to disagree with the daemon
+    /// about what it is allowed to do.
+    func testOnlyTheAppsOwnSessionsAreStoppable() {
+        let all = [
+            session(owner: app(me), ownerUID: me),
+            session(owner: agent(me), ownerUID: me, origin: .trigger),
+            session(owner: cli(me), ownerUID: me),
+            session(owner: ClientID(rawValue: "shortcuts-\(me)"), ownerUID: me),
+            session(owner: app(someoneElse), ownerUID: someoneElse),
+        ]
+        let stoppableInTheMenu = all.filter { menuSessionGroup(for: $0, userID: me) == .thisApp }
+        XCTAssertEqual(stoppableInTheMenu.map(\.id),
+                       SessionIsolation.sessionsToStop(all: false, requestedBy: app(me), among: all),
+                       "the rows with a stop button must be exactly the sessions the daemon would "
+                       + "let this app stop")
+        XCTAssertEqual(stoppableInTheMenu.count, 1)
+    }
+
+    // MARK: - The suffix that finally arrives somewhere
+
+    /// `menuAutomaticSuffix` has been written and tested since Plan 4 and has
+    /// never once returned anything in a running app: it was appended only to
+    /// `mine`, which was `app-<uid>`, while the only producer of
+    /// `origin == .trigger` is the agent. This is the test that says it arrives.
+    func testAnAutomaticSessionOfYoursSaysSo() {
+        let trigger = session(owner: agent(me), ownerUID: me, origin: .trigger)
+        let suffix = menuAutomaticSuffix(for: trigger)
+
+        XCTAssertFalse(suffix.isEmpty,
+                       "the session a trigger rule started is exactly the one this was written for")
+        XCTAssertEqual(row(trigger), "Indefinite" + suffix,
+                       "the automatic row must be built from that suffix, not from a second copy "
+                       + "of its words: \(row(trigger))")
+        XCTAssertTrue(row(trigger).contains("automatically"), row(trigger))
+    }
+
+    /// The suffix stays silent on the ordinary case, which is the whole reason
+    /// it is a suffix and not a column: "started manually" on a session you
+    /// started by hand is noise.
+    func testAManualSessionOfYoursStillSaysNothingAboutItsOrigin() {
+        XCTAssertEqual(menuAutomaticSuffix(for: session(owner: app(me), ownerUID: me)), "")
+        XCTAssertEqual(row(session(owner: app(me), ownerUID: me)), "Indefinite")
+    }
+
+    // MARK: - The combination nobody named
+
+    /// `ownerUID` and `owner` are independent axes, so "yours" and "this app's"
+    /// make four combinations, not three. The one with no name is a session of
+    /// this user's from a client this build cannot identify — and the reason the
+    /// command-line row is right for a `cli-<uid>` session is that its owner
+    /// *says* `cli`, not that it is whatever was left over. A `switch` written
+    /// as "app / trigger / else foreign / else command line" would tell the user
+    /// that a future Shortcuts extension came from a terminal they never opened.
+    func testASessionOfYoursFromAnUnknownClientIsNotCalledTheCommandLine() {
+        let unknownRole = session(owner: ClientID(rawValue: "shortcuts-\(me)"), ownerUID: me)
+        XCTAssertEqual(menuSessionGroup(for: unknownRole, userID: me), .yoursOtherClient)
+        XCTAssertFalse(row(unknownRole).lowercased().contains("command line"),
+                       "nothing here knows that: \(row(unknownRole))")
+        XCTAssertFalse(row(unknownRole).contains("automatic"), row(unknownRole))
+    }
+
+    /// The same bucket from the other direction, and the one the design review
+    /// actually named: an agent-owned session that is not a trigger. Unreachable
+    /// today — `EvidenceLoopRunner` is the only thing that connects on the agent
+    /// service and it only ever starts triggers — and it must not borrow the
+    /// automatic row's claim on the strength of its owner alone.
+    func testAnAgentSessionThatIsNotATriggerDoesNotClaimToBeAutomatic() {
+        let notATrigger = session(owner: agent(me), ownerUID: me, origin: .manual)
+        XCTAssertEqual(menuSessionGroup(for: notATrigger, userID: me), .yoursOtherClient)
+        XCTAssertFalse(row(notATrigger).contains("automatic"), row(notATrigger))
+    }
+
+    /// A `cli-<uid>` session claiming `origin == .trigger` — which no shipped
+    /// client sends, and which a hand-rolled XPC client of this user could —
+    /// gets the row its *owner* earns. The owner is server-derived; the origin
+    /// is not, and the row's job is to say where the session came from.
+    func testAClientAssertedTriggerOriginCannotPromoteACommandLineSession() {
+        let claimsTrigger = session(owner: cli(me), ownerUID: me, origin: .trigger)
+        XCTAssertEqual(menuSessionGroup(for: claimsTrigger, userID: me), .yoursCommandLine)
+    }
+
+    // MARK: - What every row does and does not say
+
+    /// Four situations, four sentences. The word "elsewhere" used to cover three
+    /// of them at once, which is exactly why nobody could tell them apart.
+    func testEveryGroupThisAppCannotStopReadsDifferentlyFromEveryOther() {
+        let examples: [MenuSessionGroup: Session] = [
+            .yoursAutomatic: session(owner: agent(me), ownerUID: me, origin: .trigger),
+            .yoursCommandLine: session(owner: cli(me), ownerUID: me),
+            .yoursOtherClient: session(owner: ClientID(rawValue: "shortcuts-\(me)"), ownerUID: me),
+            .anotherUsers: session(owner: cli(someoneElse), ownerUID: someoneElse),
+        ]
+        var seen: [String: MenuSessionGroup] = [:]
+        for group in MenuSessionGroup.allCases where group != .thisApp {
+            guard let example = examples[group] else {
+                return XCTFail("\(group) has no example row; a new group needs its own sentence")
+            }
+            XCTAssertEqual(menuSessionGroup(for: example, userID: me), group)
+            let label = menuSessionLabel(for: example, group: group, now: t0)
+            XCTAssertTrue(label.hasPrefix("Indefinite — "),
+                          "the shape is <kind> — <provenance>: \(label)")
+            if let clash = seen.updateValue(group, forKey: label) {
+                XCTFail("\(group) and \(clash) render identically: \(label)")
+            }
+        }
+    }
+
+    /// **No row explains why it has no stop button.** The absence of the button
+    /// is the existing, deliberate signal — the menu was rebuilt away from rows
+    /// that carried three facts each — and a line apologising for its own limits
+    /// on every rebuild is the verbosity that rebuild removed. The limitation is
+    /// the README's job.
+    func testNoRowApologisesForNotBeingAButton() {
+        for group in MenuSessionGroup.allCases where group != .thisApp {
+            let label = menuSessionLabel(
+                for: session(owner: cli(someoneElse), ownerUID: someoneElse), group: group, now: t0)
+            XCTAssertFalse(label.hasPrefix("Stop"), "not a button: \(label)")
+            for word in ["stop", "can't", "cannot", "unable"] {
+                XCTAssertFalse(label.lowercased().contains(word),
+                               "\(group): the missing button is the signal, not a sentence: \(label)")
+            }
+        }
+    }
+
+    /// Every unstoppable row still carries its session's wake mode, for the
+    /// reason `menuForeignSessionLabel` did: a `.system` session that reads like
+    /// a lid-safe one is how somebody shuts the lid on work that then stops.
+    func testEveryRowStillCarriesItsSessionsWakeMode() {
+        for group in MenuSessionGroup.allCases {
+            for mode in WakeMode.allCases {
+                let label = menuSessionLabel(
+                    for: session(owner: cli(me), ownerUID: me, wakeMode: mode),
+                    group: group, now: t0)
+                XCTAssertEqual(label.contains("lid"), !mode.requiresSleepDisabled,
+                               "\(group)/\(mode.rawValue): the mode that survives a lid close is "
+                               + "the rule and goes untagged; every other mode must be visible: \(label)")
+            }
+        }
+    }
+
+    /// The kind is still what leads the row — it is the answer to "why is this
+    /// Mac awake", and the provenance is the qualifier.
+    func testTheRowStillLeadsWithWhatTheSessionActuallyIs() {
+        let timed = session(owner: agent(me), ownerUID: me, origin: .trigger,
+                            kind: .duration(until: t0.addingTimeInterval(3600)))
+        XCTAssertTrue(row(timed).hasPrefix("1h 0m left"), row(timed))
     }
 }
 
@@ -728,11 +983,13 @@ final class WakeModeMenuCopyTests: XCTestCase {
     }
 
     func testAForeignSessionCarriesItsModeToo() {
-        let plain = menuForeignSessionLabel(for: session(.clamshell, owner: theirsID), now: t0)
+        let plain = menuSessionLabel(for: session(.clamshell, owner: theirsID),
+                                     group: .anotherUsers, now: t0)
         XCTAssertFalse(plain.contains("lid"), "the default mode adds nothing: \(plain)")
 
-        let tagged = menuForeignSessionLabel(for: session(.systemAndDisplay, owner: theirsID), now: t0)
-        XCTAssertTrue(tagged.contains("elsewhere"), tagged)
+        let tagged = menuSessionLabel(for: session(.systemAndDisplay, owner: theirsID),
+                                      group: .anotherUsers, now: t0)
+        XCTAssertTrue(tagged.contains("another user"), tagged)
         XCTAssertTrue(tagged.contains("lid"),
                       "a CLI `--display-may-sleep` session must not read like a lid-safe one: \(tagged)")
     }
@@ -1131,9 +1388,12 @@ final class MenuDiskAxisCopyTests: XCTestCase {
                                       owner: ClientID(rawValue: "app-501"), ownerUID: 501,
                                       persistence: .clientBound, origin: .manual, startedAt: t0,
                                       triggerID: nil, wakeMode: mode, keepsDisksAwake: disks)
-                for row in [menuStopLabel(for: session, isOnlyOneOfMine: true, now: t0),
-                            menuStopLabel(for: session, isOnlyOneOfMine: false, now: t0),
-                            menuForeignSessionLabel(for: session, now: t0)] {
+                let rows = [menuStopLabel(for: session, isOnlyOneOfMine: true, now: t0),
+                            menuStopLabel(for: session, isOnlyOneOfMine: false, now: t0)]
+                    + MenuSessionGroup.allCases.map {
+                        menuSessionLabel(for: session, group: $0, now: t0)
+                    }
+                for row in rows {
                     XCTAssertFalse(row.lowercased().contains("disk"),
                                    "\(mode.rawValue)/disks=\(disks): a row describes one session, "
                                    + "and this axis has no per-session meaning: \(row)")
