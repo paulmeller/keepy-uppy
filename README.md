@@ -139,6 +139,10 @@ when the Mac is open in front of you and you'd rather it behaved normally in
 every other respect. Settings → General picks the mode for sessions you start
 from the menu bar.
 
+**It can't stop your Mac asking for a password.** macOS only lets a
+configuration profile change when the lock kicks in, and an app isn't allowed to
+install one — the setting is yours to change in System Settings → Lock Screen.
+
 *Both flags and that picker are on `main` only — the current download predates
 them. See [Status](#status).*
 
