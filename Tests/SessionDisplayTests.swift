@@ -5,8 +5,9 @@ final class SessionDisplayTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
 
     private func session(_ kind: SessionKind, origin: SessionOrigin = .manual) -> Session {
-        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"),
-               persistence: .clientBound, origin: origin, startedAt: t0)
+        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"), ownerUID: 0,
+                persistence: .clientBound, origin: origin, startedAt: t0,
+                triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
     }
 
     func testIndefiniteHasNoRemainingTimeText() {
@@ -544,8 +545,9 @@ final class MenuCopyTests: XCTestCase {
     private let theirsID = ClientID(rawValue: "cli-501")
 
     private func session(_ kind: SessionKind, owner: ClientID, origin: SessionOrigin = .manual) -> Session {
-        Session(id: UUID(), kind: kind, owner: owner, persistence: .clientBound,
-                origin: origin, startedAt: t0)
+        Session(id: UUID(), kind: kind, owner: owner, ownerUID: 0, persistence: .clientBound,
+                origin: origin, startedAt: t0, triggerID: nil, wakeMode: .clamshell,
+                keepsDisksAwake: false)
     }
 
     func testIdleSaysSoPlainly() {
@@ -631,9 +633,11 @@ final class WakeModeMenuCopyTests: XCTestCase {
     private let theirsID = ClientID(rawValue: "cli-501")
 
     private func session(_ mode: WakeMode, owner: ClientID? = nil,
-                         kind: SessionKind = .indefinite) -> Session {
-        Session(id: UUID(), kind: kind, owner: owner ?? mineID, persistence: .clientBound,
-                origin: .manual, startedAt: t0, wakeMode: mode)
+                         kind: SessionKind = .indefinite,
+                         keepsDisksAwake: Bool = false) -> Session {
+        Session(id: UUID(), kind: kind, owner: owner ?? mineID, ownerUID: 0,
+                persistence: .clientBound, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: mode, keepsDisksAwake: keepsDisksAwake)
     }
 
     // MARK: - The per-session tag

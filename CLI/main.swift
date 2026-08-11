@@ -100,8 +100,14 @@ case .on(let kind, let persistence, let wakeMode):
     // what crosses the boundary, as JSON, and it carries the field. See
     // `HelperProtocol.startSession` for which fields of this payload the
     // daemon actually honours — `owner` below is not one of them.
-    let session = Session(id: UUID(), kind: kind, owner: ownerID, persistence: persistence,
-                          origin: .manual, startedAt: Date(), triggerID: nil, wakeMode: wakeMode)
+    // `ownerUID: 0` is a placeholder in exactly the sense `ownerID` above is —
+    // the daemon establishes it from the authenticated peer and never trusts
+    // this field (`Session.authorized(id:owner:ownerUID:startedAt:)`). It is
+    // stated because `Session.init` has no defaulted parameters: every field is
+    // named at every construction site, on purpose.
+    let session = Session(id: UUID(), kind: kind, owner: ownerID, ownerUID: 0,
+                          persistence: persistence, origin: .manual, startedAt: Date(),
+                          triggerID: nil, wakeMode: wakeMode, keepsDisksAwake: false)
     guard let data = try? JSONEncoder().encode(session) else { fail("internal error encoding session") }
     proxy.startSession(data) { sessionID, error in
         if let sessionID {

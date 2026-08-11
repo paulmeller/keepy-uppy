@@ -265,43 +265,78 @@ struct Session: Equatable, Codable, Identifiable {
     /// (Shared/TriggerRule.swift) recognize a rule already represented by a
     /// live session and not refire it every tick.
     let triggerID: UUID?
-    /// How this session keeps the Mac awake. Defaults to `.clamshell` in
-    /// both the memberwise initialiser and decoding: every session that
-    /// exists today is a clamshell session, and a payload stored before this
-    /// field existed must decode to the strongest mode, not silently become
-    /// weaker.
+    /// How this session keeps the Mac awake. **No memberwise default** — see
+    /// the initialiser below — but an absent key still decodes to
+    /// `.clamshell`: every session that existed before this field did was a
+    /// clamshell session, and a payload stored by an older build must decode
+    /// to the strongest mode rather than silently becoming weaker.
     let wakeMode: WakeMode
+    /// Whether this session also asks the machine to keep attached disks from
+    /// idling into a lower power state.
+    ///
+    /// A third axis, not a fourth `WakeMode`. `WakeMode` is a user-facing choice
+    /// of one radio button — three named points, not a grid — and folding this
+    /// in would make it six cases, two of which nobody would ever pick. The
+    /// mechanism layer already models axes separately and correctly
+    /// (`PowerPlan`), so this belongs beside `wakeMode`, not inside it.
+    ///
+    /// Its **decode-time** default is `false`, which is the opposite direction
+    /// from `wakeMode`'s and deliberately so: no session that existed before
+    /// this field asked for it, and inventing a held assertion for a session
+    /// that never requested one is over-application — a Mac whose disks never
+    /// spin down, for a reason nothing on screen explains.
+    ///
+    /// **No memberwise default, and neither has anything else any more.** See
+    /// the initialiser below.
+    let keepsDisksAwake: Bool
 
     /// This session with its lease deadline moved, and **nothing else**
     /// changed.
     ///
     /// It lives here, immediately under the field list it has to mirror,
     /// because rebuilding a `Session` field by field is this type's one
-    /// recurring trap: exactly three of its fields carry defaults in the
-    /// memberwise initialiser (`ownerUID`, `triggerID`, `wakeMode`), and
-    /// omitting any of those three at a rebuild site does **not** fail to
-    /// compile — it silently substitutes the default. `triggerID` was dropped
-    /// from `SessionEngine`'s lease renewal once; `wakeMode` was dropped from
-    /// the same line when it was added, which *escalated* a renewed session
-    /// (a client that asked for the display to be free to sleep had the
-    /// global `SleepDisabled` switched on for it at the first renewal), and
-    /// `ownerUID` could still have been dropped there with every test
-    /// passing.
+    /// recurring trap. It used to be a trap the compiler slept through: three
+    /// of its fields carried memberwise defaults (`ownerUID`, `triggerID`,
+    /// `wakeMode`), and omitting any of those three at a rebuild site did
+    /// **not** fail to compile — it silently substituted the default.
+    /// `triggerID` was dropped from `SessionEngine`'s lease renewal once;
+    /// `wakeMode` was dropped from the same line when it was added, which
+    /// *escalated* a renewed session (a client that asked for the display to be
+    /// free to sleep had the global `SleepDisabled` switched on for it at the
+    /// first renewal), and `ownerUID` could still have been dropped there with
+    /// every test passing.
     ///
-    /// One copy, adjacent to the fields, is the structural fix: a new field
-    /// is added a few lines above the only place that has to carry it
-    /// across, and `SessionEngineTests`' whole-struct renewal test — a
-    /// `Session == Session` comparison, not a hand-written list of fields —
-    /// fails if it isn't.
+    /// No parameter has a default any more, so an omission here is now a
+    /// compile error rather than a silent substitution. One copy, adjacent to
+    /// the fields, is still the structural fix for the *other* half — a new
+    /// field is added a few lines above the only place that has to carry it
+    /// across — and `SessionEngineTests`' whole-struct renewal test, a
+    /// `Session == Session` comparison rather than a hand-written list of
+    /// fields, is what catches a field carried across as the wrong value.
     func renewed(until: Date) -> Session {
         Session(id: id, kind: .lease(expires: until), owner: owner, ownerUID: ownerUID,
                 persistence: persistence, origin: origin, startedAt: startedAt,
-                triggerID: triggerID, wakeMode: wakeMode)
+                triggerID: triggerID, wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake)
     }
 
-    init(id: UUID, kind: SessionKind, owner: ClientID, ownerUID: UInt32 = 0,
+    /// **No parameter here has a default, and none may gain one.**
+    ///
+    /// Three used to (`ownerUID`, `triggerID`, `wakeMode`) and the omission bit
+    /// five times, always the same way: a rebuild site that left one out
+    /// compiled silently and substituted somebody else's idea of harmless.
+    /// `triggerID` was dropped from lease renewal; `wakeMode` was dropped from
+    /// the same line and *escalated* every renewed session; omitting it from
+    /// `authorized(...)` made every production session a clamshell session
+    /// whatever the client asked for. All three compiled. All three passed.
+    ///
+    /// There is no way to assert "this does not compile" in XCTest, so this
+    /// comment is the guarantee. Adding a defaulted parameter here is the thing
+    /// it forbids. Note that the **decode-time** defaults in `init(from:)` are a
+    /// different mechanism serving a different caller (the wire) and stay.
+    init(id: UUID, kind: SessionKind, owner: ClientID, ownerUID: UInt32,
          persistence: SessionPersistence, origin: SessionOrigin,
-         startedAt: Date, triggerID: UUID? = nil, wakeMode: WakeMode = .clamshell) {
+         startedAt: Date, triggerID: UUID?, wakeMode: WakeMode,
+         keepsDisksAwake: Bool) {
         self.id = id
         self.kind = kind
         self.owner = owner
@@ -311,19 +346,28 @@ struct Session: Equatable, Codable, Identifiable {
         self.startedAt = startedAt
         self.triggerID = triggerID
         self.wakeMode = wakeMode
+        self.keepsDisksAwake = keepsDisksAwake
     }
 
-    // `wakeMode` needs a *decode-time* default, not just an initializer
-    // default: Swift's synthesized Decodable requires a non-Optional
-    // stored property's key to be present unless the property itself
-    // carries a declaration-site default (`let wakeMode: WakeMode =
-    // .clamshell`) — and that alternative is worse, because Swift then
-    // excludes the property from decoding entirely, so a *real*,
-    // non-clamshell `wakeMode` would silently come back as `.clamshell`
-    // after any encode/decode round trip. A hand-written `init(from:)`
-    // with `decodeIfPresent(...) ?? .clamshell` is the only way to get
-    // "absent key defaults to clamshell" and "present key decodes
-    // faithfully" at the same time. `encode(to:)` is left to synthesis.
+    // `wakeMode` and `keepsDisksAwake` need *decode-time* defaults, which are
+    // not the same mechanism as an initializer default and survive its
+    // removal: Swift's synthesized Decodable requires a non-Optional stored
+    // property's key to be present unless the property itself carries a
+    // declaration-site default (`let wakeMode: WakeMode = .clamshell`) — and
+    // that alternative is worse, because Swift then excludes the property from
+    // decoding entirely, so a *real*, non-clamshell `wakeMode` would silently
+    // come back as `.clamshell` after any encode/decode round trip, and a real
+    // `keepsDisksAwake: true` as `false`. A hand-written `init(from:)` with
+    // `decodeIfPresent(...) ?? …` is the only way to get "absent key defaults"
+    // and "present key decodes faithfully" at the same time. `encode(to:)` is
+    // left to synthesis.
+    //
+    // The two defaults point in OPPOSITE directions, and that is the decision,
+    // not an inconsistency. An absent `wakeMode` becomes the STRONGEST mode
+    // because weakening a session that already exists loses a user's work; an
+    // absent `keepsDisksAwake` becomes the WEAKEST state because nobody asked
+    // for it and holding disks awake unasked costs battery for no visible
+    // reason. `SessionDiskAxisTests` pins both directions off one payload.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -335,6 +379,7 @@ struct Session: Equatable, Codable, Identifiable {
         startedAt = try container.decode(Date.self, forKey: .startedAt)
         triggerID = try container.decodeIfPresent(UUID.self, forKey: .triggerID)
         wakeMode = try container.decodeIfPresent(WakeMode.self, forKey: .wakeMode) ?? .clamshell
+        keepsDisksAwake = try container.decodeIfPresent(Bool.self, forKey: .keepsDisksAwake) ?? false
     }
 }
 
@@ -354,27 +399,30 @@ extension Session {
     ///   facts about *who is calling*, which only the daemon can establish.
     ///
     /// CLIENT-CHOSEN — everything read off `self`: `kind`, `persistence`,
-    ///   `origin`, `triggerID`, and `wakeMode`. These are the request: what
-    ///   the caller wants, which the daemon then admits or rejects on its own
-    ///   terms (`SessionAdmission`) but does not silently rewrite. `wakeMode`
-    ///   is here and not above because how a session keeps the Mac awake is
-    ///   the caller's business, exactly like when it ends — there is no mode a
-    ///   caller can select that would let it affect another client's session,
-    ///   since the daemon unions every live session's mode itself
-    ///   (`PowerPlan.reduce`).
+    ///   `origin`, `triggerID`, `wakeMode`, and `keepsDisksAwake`. These are the
+    ///   request: what the caller wants, which the daemon then admits or rejects
+    ///   on its own terms (`SessionAdmission`) but does not silently rewrite.
+    ///   The two power axes are here and not above because how a session keeps
+    ///   the Mac awake is the caller's business, exactly like when it ends —
+    ///   there is nothing a caller can select on either axis that would let it
+    ///   affect another client's session, since the daemon unions every live
+    ///   session's request itself (`PowerPlan.reduce`).
     ///
     /// This lives in `Shared/` for the same reason `SessionTable.desiredPowerPlan`
     /// does: `Helper/` is not reachable from the test target, so anything left
     /// there is verified by reading alone — and this is the most
-    /// security-relevant line in `HelperService.startSession`, with the same
-    /// silent-default trap as `renewed(until:)` above. Omitting `wakeMode:`
-    /// from the rebuild is exactly what made every session in production a
-    /// clamshell session no matter what any client asked for, and it did not
-    /// fail to compile. `SessionTests` now covers the split directly, with a
-    /// whole-struct comparison rather than a hand-written field list.
+    /// security-relevant line in `HelperService.startSession`, and was for a long
+    /// time the same silent-default trap as `renewed(until:)` above. Omitting
+    /// `wakeMode:` from the rebuild is exactly what made every session in
+    /// production a clamshell session no matter what any client asked for, and it
+    /// did not fail to compile. It would now: no parameter of `Session.init` has
+    /// a default. `SessionTests` covers the split directly on top of that, with
+    /// whole-struct comparisons rather than a hand-written field list, because
+    /// the compiler can force a field to be *named* here but not to be named
+    /// with the value the client sent.
     func authorized(id: UUID, owner: ClientID, ownerUID: UInt32, startedAt: Date) -> Session {
         Session(id: id, kind: kind, owner: owner, ownerUID: ownerUID,
                 persistence: persistence, origin: origin, startedAt: startedAt,
-                triggerID: triggerID, wakeMode: wakeMode)
+                triggerID: triggerID, wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake)
     }
 }

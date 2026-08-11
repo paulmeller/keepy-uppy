@@ -8,11 +8,12 @@ final class SessionTableTests: XCTestCase {
 
     private func session(_ id: String, owner: ClientID,
                          persistence: SessionPersistence = .clientBound,
-                         wakeMode: WakeMode = .clamshell) -> Session {
+                         wakeMode: WakeMode = .clamshell,
+                         keepsDisksAwake: Bool = false) -> Session {
         Session(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(id)")!,
-                kind: .indefinite, owner: owner,
+                kind: .indefinite, owner: owner, ownerUID: 0,
                 persistence: persistence, origin: .manual, startedAt: t0,
-                wakeMode: wakeMode)
+                triggerID: nil, wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake)
     }
 
     func testEmptyTableWantsSleepEnabled() {
@@ -95,8 +96,9 @@ final class SessionTableTests: XCTestCase {
 
     private func timedSession(_ id: String, deadline: Date, owner: ClientID) -> Session {
         Session(id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(id)")!,
-                kind: .duration(until: deadline), owner: owner,
-                persistence: .clientBound, origin: .manual, startedAt: t0)
+                kind: .duration(until: deadline), owner: owner, ownerUID: 0,
+                persistence: .clientBound, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
     }
 
     func testRemoveExpiredIsANoOpWhenNothingIsDue() {

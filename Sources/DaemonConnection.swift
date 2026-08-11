@@ -155,23 +155,27 @@ final class DaemonConnection: ObservableObject {
     /// whose remaining fields are the actual ask.
     ///
     /// It is a separate, testable function rather than four lines inside
-    /// `startSession` for one reason: `wakeMode` is one of exactly three
+    /// `startSession` for one reason: `wakeMode` used to be one of exactly three
     /// `Session` fields with a memberwise default, so omitting it from a
-    /// construction site is not a compile error — it silently substitutes
+    /// construction site was not a compile error — it silently substituted
     /// `.clamshell`. That omission *was* here, which is why every session this
-    /// app started ignored the mode entirely, and the identical omission has
-    /// now been made and fixed twice more on two other lines
-    /// (`SessionEngine`'s lease renewal, `HelperService`'s trust split). Both
-    /// of those were closed by pairing one copy with one whole-struct test;
-    /// this is the third and last construction site in the app, closed the same
-    /// way by `DaemonConnectionRequestTests`.
+    /// app started ignored the mode entirely, and the identical omission was
+    /// made and fixed twice more on two other lines (`SessionEngine`'s lease
+    /// renewal, `HelperService`'s trust split). `Session.init` no longer defaults
+    /// anything, so that particular omission is now a compile error everywhere —
+    /// but this function stays, because the compiler can force a field to be
+    /// *named* and cannot force it to be named with the value the caller asked
+    /// for, which is what `DaemonConnectionRequestTests` checks.
     nonisolated static func requestedSession(
         kind: SessionKind, wakeMode: WakeMode,
         persistence: SessionPersistence, origin: SessionOrigin, now: Date = Date()
     ) -> Session {
-        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "app"),
+        // `ownerUID: 0` and the `nil` trigger id are the request's placeholders:
+        // the daemon overwrites the first server-side and this app never starts
+        // a trigger-originated session.
+        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "app"), ownerUID: 0,
                 persistence: persistence, origin: origin, startedAt: now,
-                wakeMode: wakeMode)
+                triggerID: nil, wakeMode: wakeMode, keepsDisksAwake: false)
     }
 
     /// `wakeMode` has **no default**, unlike `persistence` and `origin`, and

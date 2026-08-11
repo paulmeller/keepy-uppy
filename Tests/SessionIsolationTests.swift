@@ -11,8 +11,9 @@ final class SessionIsolationTests: XCTestCase {
     private let bob = ClientID(rawValue: "bob")
 
     private func session(owner: ClientID, persistence: SessionPersistence = .clientBound) -> Session {
-        Session(id: UUID(), kind: .indefinite, owner: owner,
-                persistence: persistence, origin: .manual, startedAt: t0)
+        Session(id: UUID(), kind: .indefinite, owner: owner, ownerUID: 0,
+                persistence: persistence, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
     }
 
     // MARK: - authorize: the ownership check behind stopSession / renewLease

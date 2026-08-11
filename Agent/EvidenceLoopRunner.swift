@@ -164,18 +164,35 @@ final class EvidenceLoopRunner {
             // now — see `TriggerRule.defaultKind` for what going the other
             // way costs (a permanent 5s refire loop against the daemon).
             let now = Date()
-            // `wakeMode:` is written out rather than left to the memberwise
-            // default: a trigger fires while nobody is watching, so its session
-            // has to be the one that survives a lid close. Spelling it is not
-            // ceremony — `wakeMode` is one of `Session`'s three defaulted
-            // fields, so omitting it is not a compile error (see
-            // `Session.renewed(until:)`), and this file is not in the test
-            // target, making this the one construction site with neither a
-            // compiler nor a test to notice.
+            // Both power axes are written out, and they are answered in
+            // opposite directions on purpose.
+            //
+            // `wakeMode: .clamshell` because a trigger fires while nobody is
+            // watching, so its session has to be the one that survives a lid
+            // close — over-applying there protects the work the rule exists
+            // for.
+            //
+            // `keepsDisksAwake: false` because a `TriggerRule` has no way to
+            // ask for it. Holding attached disks out of idle costs battery
+            // (the IOKit header says so outright) and shows up nowhere on
+            // screen, so a trigger that held them awake would be a machine-wide
+            // effect nobody requested and nobody could explain — the same
+            // "nobody asked for it" reasoning behind the field's decode-time
+            // default. If a rule ever gains its own power request, this is the
+            // line that reads it.
+            //
+            // Spelling both out is no longer what stops an omission — no
+            // parameter of `Session.init` has a default any more, so leaving
+            // one off is a compile error here as everywhere else. What is still
+            // true of this site alone is that it is the only `Session`
+            // construction outside `Shared/` that no test can reach: this file
+            // is not in the app target's `sources:` list, so it is verified by
+            // reading plus a green build of the agent, and nothing else.
             let session = Session(id: UUID(), kind: sessionKind(firing: rule, now: now),
-                                  owner: ClientID(rawValue: "agent"),
+                                  owner: ClientID(rawValue: "agent"), ownerUID: 0,
                                   persistence: .detached, origin: .trigger, startedAt: now,
-                                  triggerID: rule.id, wakeMode: .clamshell)
+                                  triggerID: rule.id, wakeMode: .clamshell,
+                                  keepsDisksAwake: false)
             let (sessionID, error) = await connection.startSession(session)
             if sessionID == nil {
                 // A `.triggerSuppressed` ("cooldown") rejection here is

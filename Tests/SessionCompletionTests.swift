@@ -16,7 +16,8 @@ final class SessionCompletionTests: XCTestCase {
     private func session(id: UUID = UUID(), kind: SessionKind = .indefinite,
                          ownerUID: UInt32 = 501) -> Session {
         Session(id: id, kind: kind, owner: ClientID(rawValue: "x"), ownerUID: ownerUID,
-               persistence: .detached, origin: .manual, startedAt: t0)
+                persistence: .detached, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
     }
 
     // MARK: - sessionsEndedSince

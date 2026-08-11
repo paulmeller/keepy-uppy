@@ -53,8 +53,9 @@ final class EvidenceLoopTests: XCTestCase {
     }
 
     private func session(_ kind: SessionKind) -> Session {
-        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"),
-               persistence: .detached, origin: .manual, startedAt: t0)
+        Session(id: UUID(), kind: kind, owner: ClientID(rawValue: "x"), ownerUID: 0,
+                persistence: .detached, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
     }
 
     /// One `sessionsToEnd` tick, with every observer defaulted to something

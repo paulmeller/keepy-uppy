@@ -385,9 +385,9 @@ final class TriggerRuleTests: XCTestCase {
     func testAlreadyActiveTriggerDoesNotFireAgain() {
         let r = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"))
         let already = Session(id: UUID(), kind: r.defaultKind.sessionKind(now: Date()),
-                              owner: ClientID(rawValue: "agent"),
+                              owner: ClientID(rawValue: "agent"), ownerUID: 0,
                               persistence: .detached, origin: .trigger, startedAt: Date(),
-                              triggerID: r.id)
+                              triggerID: r.id, wakeMode: .clamshell, keepsDisksAwake: false)
         XCTAssertTrue(fire([r], activeSessions: [already],
                            app: FakeAppRunning(running: ["com.apple.dt.Xcode"])).isEmpty)
     }
@@ -401,9 +401,9 @@ final class TriggerRuleTests: XCTestCase {
     func testAlreadyActiveProcessTriggerDoesNotFireAgain() {
         let r = rule(.processRunning(processName: "claude"))
         let already = Session(id: UUID(), kind: sessionKind(firing: r, now: Date()),
-                              owner: ClientID(rawValue: "agent"),
+                              owner: ClientID(rawValue: "agent"), ownerUID: 0,
                               persistence: .detached, origin: .trigger, startedAt: Date(),
-                              triggerID: r.id)
+                              triggerID: r.id, wakeMode: .clamshell, keepsDisksAwake: false)
         XCTAssertEqual(already.kind, .whileProcessRunning(processName: "claude"))
         XCTAssertTrue(fire([r], activeSessions: [already],
                            process: FakeProcessRunning(running: ["claude"])).isEmpty,
@@ -416,9 +416,10 @@ final class TriggerRuleTests: XCTestCase {
         let mine = rule(.processRunning(processName: "claude"))
         let other = rule(.processRunning(processName: "codex"))
         let othersSession = Session(id: UUID(), kind: sessionKind(firing: other, now: Date()),
-                                    owner: ClientID(rawValue: "agent"),
+                                    owner: ClientID(rawValue: "agent"), ownerUID: 0,
                                     persistence: .detached, origin: .trigger, startedAt: Date(),
-                                    triggerID: other.id)
+                                    triggerID: other.id, wakeMode: .clamshell,
+                                    keepsDisksAwake: false)
         let fired = fire([mine], activeSessions: [othersSession],
                          process: FakeProcessRunning(running: ["claude", "codex"]))
         XCTAssertEqual(fired.map(\.id), [mine.id])
@@ -630,8 +631,9 @@ final class TriggerRuleTests: XCTestCase {
         for family in SessionKind.Family.allCases {
             let session = Session(id: UUID(),
                                   kind: family.sampleKind(deadline: start.addingTimeInterval(86_400)),
-                                  owner: ClientID(rawValue: "cli-501"),
-                                  persistence: .clientBound, origin: .manual, startedAt: start)
+                                  owner: ClientID(rawValue: "cli-501"), ownerUID: 0,
+                                  persistence: .clientBound, origin: .manual, startedAt: start,
+                                  triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
             // More runs than `negativesBeforeEnding`, because the bug this
             // guards against is a *stream* of failed reads accumulating into an
             // end — which is what the process observer's sysctl race actually
@@ -696,8 +698,9 @@ final class TriggerRuleTests: XCTestCase {
         let r = rule(.acPowerConnected, kind: .oneHour)
         // Exactly what EvidenceLoopRunner does when the rule fires, at `fire`.
         let session = Session(id: UUID(), kind: r.defaultKind.sessionKind(now: fire),
-                              owner: ClientID(rawValue: "agent"),
-                              persistence: .detached, origin: .trigger, startedAt: fire, triggerID: r.id)
+                              owner: ClientID(rawValue: "agent"), ownerUID: 0,
+                              persistence: .detached, origin: .trigger, startedAt: fire,
+                              triggerID: r.id, wakeMode: .clamshell, keepsDisksAwake: false)
         XCTAssertGreaterThan(session.kind.deadline ?? .distantPast, fire,
                              "a rule fired at `fire` must produce a session that outlives `fire`")
         XCTAssertEqual(session.kind, .duration(until: fire.addingTimeInterval(3600)))

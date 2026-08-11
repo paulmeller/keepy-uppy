@@ -91,7 +91,8 @@ final class StableIdentityStopScopingTests: XCTestCase {
                                       persistence: SessionPersistence = .detached) -> Session {
         Session(id: UUID(), kind: .duration(until: t0.addingTimeInterval(300)),
                 owner: role.clientID(forUserID: userID), ownerUID: userID,
-                persistence: persistence, origin: .manual, startedAt: t0)
+                persistence: persistence, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
     }
 
     func testASeparateCLIInvocationStopsTheSessionAnEarlierOneStarted() {
@@ -181,11 +182,13 @@ final class StableIdentityStopScopingTests: XCTestCase {
         let owner = ClientRole.cli.clientID(forUserID: uid)
         for _ in 0..<SessionAdmission.maxSessionsPerOwner {
             let session = Session(id: UUID(), kind: .indefinite, owner: owner, ownerUID: uid,
-                                  persistence: .detached, origin: .manual, startedAt: t0)
+                                  persistence: .detached, origin: .manual, startedAt: t0,
+                                  triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
             XCTAssertEqual(engine.startSession(session, now: t0, liveAgentConnections: 1), .admitted)
         }
         let oneMore = Session(id: UUID(), kind: .indefinite, owner: owner, ownerUID: uid,
-                              persistence: .detached, origin: .manual, startedAt: t0)
+                              persistence: .detached, origin: .manual, startedAt: t0,
+                              triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
         XCTAssertEqual(engine.startSession(oneMore, now: t0, liveAgentConnections: 1),
                        .ownerLimitReached,
                        "a reconnecting client must not get a fresh per-owner allowance")

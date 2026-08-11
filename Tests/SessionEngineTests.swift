@@ -9,10 +9,12 @@ final class SessionEngineTests: XCTestCase {
                       persistence: SessionPersistence = .clientBound,
                       origin: SessionOrigin = .manual,
                       userID: UInt32 = 0,
-                      wakeMode: WakeMode = .clamshell) -> Session {
+                      wakeMode: WakeMode = .clamshell,
+                      keepsDisksAwake: Bool = false) -> Session {
         Session(id: UUID(), kind: kind, owner: alice,
                 ownerUID: userID, persistence: persistence,
-                origin: origin, startedAt: t0, wakeMode: wakeMode)
+                origin: origin, startedAt: t0, triggerID: nil,
+                wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake)
     }
 
     func testStartingASessionKeepsAwake() {
@@ -150,29 +152,31 @@ final class SessionEngineTests: XCTestCase {
     /// (`…PreservesIdentityAndOnlyMovesDeadline`, `…PreservesTriggerID`,
     /// `…PreservesWakeMode`) and, between them, still missed one.
     ///
-    /// Exactly three of `Session`'s fields carry defaults in its memberwise
-    /// initialiser — `ownerUID`, `triggerID`, `wakeMode` — and those three,
-    /// and only those three, can be silently omitted from a rebuild without
+    /// Three of `Session`'s fields used to carry defaults in its memberwise
+    /// initialiser — `ownerUID`, `triggerID`, `wakeMode` — and those three, and
+    /// only those three, could be silently omitted from a rebuild without
     /// failing to compile. Two of them had been dropped from this renewal for
     /// real; the third was still open, and deleting `ownerUID` from the copy
     /// left all of `SessionEngineTests`, `SessionIsolationTests` and
-    /// `ClientIdentityTests` passing.
+    /// `ClientIdentityTests` passing. `Session.init` now defaults nothing, so
+    /// an *omission* is a compile error at every site; what this test still
+    /// covers is the half the compiler cannot — a field carried across as the
+    /// wrong value.
     ///
     /// So this names no fields at all. `Session` is `Equatable`: the lease is
     /// built with *every* field set to a non-default value, and the
     /// expectation comes from the same factory with only the deadline moved.
-    /// A field dropped from `Session.renewed(until:)` takes its initialiser
-    /// default, the two structs stop being equal, and this fails — whether or
-    /// not anyone thought to name it, **for the fields the factory sets**.
+    /// A field rebuilt wrongly in `Session.renewed(until:)` makes the two
+    /// structs unequal and this fails — whether or not anyone thought to name
+    /// it, **for the fields the factory sets to something distinguishable**.
     ///
-    /// That qualifier is the whole point, and it does not stretch to fields
-    /// that do not exist yet. The expectation is built with the *same*
-    /// memberwise initialiser as the value under test, so a defaulted field
-    /// added to `Session` later and left out of the factory below is left out
-    /// of both sides and compares default-to-default — silently uncovered, in
-    /// precisely the way this test exists to prevent. A new defaulted field is
+    /// That qualifier is the whole point. The expectation is built with the
+    /// *same* memberwise initialiser as the value under test, so a new field
+    /// given the same uninteresting value on both sides (a fresh `Bool` left
+    /// `false`) compares equal whatever `renewed` does with it. A new field is
     /// covered only once someone gives it a **non-default** value in the
-    /// factory, and nothing but this sentence will say so.
+    /// factory below — `keepsDisksAwake` is `true` here for that reason, exactly
+    /// as `wakeMode` is `.system` — and nothing but this sentence will say so.
     /// `DaemonConnectionRequestTests` carries the same warning, for the same
     /// reason.
     func testRenewingALeaseMovesTheDeadlineAndChangesNothingElse() {
@@ -182,7 +186,7 @@ final class SessionEngineTests: XCTestCase {
             Session(id: id, kind: .lease(expires: expires),
                     owner: ClientID(rawValue: "agent-501"), ownerUID: 501,
                     persistence: .detached, origin: .trigger, startedAt: t0,
-                    triggerID: triggerID, wakeMode: .system)
+                    triggerID: triggerID, wakeMode: .system, keepsDisksAwake: true)
         }
 
         var engine = SessionEngine()
@@ -315,7 +319,9 @@ final class SessionEngineTests: XCTestCase {
             let batch = min(SessionAdmission.maxSessionsPerOwner, SessionAdmission.maxSessionsGlobal - count)
             for _ in 0..<batch {
                 let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "owner-\(owner)"),
-                                      persistence: .clientBound, origin: .manual, startedAt: t0)
+                                      ownerUID: 0, persistence: .clientBound, origin: .manual,
+                                      startedAt: t0, triggerID: nil, wakeMode: .clamshell,
+                                      keepsDisksAwake: false)
                 XCTAssertEqual(engine.startSession(session, now: t0, liveAgentConnections: 0), .admitted)
                 count += 1
             }
@@ -328,7 +334,8 @@ final class SessionEngineTests: XCTestCase {
         // rejected once the daemon-wide cap is reached.
         let rejected = engine.startSession(
             Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "brand-new-owner"),
-                    persistence: .clientBound, origin: .manual, startedAt: t0),
+                    ownerUID: 0, persistence: .clientBound, origin: .manual, startedAt: t0,
+                    triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false),
             now: t0, liveAgentConnections: 0)
 
         XCTAssertEqual(rejected, .globalLimitReached)
@@ -347,12 +354,14 @@ final class SessionEngineTests: XCTestCase {
         // proves the cap is global-to-detached-kind, not per-owner.
         for i in 0..<SessionAdmission.maxDetachedSessionsGlobal {
             let session = Session(id: UUID(), kind: .indefinite,
-                                  owner: ClientID(rawValue: "owner-\(i)"),
-                                  persistence: .detached, origin: .manual, startedAt: t0)
+                                  owner: ClientID(rawValue: "owner-\(i)"), ownerUID: 0,
+                                  persistence: .detached, origin: .manual, startedAt: t0,
+                                  triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
             XCTAssertEqual(engine.startSession(session, now: t0, liveAgentConnections: 0), .admitted)
         }
         let oneMore = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "owner-extra"),
-                              persistence: .detached, origin: .manual, startedAt: t0)
+                              ownerUID: 0, persistence: .detached, origin: .manual, startedAt: t0,
+                              triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
         XCTAssertEqual(engine.startSession(oneMore, now: t0, liveAgentConnections: 0), .globalLimitReached)
     }
 
@@ -360,15 +369,18 @@ final class SessionEngineTests: XCTestCase {
         var engine = SessionEngine()
         for i in 0..<SessionAdmission.maxDetachedSessionsGlobal {
             let session = Session(id: UUID(), kind: .indefinite,
-                                  owner: ClientID(rawValue: "owner-\(i)"),
-                                  persistence: .detached, origin: .manual, startedAt: t0)
+                                  owner: ClientID(rawValue: "owner-\(i)"), ownerUID: 0,
+                                  persistence: .detached, origin: .manual, startedAt: t0,
+                                  triggerID: nil, wakeMode: .clamshell, keepsDisksAwake: false)
             _ = engine.startSession(session, now: t0, liveAgentConnections: 0)
         }
         // The detached sub-cap must not touch clientBound admission at all —
         // this is the actual guarantee: headroom stays reserved for sessions
         // whose owner is (by construction) still connected.
         let clientBound = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "owner-cb"),
-                                  persistence: .clientBound, origin: .manual, startedAt: t0)
+                                  ownerUID: 0, persistence: .clientBound, origin: .manual,
+                                  startedAt: t0, triggerID: nil, wakeMode: .clamshell,
+                                  keepsDisksAwake: false)
         XCTAssertEqual(engine.startSession(clientBound, now: t0, liveAgentConnections: 0), .admitted)
     }
 

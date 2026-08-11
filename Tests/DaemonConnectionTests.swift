@@ -103,14 +103,14 @@ final class DaemonConnectionRequestTests: XCTestCase {
     /// claimed the shape gave what `SessionEngineTests`' renewal test gives:
     /// "a field added later is covered without anyone remembering to add it
     /// here". It does not, and cannot. The expectation is built with the *same*
-    /// memberwise initialiser as the value under test, so a field added later
-    /// with a default that nobody names below is absent from both sides and
-    /// compares default-to-default — silently uncovered. Defaulted fields are
-    /// exactly the class that has silently broken this repo four times, and
-    /// `Session.renewed(until:)`'s comment lists the three that carry one
-    /// today (`ownerUID`, `triggerID`, `wakeMode`).
+    /// memberwise initialiser as the value under test, so a field given the same
+    /// uninteresting value on both sides proves nothing about what
+    /// `requestedSession` did with it. This is now only half the old hazard:
+    /// `Session.init` defaults nothing, so a new field cannot be silently
+    /// *omitted* from either side — it would not compile — but it can still be
+    /// named `false` on both and compare equal for free.
     ///
-    /// So: adding a defaulted field to `Session` means naming it here with a
+    /// So: adding a field to `Session` means naming it here with a
     /// **non-default** value, and nothing but this sentence will say so.
     /// `wakeMode` is `.systemAndDisplay` rather than `.clamshell` for that
     /// reason, and the server-owned fields are asserted against literals rather
@@ -140,7 +140,8 @@ final class DaemonConnectionRequestTests: XCTestCase {
         XCTAssertEqual(request, Session(id: request.id, kind: .duration(until: until),
                                         owner: ClientID(rawValue: "app"), ownerUID: 0,
                                         persistence: .detached, origin: .trigger, startedAt: t0,
-                                        triggerID: nil, wakeMode: .systemAndDisplay))
+                                        triggerID: nil, wakeMode: .systemAndDisplay,
+                                        keepsDisksAwake: false))
     }
 }
 

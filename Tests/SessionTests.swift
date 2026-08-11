@@ -41,16 +41,98 @@ final class WakeModeTests: XCTestCase {
         // non-clamshell wakeMode must survive an encode/decode round trip.
         let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "cli-501"),
                                ownerUID: 501, persistence: .detached, origin: .manual,
-                               startedAt: Date(timeIntervalSince1970: 0), wakeMode: .systemAndDisplay)
+                               startedAt: Date(timeIntervalSince1970: 0), triggerID: nil,
+                               wakeMode: .systemAndDisplay, keepsDisksAwake: false)
         let data = try JSONEncoder().encode(session)
         let decoded = try JSONDecoder().decode(Session.self, from: data)
         XCTAssertEqual(decoded.wakeMode, .systemAndDisplay)
     }
 
-    func testMemberwiseInitializerDefaultsToClamshell() {
+    // `testMemberwiseInitializerDefaultsToClamshell` used to sit here, asserting
+    // that a `Session` built without a `wakeMode:` came back `.clamshell`. That
+    // default is gone — every parameter of `Session.init` is now required — so
+    // the test no longer compiles, and there is nothing left for it to assert:
+    // the guarantee it stood for is now the compiler's, at every construction
+    // site rather than at this one. The *decode*-time default it was often
+    // confused with is a different mechanism and is still pinned, one test up.
+}
+
+/// The third power axis at the `Session` layer: it is stored, it is
+/// client-chosen, and it crosses the wire — nothing here knows what an
+/// assertion is (that is `PowerRequest`'s and `PowerPlan`'s job).
+///
+/// The two decode-time defaults point in **opposite directions on purpose**,
+/// and these tests are where that is written down as behaviour rather than as
+/// a comment. An absent `wakeMode` decodes to `.clamshell`, the *strongest*
+/// mode, because every session that existed before that field did was a
+/// clamshell session and weakening one on decode loses a user's work. An absent
+/// `keepsDisksAwake` decodes to `false`, the *weakest* state, because no
+/// session that existed before this field asked for it, and inventing a held
+/// assertion for a session that never requested one is over-application: a Mac
+/// whose disks never spin down, for a reason nothing on screen explains.
+final class SessionDiskAxisTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func testDecodingASessionWithoutTheDiskAxisDefaultsToFalse() throws {
+        // The same real payload `testDecodingASessionWithoutAWakeModeDefaultsToClamshell`
+        // uses — a session written before either field existed — so both
+        // directions are read off one document rather than two that could
+        // drift.
+        let legacy = #"{"ownerUID":501,"id":"A4C6403A-9AC7-49FD-8276-C740C220A1C2","origin":"manual","kind":{"indefinite":{}},"startedAt":-978307200,"owner":"cli-501","persistence":"detached"}"#
+        let session = try JSONDecoder().decode(Session.self, from: Data(legacy.utf8))
+
+        XCTAssertFalse(session.keepsDisksAwake,
+                       "an absent disk axis must decode to the WEAKEST state: nobody asked for it")
+        XCTAssertEqual(session.wakeMode, .clamshell,
+                       "and an absent wake mode must still decode to the STRONGEST mode, "
+                       + "which is the opposite direction and stays that way")
+    }
+
+    func testTheDiskAxisRoundTripsThroughEncoding() throws {
+        // The declaration-site-default trap `testWakeModeRoundTripsThroughEncodingWhenNotClamshell`
+        // documents, on the new field: `let keepsDisksAwake: Bool = false` would
+        // make Swift exclude the property from synthesized Decodable entirely,
+        // so a real `true` would come back `false` after any round trip — a
+        // session silently dropping the axis it was started for.
         let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "cli-501"),
-                               persistence: .detached, origin: .manual, startedAt: Date())
-        XCTAssertEqual(session.wakeMode, .clamshell)
+                              ownerUID: 501, persistence: .detached, origin: .manual,
+                              startedAt: t0, triggerID: nil, wakeMode: .system,
+                              keepsDisksAwake: true)
+        let decoded = try JSONDecoder().decode(Session.self,
+                                               from: try JSONEncoder().encode(session))
+
+        XCTAssertTrue(decoded.keepsDisksAwake)
+        XCTAssertEqual(decoded, session, "and nothing else moved on the way through")
+    }
+
+    /// `renewed(until:)` must carry every field but the deadline across, as one
+    /// `Session == Session` comparison rather than a field list that can forget
+    /// the field that matters — the shape
+    /// `SessionEngineTests.testRenewingALeaseMovesTheDeadlineAndChangesNothingElse`
+    /// established, here at the level of the function itself rather than through
+    /// the engine.
+    ///
+    /// Both values, not just `true`: a `renewed` that hard-coded `true` would
+    /// pass a one-value test while inventing an assertion for every renewed
+    /// lease, which is precisely the over-application half of the mutator rule.
+    func testRenewalCarriesTheDiskAxisAcross() {
+        for wanted in [false, true] {
+            let id = UUID()
+            let triggerID = UUID()
+            func lease(expires: Date) -> Session {
+                Session(id: id, kind: .lease(expires: expires),
+                        owner: ClientID(rawValue: "agent-501"), ownerUID: 501,
+                        persistence: .detached, origin: .trigger, startedAt: t0,
+                        triggerID: triggerID, wakeMode: .system, keepsDisksAwake: wanted)
+            }
+
+            let renewed = lease(expires: t0.addingTimeInterval(60))
+                .renewed(until: t0.addingTimeInterval(120))
+
+            XCTAssertEqual(renewed, lease(expires: t0.addingTimeInterval(120)),
+                           "renewing a lease that asked for keepsDisksAwake=\(wanted) "
+                           + "must move the deadline and nothing else")
+        }
     }
 }
 
@@ -75,14 +157,19 @@ final class SessionAuthorizationTests: XCTestCase {
     /// its initialiser default and this fails — **for the fields named
     /// below**.
     ///
-    /// That qualifier is the whole point, and it does not stretch to fields
-    /// that do not exist yet. The expectation is built with the *same*
-    /// memberwise initialiser as the value under test, so a defaulted field
-    /// added to `Session` later and named on neither side is absent from both
-    /// and compares default-to-default — silently uncovered, in precisely the
-    /// way dropping `wakeMode:` from `authorized` once was. Adding a defaulted
-    /// field to `Session` means naming it here with a **non-default** value,
-    /// and nothing but this sentence will say so.
+    /// That qualifier is the whole point, and it used to have to be maintained
+    /// by hand: the expectation is built with the *same* memberwise initialiser
+    /// as the value under test, so a **defaulted** field added to `Session` later
+    /// and named on neither side was absent from both and compared
+    /// default-to-default — silently uncovered, in precisely the way dropping
+    /// `wakeMode:` from `authorized` once was.
+    ///
+    /// `Session.init` now has **no defaulted parameters at all**, so that hole is
+    /// closed structurally: a new field cannot be left off either side of this
+    /// comparison, because neither side would compile. What is still on a human
+    /// is giving it a **non-default value** here — a new `Bool` named `false` on
+    /// both sides compiles and proves nothing. `keepsDisksAwake` is therefore
+    /// `true` below, exactly as `wakeMode` is `.systemAndDisplay`.
     /// `DaemonConnectionRequestTests` carries the same warning, for the same
     /// reason.
     func testAuthorizingKeepsWhatTheClientChoseAndOverwritesWhatItCannotBeTrustedWith() {
@@ -91,7 +178,7 @@ final class SessionAuthorizationTests: XCTestCase {
                                 owner: ClientID(rawValue: "root"), ownerUID: 0,
                                 persistence: .detached, origin: .trigger,
                                 startedAt: t0, triggerID: triggerID,
-                                wakeMode: .systemAndDisplay)
+                                wakeMode: .systemAndDisplay, keepsDisksAwake: true)
 
         let serverID = UUID()
         let serverStartedAt = t0.addingTimeInterval(3600)
@@ -104,7 +191,39 @@ final class SessionAuthorizationTests: XCTestCase {
                                owner: ClientID(rawValue: "cli-501"), ownerUID: 501,
                                persistence: .detached, origin: .trigger,
                                startedAt: serverStartedAt, triggerID: triggerID,
-                               wakeMode: .systemAndDisplay))
+                               wakeMode: .systemAndDisplay, keepsDisksAwake: true))
+    }
+
+    /// The disk axis is **client-chosen**, like `kind` and `wakeMode`, and not
+    /// server-owned like `owner` — whether a session also holds disks out of
+    /// idle is the caller's business, and no value of it lets one client affect
+    /// another's session (the daemon unions every live session's request itself).
+    ///
+    /// Not a duplicate of the test above, which pins one value: an `authorized`
+    /// that hard-coded `keepsDisksAwake: true` would pass it while inventing an
+    /// assertion for every session that never asked for one. Both directions,
+    /// each as a whole-struct comparison, is what rules that out.
+    func testAuthorizingCarriesTheDiskAxisAcross() {
+        for wanted in [false, true] {
+            let requested = Session(id: UUID(), kind: .indefinite,
+                                    owner: ClientID(rawValue: "root"), ownerUID: 0,
+                                    persistence: .detached, origin: .manual,
+                                    startedAt: t0, triggerID: nil,
+                                    wakeMode: .system, keepsDisksAwake: wanted)
+
+            let serverID = UUID()
+            let authorized = requested.authorized(id: serverID,
+                                                  owner: ClientID(rawValue: "cli-501"),
+                                                  ownerUID: 501, startedAt: t0)
+
+            XCTAssertEqual(authorized,
+                           Session(id: serverID, kind: .indefinite,
+                                   owner: ClientID(rawValue: "cli-501"), ownerUID: 501,
+                                   persistence: .detached, origin: .manual,
+                                   startedAt: t0, triggerID: nil,
+                                   wakeMode: .system, keepsDisksAwake: wanted),
+                           "a client asking for keepsDisksAwake=\(wanted) must get exactly that")
+        }
     }
 
     /// The reason the four server-owned fields are server-owned, stated as
@@ -113,7 +232,8 @@ final class SessionAuthorizationTests: XCTestCase {
         let claimed = Session(id: UUID(), kind: .indefinite,
                               owner: ClientID(rawValue: "app-502"), ownerUID: 502,
                               persistence: .clientBound, origin: .manual,
-                              startedAt: .distantPast)
+                              startedAt: .distantPast, triggerID: nil,
+                              wakeMode: .clamshell, keepsDisksAwake: false)
 
         let authorized = claimed.authorized(id: UUID(), owner: ClientID(rawValue: "cli-501"),
                                             ownerUID: 501, startedAt: t0)
@@ -223,7 +343,8 @@ final class SessionOverXPCTransportTests: XCTestCase {
             } as? HelperProtocol
             let session = Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "cli-501"),
                                   ownerUID: 501, persistence: .detached, origin: .manual,
-                                  startedAt: Date(), wakeMode: mode)
+                                  startedAt: Date(), triggerID: nil, wakeMode: mode,
+                                  keepsDisksAwake: false)
             let payload = try JSONEncoder().encode(session)
             proxy?.startSession(payload) { decoded, _ in
                 echoed = decoded
