@@ -11,6 +11,26 @@ func sessionsEndedSince(previous: [Session], current: [Session]) -> [Session] {
     return previous.filter { !currentIDs.contains($0.id) }
 }
 
+/// Pure: which sessions present in `current` were absent from `previous`,
+/// i.e. started since the last poll. The three-line inverse of
+/// `sessionsEndedSince`, and it lives **beside it** rather than in the one
+/// file that needs it (`Sources/SessionNotifications.swift`, the app's
+/// notification tracker) for a reason worth stating: two set-difference
+/// implementations in two files is exactly how the two directions come to
+/// disagree. One keyed on `id` and the other on whole-value equality would
+/// make a renewed lease — same id, new deadline, rebuilt by
+/// `Session.renewed(until:)` — look like a session ending and another
+/// starting in the same tick.
+///
+/// Like its twin it says nothing about *why* a session appeared. The caller
+/// decides which appearances mean anything; `Session.origin` and
+/// `Session.owner` are what it decides with, and only the second of those is
+/// server-stamped (see `Session.authorized(id:owner:ownerUID:startedAt:)`).
+func sessionsStartedSince(previous: [Session], current: [Session]) -> [Session] {
+    let previousIDs = Set(previous.map(\.id))
+    return current.filter { !previousIDs.contains($0.id) }
+}
+
 /// The snapshot bookkeeping behind "which of *my* sessions ended since the
 /// last poll", lifted out of `Agent/EvidenceLoopRunner.tick` so that it is
 /// (a) testable and (b) a single mutating call, which is the point.

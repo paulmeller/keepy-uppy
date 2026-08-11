@@ -10,6 +10,14 @@ struct MenuBarIcon: View {
 
 struct MenuContent: View {
     @ObservedObject var daemon: DaemonConnection
+    /// Told — not asked — which endings this app is responsible for, at the two
+    /// buttons that cause them. A plain `let` rather than an `@ObservedObject`
+    /// because it publishes nothing and this view never reads it back.
+    ///
+    /// It is here, at the call site, rather than inside `DaemonConnection`, so
+    /// that the XPC client stays a transport and
+    /// `SessionNotificationTracker` stays the only thing that decides anything.
+    let notifier: SessionNotifier
     @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
     private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
     @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
@@ -107,6 +115,12 @@ struct MenuContent: View {
             // away. Its real caller is the automatic row below.
             ForEach(mine) { session in
                 Button {
+                    // Marked BEFORE the call, and synchronously, so no poll can
+                    // observe the ending before the mark exists. Without it the
+                    // commonest way for the last session to end — this very
+                    // click — produces a banner explaining the click back to
+                    // the person who just made it.
+                    notifier.appWillStop(sessionIDs: [session.id])
                     Task { await daemon.stopSession(session.id) }
                 } label: {
                     Text(menuStopLabel(for: session, isOnlyOneOfMine: mine.count == 1, now: now)
@@ -119,6 +133,13 @@ struct MenuContent: View {
             // is how the old menu ended up with two different stop buttons.
             if mine.count > 1 {
                 Button("Stop all mine") {
+                    // The ids are snapshotted here because
+                    // `stopAllSessions(all:)` replies with a count and not with
+                    // ids: after the call there is nothing left to name. `mine`
+                    // is exactly the set it will stop — `SessionIsolation`
+                    // scopes it to this client's own `ClientID`, which is what
+                    // that group means.
+                    notifier.appWillStop(sessionIDs: mine.map(\.id))
                     Task { await daemon.stopAllSessions(all: false) }
                 }
             }

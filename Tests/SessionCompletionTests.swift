@@ -51,6 +51,71 @@ final class SessionCompletionTests: XCTestCase {
         XCTAssertTrue(ended.isEmpty)
     }
 
+    // MARK: - sessionsStartedSince
+    //
+    // The inverse, added for the app's notification tracker
+    // (`Sources/SessionNotifications.swift`) and tested here beside its twin
+    // rather than there. Two set-difference implementations living in two
+    // files is exactly how the two directions come to disagree — one keyed on
+    // `id` and the other on whole-value equality, say, which would make a
+    // renewed lease look like a session that had just started.
+
+    func testNoChangeReportsNothingStarted() {
+        let a = session()
+        XCTAssertTrue(sessionsStartedSince(previous: [a], current: [a]).isEmpty)
+    }
+
+    func testAppearedSessionIsReportedStarted() {
+        let a = session()
+        let b = session()
+        let started = sessionsStartedSince(previous: [a], current: [a, b])
+        XCTAssertEqual(started.map(\.id), [b.id])
+    }
+
+    func testMultipleAppearedSessionsAreAllReported() {
+        let a = session()
+        let b = session()
+        let started = sessionsStartedSince(previous: [], current: [a, b])
+        XCTAssertEqual(Set(started.map(\.id)), Set([a.id, b.id]))
+    }
+
+    func testDisappearedSessionIsNeverReportedAsStarted() {
+        let a = session()
+        XCTAssertTrue(sessionsStartedSince(previous: [a], current: []).isEmpty)
+    }
+
+    /// The two directions are exact inverses of one another, over the same
+    /// pair of arrays. Written as one property rather than as two hand-picked
+    /// examples, because the failure worth catching is the pair drifting
+    /// apart — an ending that is also reported as a start, or a session that
+    /// falls through both.
+    func testTheTwoDirectionsPartitionTheSameTwoSnapshots() {
+        let staying = session()
+        let going = session()
+        let arriving = session()
+        let previous = [staying, going]
+        let current = [staying, arriving]
+        XCTAssertEqual(sessionsEndedSince(previous: previous, current: current).map(\.id),
+                       [going.id])
+        XCTAssertEqual(sessionsStartedSince(previous: previous, current: current).map(\.id),
+                       [arriving.id])
+        XCTAssertEqual(sessionsStartedSince(previous: current, current: previous).map(\.id),
+                       sessionsEndedSince(previous: previous, current: current).map(\.id),
+                       "started(a, b) and ended(b, a) are the same question asked twice")
+    }
+
+    /// Identity is the session's `id`, not the whole value: a lease that is
+    /// renewed comes back with a different `kind` and the same id, and neither
+    /// direction may treat that as a session ending and another starting.
+    func testARenewedLeaseNeitherStartsNorEnds() {
+        let id = UUID()
+        let before = session(id: id, kind: .lease(expires: t0.addingTimeInterval(60)))
+        let after = session(id: id, kind: .lease(expires: t0.addingTimeInterval(120)))
+        XCTAssertNotEqual(before, after)
+        XCTAssertTrue(sessionsEndedSince(previous: [before], current: [after]).isEmpty)
+        XCTAssertTrue(sessionsStartedSince(previous: [before], current: [after]).isEmpty)
+    }
+
     // MARK: - SessionCompletionTracker: own-uid scoping
     //
     // `HelperService.listSessions` returns the whole table unfiltered by uid

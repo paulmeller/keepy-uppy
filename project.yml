@@ -46,6 +46,16 @@ targets:
       # error in the *app*, which is a confusing place to look for a change
       # made to the agent's code.
       - sdk: SystemConfiguration.framework
+      # THIS TARGET ONLY. The app holds the notification centre because it has
+      # the UI that can ask for the grant, the run loop that can present, and a
+      # lifetime the user understands; the agent would be a *second*,
+      # separately-refusable notification client (its bundle identifier is its
+      # own — `au.com.workwireless.keepy-uppy.agent` — even though it lives
+      # inside this bundle), and the daemon and CLI have no business with one at
+      # all. Unlike SystemConfiguration above there is no shared file forcing
+      # this onto a second target: nothing outside `Sources/` imports
+      # UserNotifications.
+      - sdk: UserNotifications.framework
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist

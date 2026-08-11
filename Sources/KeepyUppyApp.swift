@@ -6,7 +6,7 @@ struct KeepyUppyApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(daemon: appDelegate.daemon)
+            MenuContent(daemon: appDelegate.daemon, notifier: appDelegate.notifier)
         } label: {
             MenuBarIcon(daemon: appDelegate.daemon)
         }
