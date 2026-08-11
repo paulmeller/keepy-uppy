@@ -58,12 +58,20 @@ final class HelperService: NSObject, HelperProtocol {
         // and which the client chooses, and why.
         //
         // It is not written out here on purpose. `Helper/` is not reachable
-        // from the test target, so a field silently dropped from a rebuild at
-        // this call site — which does not fail to compile; it takes
-        // `Session.init`'s default — was undetectable by any test. Omitting
-        // `wakeMode:` here is exactly what made every session in production a
-        // clamshell session no matter what any client asked for. What remains
-        // below is decode, authorize, switch.
+        // from the test target, so a field dropped from a rebuild at this call
+        // site was undetectable by any test — and at the time it did not even
+        // fail to compile, because it silently took `Session.init`'s default.
+        // Omitting `wakeMode:` here is exactly what made every session in
+        // production a clamshell session no matter what any client asked for.
+        //
+        // `Session.init` has no defaulted parameters any more, so that
+        // particular omission would now be a compile error even in this
+        // untested file. The rebuild still does not belong here: the compiler
+        // can force a field to be *named*, and only `SessionTests` can check
+        // that it is named with the value the client actually sent — which is
+        // the half that decides whether a client's `keepsDisksAwake` or
+        // `wakeMode` survives the trust split. What remains below is decode,
+        // authorize, switch.
         let session = requested.authorized(id: UUID(), owner: clientID,
                                            ownerUID: userID, startedAt: Date())
         switch runtime.startSession(session) {
