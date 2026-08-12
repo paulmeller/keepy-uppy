@@ -320,11 +320,22 @@ struct SessionNotificationTracker {
     /// server-stamped from the listener that accepted the connection
     /// (`ClientRole.clientID(forUserID:)`), and only the agent can connect on
     /// the agent's Mach service. Requiring the conjunction is what makes "a
-    /// trigger started this" rest on a fact the daemon established, and it is
-    /// exactly what `menuSessionGroup` already does for the equivalent menu row.
+    /// trigger started this" rest on a fact the daemon established.
+    ///
+    /// This used to say all that and then write the conjunction out a second
+    /// time, ending on "exactly what `menuSessionGroup` already does for the
+    /// equivalent menu row" — which is an accurate description of two rules that
+    /// agree, and of the day one of them is loosened alone. It now *asks* that
+    /// rule instead: `Session.startedByTrigger(forUserID:)` is defined as the
+    /// menu grouping, so the banner and the row cannot come to disagree about
+    /// which sessions were automatic.
+    ///
+    /// The tracker's own uid filter (`record`'s `mine`) already applies the
+    /// `ownerUID` half, so this is the same answer on the same input; asking the
+    /// whole rule rather than the leftover half is what keeps it that way if the
+    /// filter ever moves.
     private func isAutomatic(_ session: Session) -> Bool {
-        session.origin == .trigger
-            && session.owner == ClientRole.agent.clientID(forUserID: ownerUID)
+        session.startedByTrigger(forUserID: ownerUID)
     }
 }
 

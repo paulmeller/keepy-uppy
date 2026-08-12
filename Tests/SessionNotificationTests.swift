@@ -21,6 +21,7 @@ final class SessionNotificationTrackerTests: XCTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
     private var t1: Date { t0.addingTimeInterval(3) }
     private var t2: Date { t0.addingTimeInterval(6) }
+    private var t3: Date { t0.addingTimeInterval(12) }
 
     private let me: UInt32 = 501
     private let otherUser: UInt32 = 502
@@ -167,6 +168,34 @@ final class SessionNotificationTrackerTests: XCTestCase {
         _ = tracker.record(current: [], now: t2)
         XCTAssertEqual(tracker.record(current: [session(role: .agent, origin: .manual)],
                                       now: t2.addingTimeInterval(3)), [])
+        // ...and this app's own session claiming it, which is the one shape a
+        // *genuine* Keepy Uppy could produce: `DaemonConnection.startSession`
+        // takes the origin as a parameter. The menu row for such a session may
+        // honestly say "started automatically" — it is this app describing its
+        // own session — but a banner announcing "one of your rules started a
+        // session" would be wrong, because no rule did.
+        _ = tracker.record(current: [], now: t3)
+        XCTAssertEqual(tracker.record(current: [session(role: .app, origin: .trigger)],
+                                      now: t3.addingTimeInterval(3)), [])
+    }
+
+    /// The weld. The banner and the menu row must not become two rules: the
+    /// tracker fires exactly when the session is one this user's own trigger
+    /// rule started, and that is now a single predicate rather than a
+    /// conjunction written out here and again in `SessionDisplay.swift`.
+    func testTheAnnouncedSessionsAreExactlyTheOnesTheMenuCallsAutomatic() {
+        for candidate in [session(role: .agent, origin: .trigger),
+                          session(role: .agent, origin: .manual),
+                          session(role: .app, origin: .trigger),
+                          session(role: .cli, origin: .trigger),
+                          session(ownerUID: otherUser, role: .agent, origin: .trigger)] {
+            var tracker = self.tracker()
+            _ = tracker.record(current: [], now: t0)
+            let announced = tracker.record(current: [candidate], now: t1)
+                .contains(.triggerStartedSession)
+            XCTAssertEqual(announced, candidate.startedByTrigger(forUserID: me),
+                           "the banner and the menu disagree about \(candidate.owner)")
+        }
     }
 
     /// The event carries no payload, so two trigger sessions appearing in one

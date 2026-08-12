@@ -620,6 +620,30 @@ func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> St
 /// every row it now lands in has the shape `"<kind> — <provenance>"`; see
 /// `MenuCopyTests.testTheAutomaticMentionIsShapedLikeEveryOtherProvenanceClause`
 /// for the argument.
+///
+/// ## Why this asks `origin` alone, and is not a third copy of the rule
+///
+/// `Session.startedByTrigger(forUserID:)` is the one place the "this user's own
+/// rule started it" conjunction is written, and this function deliberately does
+/// **not** call it. It is a renderer, not a decision, and its two call sites
+/// supply the ownership half in the two different ways that are correct for
+/// them:
+///
+/// * `menuSessionLabel`'s `.yoursAutomatic` row has already been through
+///   `menuSessionGroup`, so the whole conjunction holds before this is reached;
+///   the `origin` check here is the belt-and-braces described above.
+/// * `MenuContent`'s `mine` rows are `app-<uid>` — this app's own sessions, the
+///   only ones it can stop. Corroborating `origin` there would be checking
+///   whether we believe ourselves: the daemon's listener admits `app-<uid>` only
+///   for a binary meeting `SigningRequirement`, so `origin` on such a session is
+///   a genuine Keepy Uppy describing a session it started, not a claim by a
+///   client that might be lying. Requiring `owner == agent-<uid>` there would
+///   make the call provably constant-empty and delete the case
+///   `DaemonConnection.startSession`'s `origin` parameter exists to allow.
+///
+/// The failure mode the conjunction defends against — a `cli-<uid>` session
+/// asserting `.trigger` and being described as automatic — cannot reach either
+/// call site, because `menuSessionGroup` sends it to `.yoursCommandLine`.
 func menuAutomaticSuffix(for session: Session) -> String {
     session.origin == .trigger ? " — started automatically" : ""
 }
@@ -703,6 +727,34 @@ func menuSessionGroup(for session: Session, userID: UInt32) -> MenuSessionGroup 
         return .yoursCommandLine
     case nil:
         return .yoursOtherClient
+    }
+}
+
+/// **"This user's own trigger rule started this session", written once.**
+///
+/// The rule is a two-clause security predicate — this user's `agent-<uid>`, and
+/// `origin == .trigger` — and it was written out by hand in two places: the
+/// `.agent` branch above, and `SessionNotificationTracker.isAutomatic`, whose
+/// own doc comment said so ("exactly what `menuSessionGroup` already does for
+/// the equivalent menu row"). Two copies of a rule is two rules, and the one
+/// that gets loosened first is the one whose file never mentions the other.
+///
+/// It is **defined as** the grouping rather than as a fresh conjunction beside
+/// it, which is the difference between one rule and two that happen to agree
+/// today. Everything `menuSessionGroup` argues — that `ownerUID` and `owner`
+/// are independent server-derived axes, that `origin` is the client-chosen one
+/// and therefore never asked on its own, that a `cli-<uid>` session saying
+/// "trigger" is a claim rather than a fact — holds here without being restated,
+/// and cannot be half-changed.
+///
+/// It lives here, in `Sources/`, and not in `Shared/` beside `Session` itself:
+/// nothing in the daemon, the CLI or the agent asks this question. The agent
+/// *starts* trigger sessions and never classifies them, and the daemon's own
+/// authority over the two unforgeable halves is `ClientRole` and the listener
+/// that stamped them. Same reasoning as `DefaultSessionKindPreference`'s.
+extension Session {
+    func startedByTrigger(forUserID userID: UInt32) -> Bool {
+        menuSessionGroup(for: self, userID: userID) == .yoursAutomatic
     }
 }
 

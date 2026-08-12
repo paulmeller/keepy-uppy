@@ -75,8 +75,20 @@ struct MenuContent: View {
     /// `menuStatusLine`'s "yours" still counts `mine` only, so a user with a
     /// trigger session and an app session reads "2 sessions, 1 yours". That is
     /// the count of what the menu can act on rather than of what belongs to
-    /// them, and it is left as it was: widening it is a change to a different
-    /// sentence than the one this task was about.
+    /// them.
+    ///
+    /// **Asked again and deliberately left alone.** "Yours" earns its meaning
+    /// from the stop buttons directly beneath it: the number says how many of
+    /// those rows you can do something about, and `SessionIsolation.authorize`
+    /// is what decides that — not this view. Widening it to "belongs to your
+    /// account" would put a count above a list where most of the counted rows
+    /// have no button, which is the same mismatch in the other direction.
+    ///
+    /// It is the authorization that has to move first, and Plan 8's Task 5 moves
+    /// it: once this app may stop its own user's trigger-started sessions, those
+    /// rows gain buttons and "yours" should count them the same day, in the same
+    /// change. Doing it here would leave the sentence true for one release and
+    /// wrong in whichever direction Task 5 lands.
     private var others: [(session: Session, group: MenuSessionGroup)] {
         grouped.filter { $0.group != .thisApp }
     }
@@ -122,6 +134,15 @@ struct MenuContent: View {
             // because `DaemonConnection.startSession` takes the origin as a
             // parameter, so an app-started automatic session is one argument
             // away. Its real caller is the automatic row below.
+            //
+            // It is `origin` alone, and not the `startedByTrigger(forUserID:)`
+            // rule the menu and the notifier share, *because* these rows are
+            // `app-<uid>`: that rule requires `agent-<uid>` and would be
+            // constant-false here, deleting the one-argument-away case rather
+            // than guarding it. Nothing is lost by not corroborating, either —
+            // only a binary meeting `SigningRequirement` is admitted as
+            // `app-<uid>`, so this is us reading our own session's origin, not
+            // taking another client's word for it.
             ForEach(mine) { session in
                 Button {
                     // Marked BEFORE the call, and synchronously, so no poll can

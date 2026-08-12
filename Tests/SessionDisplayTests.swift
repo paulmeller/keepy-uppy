@@ -743,6 +743,59 @@ final class MenuSessionGroupingTests: XCTestCase {
         XCTAssertEqual(stoppableInTheMenu.count, 1)
     }
 
+    // MARK: - One rule, read in two places
+
+    /// "This user's own trigger rule started this session" was written out by
+    /// hand twice — here, inside `menuSessionGroup`'s `.agent` branch, and again
+    /// in `SessionNotificationTracker.isAutomatic`, which said so itself
+    /// ("exactly what `menuSessionGroup` already does for the equivalent menu
+    /// row"). Two hand-written copies of a two-clause security predicate is the
+    /// drift this codebase closes everywhere else — `ClientRole.clientID(forUserID:)`,
+    /// `TriggerCondition.boundSessionKind`, `MenuDefaultStart` — and the copy
+    /// that would be loosened first is the one whose file never mentions the
+    /// other.
+    ///
+    /// So there is one rule now, and this is the weld: the predicate is not
+    /// merely *equal* to the group today, it is defined as the group, and this
+    /// test fails the moment somebody re-writes it out by hand.
+    func testTheAutomaticRuleIsTheGroupingItself() {
+        for candidate in [
+            session(owner: agent(me), ownerUID: me, origin: .trigger),
+            session(owner: agent(me), ownerUID: me, origin: .manual),
+            session(owner: app(me), ownerUID: me, origin: .trigger),
+            session(owner: app(me), ownerUID: me, origin: .manual),
+            session(owner: cli(me), ownerUID: me, origin: .trigger),
+            session(owner: agent(someoneElse), ownerUID: someoneElse, origin: .trigger),
+            session(owner: ClientID(rawValue: "shortcuts-\(me)"), ownerUID: me, origin: .trigger),
+        ] {
+            XCTAssertEqual(candidate.startedByTrigger(forUserID: me),
+                           menuSessionGroup(for: candidate, userID: me) == .yoursAutomatic,
+                           "the predicate and the grouping must not be two rules: \(candidate.owner)")
+        }
+    }
+
+    /// The four cases the conjunction exists for, one assertion each.
+    ///
+    /// The second is the whole reason it is a conjunction: `origin` is
+    /// client-chosen — `HelperProtocol.startSession` passes it through untouched
+    /// — so any client of this user can *say* `.trigger`. `owner` is stamped by
+    /// the daemon from the listener that accepted the connection, and only the
+    /// agent can connect on the agent's service, so it is the half that cannot
+    /// be asserted into existence.
+    func testOnlyThisUsersAgentStartingATriggerSessionCountsAsAutomatic() {
+        XCTAssertTrue(session(owner: agent(me), ownerUID: me, origin: .trigger)
+            .startedByTrigger(forUserID: me))
+        XCTAssertFalse(session(owner: cli(me), ownerUID: me, origin: .trigger)
+            .startedByTrigger(forUserID: me),
+                       "a terminal saying \"trigger\" is a claim, not a fact")
+        XCTAssertFalse(session(owner: agent(me), ownerUID: me, origin: .manual)
+            .startedByTrigger(forUserID: me),
+                       "the agent can start a session that no rule asked for")
+        XCTAssertFalse(session(owner: agent(someoneElse), ownerUID: someoneElse, origin: .trigger)
+            .startedByTrigger(forUserID: me),
+                       "another account's rule fired, not this user's")
+    }
+
     // MARK: - The suffix that finally arrives somewhere
 
     /// `menuAutomaticSuffix` has been written and tested since Plan 4 and has

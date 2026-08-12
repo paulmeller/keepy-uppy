@@ -161,6 +161,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// last session to end — this very keystroke — cannot produce a banner
     /// explaining the keystroke back to the person who just made it. The menu's
     /// Stop rows do the same thing for the same reason.
+    ///
+    /// ## The marked set is up to one poll old, and stays that way
+    ///
+    /// `daemon.sessions` is refreshed on a 3s timer, so the ids marked here are
+    /// a snapshot up to 3s stale while `stopAllSessions(all: false)` is
+    /// evaluated by the daemon against the live table. Reviewed in Plan 8 and
+    /// left alone, with the reasoning recorded rather than the deferral:
+    ///
+    /// * The two directions are not symmetric. A session that *ended* during the
+    ///   window is marked needlessly, which costs nothing — ids are UUIDs so no
+    ///   later session inherits the mark, and it expires anyway
+    ///   (`SessionNotificationTracker.stopSuppressionWindow`). A session that
+    ///   *started* during the window is stopped without being marked, and that
+    ///   is the whole exposure.
+    /// * Its worst case is **one extra banner**: the unmarked ending counts as
+    ///   unrequested, and only if it is also the tick that empties the table and
+    ///   only if the user has the stop notification switched on at all. Nothing
+    ///   is corrupted, no session is left running, and the next poll re-syncs —
+    ///   which is what "self-limiting" meant.
+    /// * The fix that would actually close it is not a smaller one. Marking ids
+    ///   at all is the mismatch: `all: false` means "every session of mine",
+    ///   including ones this app has not seen yet, so the faithful mark is that
+    ///   intent and not a list. That is a second kind of mark in the tracker,
+    ///   shared with `MenuContent`'s Stop-all row, which has exactly the same
+    ///   staleness for exactly the same reason — so it is a change to the
+    ///   notification design, not a fix to this keystroke.
+    ///
+    /// Worth revisiting if the poll ever becomes a push, at which point the
+    /// window closes for free.
     private func performHotKeyAction(_ action: HotKeyAction) {
         switch action {
         case .startDefaultSession:
