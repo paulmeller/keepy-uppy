@@ -319,6 +319,17 @@ final class SessionOverXPCTransportTests: XCTestCase {
             case .forbidden: reply(false, "forbidden")
             }
         }
+        /// Not a stub either, since Plan 8 Task 6: whatever the test hands it,
+        /// encoded the way `HelperService.recentSafetyStops` encodes it.
+        var safetyStopsReply: [SafetyStopRecord] = []
+
+        func recentSafetyStops(reply: @escaping (Data?, String?) -> Void) {
+            guard let data = try? JSONEncoder().encode(safetyStopsReply) else {
+                return reply(nil, "encoding failure")
+            }
+            reply(data, nil)
+        }
+
         func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) { reply(0, "unused") }
         func listSessions(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
         func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
@@ -438,6 +449,78 @@ final class SessionOverXPCTransportTests: XCTestCase {
         XCTAssertEqual(received?.0, 4, "the session count did not survive the round trip")
         XCTAssertEqual(received?.1, false,
                        "the flag `reset` refuses to unregister on did not survive the round trip")
+    }
+
+    /// **Plan 8 Task 6's wire proof: a reason crosses XPC intact, for every
+    /// reason there is.**
+    ///
+    /// `SafetyStopRecord` is the only thing in this project that carries a
+    /// `SafetyReason` outside the daemon, and `SafetyReason` is an enum with a
+    /// `String` raw value inside a `Codable` struct inside a JSON array inside
+    /// an `NSData` reply — four layers, any of which could flatten a case into
+    /// a neighbouring one without failing to decode.
+    ///
+    /// Written over `SafetyReason.allCases` (which is what that conformance was
+    /// sanctioned for) rather than over three hand-written cases, so a fourth
+    /// reason cannot escape this proof by nobody remembering to add it. Every
+    /// field of every record is non-default and distinct — a distinct uid, a
+    /// distinct instant, its own UUID — so a reason dropped, flattened, or
+    /// reordered on the wire shows up as a **wrong value**, and never as an
+    /// empty list that a decoder shrug would also produce.
+    ///
+    /// Compared as whole values (`[SafetyStopRecord] == [SafetyStopRecord]`),
+    /// not field by field, for `SessionAuthorizationTests`' reason: a field-wise
+    /// comparison silently stops covering a field the day one is added.
+    func testEverySafetyStopReasonSurvivesARealXPCRoundTrip() {
+        let sent = SafetyReason.allCases.enumerated().map { index, reason in
+            SafetyStopRecord(sessionID: UUID(),
+                             // Distinct, and none of them 0 or this test host's
+                             // own uid: an implementation that lost the field
+                             // and substituted either would still pass.
+                             ownerUID: UInt32(9_000 + index),
+                             reason: reason,
+                             // Integral, so nothing here can fail on a float
+                             // that survived the trip but not the comparison.
+                             endedAt: Date(timeIntervalSinceReferenceDate: Double(800_000_000 + index)))
+        }
+        XCTAssertEqual(sent.count, SafetyReason.allCases.count)
+
+        let listener = NSXPCListener.anonymous()
+        // `NSXPCListener.delegate` is weak — the same trap as the two tests
+        // above, and the same fix.
+        let delegate = ListenerDelegate()
+        delegate.exported.safetyStopsReply = sent
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+        connection.resume()
+        defer { connection.invalidate() }
+
+        let replied = expectation(description: "recentSafetyStops reply")
+        replied.assertForOverFulfill = false
+        var received: [SafetyStopRecord]?
+        var decodeFailed = false
+        let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+            XCTFail("XPC error: \(error.localizedDescription)")
+            replied.fulfill()
+        } as? HelperProtocol
+        proxy?.recentSafetyStops { data, _ in
+            guard let data,
+                  let decoded = try? JSONDecoder().decode([SafetyStopRecord].self, from: data) else {
+                decodeFailed = true
+                return replied.fulfill()
+            }
+            received = decoded
+            replied.fulfill()
+        }
+        wait(for: [replied], timeout: 10)
+
+        XCTAssertFalse(decodeFailed, "the reply did not decode as [SafetyStopRecord] at all")
+        XCTAssertEqual(received, sent,
+                       "a safety stop record did not survive the XPC round trip intact")
     }
 }
 

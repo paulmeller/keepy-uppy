@@ -145,6 +145,62 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     /// It is read-only in the strongest sense available here — it takes no
     /// argument, touches no session, and cannot change what this Mac does.
     func version(reply: @escaping (String) -> Void)
+
+    /// Replies with a JSON-encoded `[SafetyStopRecord]`: the sessions a safety
+    /// guard has ended recently, daemon-wide, each with the reason it ended
+    /// for. `Shared/SafetyStopLog.swift` owns the shape and both bounds.
+    ///
+    /// The same `(Data?, String?)` shape `listSessions` already uses, and for
+    /// its reason: whitelisting a Swift enum with associated values for
+    /// `NSSecureCoding` is far more ceremony than encoding a `Codable` struct,
+    /// and — the part that matters more here — an additive field on
+    /// `SafetyStopRecord` later stays cheap, because `JSONDecoder` ignores a key
+    /// it does not declare in either direction.
+    ///
+    /// **Read-only in the strongest sense available here** — the same sentence
+    /// `version(reply:)` earns, and this verb earns it for the same three
+    /// reasons: it takes no argument, it touches no session, and it cannot
+    /// change what this Mac does. It reports on sessions that are *already
+    /// gone*, which is a stronger statement than `listSessions` can make.
+    ///
+    /// ## The privacy decision, made explicitly: the reply is **unfiltered**
+    ///
+    /// Exactly as `listSessions` is, and the client filters to its own uid
+    /// (which is why `SafetyStopRecord` carries `ownerUID` at all). Three
+    /// reasons, in weight order:
+    ///
+    /// 1. **The reason is a machine-wide fact, not a personal one.** Thermal
+    ///    state and battery level are properties of the Mac, and `maxDuration`
+    ///    keys off the age of the oldest session *anywhere* — so the reason
+    ///    another account's session ended is, quite literally, the same fact as
+    ///    the reason yours did. A safety stop is one `.stopAll`; there is one
+    ///    reason per episode, not one per user.
+    /// 2. **It publishes nothing about another user that is not already
+    ///    published.** Every session on this Mac is already visible to every
+    ///    admitted client through `listSessions`, by deliberate design (spec §9:
+    ///    the UI must be able to show why the Mac is awake regardless of who
+    ///    started it). A record names a session id and a uid that were readable
+    ///    a moment ago, plus a machine-wide fact.
+    /// 3. **Filtering here would be the daemon deciding what a menu bar may
+    ///    say.** That policy belongs where the sentence is written, next to the
+    ///    uid scoping every other claim in this app is already built on.
+    ///
+    /// The two verbs must not disagree about this question, so if this is ever
+    /// filtered daemon-side, `listSessions`' comment above has to change in the
+    /// same commit.
+    ///
+    /// ## Callers: never polled, and gated before the first send
+    ///
+    /// This is the first verb added to this protocol since the daemon-skew
+    /// hazard was measured (`Tests/UnimplementedVerbProbeTests.swift`): sending
+    /// a verb an older daemon does not implement **invalidates the connection
+    /// server-side**, which in the real daemon runs
+    /// `DaemonRuntime.clientDisconnected` and ends every `clientBound` session
+    /// the caller owns. So this verb is sent only by
+    /// `DaemonConnection.recentSafetyStops()`, only when the app has an ending
+    /// it is about to explain, never on any timer, and only after
+    /// `DaemonCapability` has cleared the daemon. See that type and that method.
+    func recentSafetyStops(reply: @escaping (Data?, String?) -> Void)
 }
 
 // MARK: - How a version is written
@@ -180,6 +236,126 @@ func bundleVersionText(shortVersion: String?, build: String?) -> String {
 func bundleVersionText(of bundle: Bundle) -> String {
     bundleVersionText(shortVersion: bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
                       build: bundle.infoDictionary?["CFBundleVersion"] as? String)
+}
+
+// MARK: - Which verbs this daemon can be asked for
+
+/// **Whether a daemon is new enough to be sent a verb that did not always
+/// exist — decided before the verb is ever sent, from a verb that always did.**
+///
+/// ## Why this has to exist at all
+///
+/// Plan 8 Task 1 measured what a client observes when it sends a verb the
+/// daemon does not implement (`Tests/UnimplementedVerbProbeTests.swift`, over a
+/// fully isolated anonymous listener). It is not a per-message error: the
+/// **server side of the connection is invalidated**, which in the real daemon
+/// runs `HelperListenerDelegate`'s teardown → `DaemonRuntime.clientDisconnected`
+/// → `SessionTable.removeAll(ownedBy:)`, ending every `clientBound` session that
+/// identity owns. The client then heals silently on its next message, so
+/// nothing stops it happening again. One ungated call costs a user their
+/// sessions; a *polled* one costs them their sessions every poll, forever.
+///
+/// This is not hypothetical on this project. The daemon is a root LaunchDaemon
+/// that keeps running across app updates — nothing short of the bundle path
+/// vanishing or a reboot replaces it — so "old daemon, new client" is the
+/// ordinary state after an in-place upgrade.
+///
+/// ## Why `version(reply:)` is the only usable probe
+///
+/// It is the one verb that has existed since v2 and is implemented by every
+/// daemon this project has ever shipped, so asking it can never be the thing
+/// that tears a connection down. Every other candidate probe would have to be
+/// the very verb whose presence is in question.
+///
+/// ## Why its answer describes the daemon's own vintage — measured
+///
+/// `HelperService.version` replies `bundleVersionText(of: .main)`, and
+/// `Bundle.main` for the helper resolves to the enclosing **`.app`**, not to the
+/// helper binary (Task 1, Step 3b) — so on its face the reply looks like it
+/// would report whatever version is on disk *now*, including a newer app that
+/// replaced the one the running daemon came from. It does not, and the
+/// difference was measured rather than assumed, with a throwaway tool inside a
+/// synthetic bundle whose `Info.plist` was rewritten underneath it:
+///
+/// * a process that touches `Bundle.main` **before** the swap goes on reporting
+///   the values from when it first touched it (`0.1.0 / 3` while the file on
+///   disk read `9.9.9 / 999`);
+/// * a process that touches it for the first time only **after** the swap
+///   reports the new values.
+///
+/// The daemon is firmly in the first case: `Helper/main.swift`'s very first act
+/// is `DaemonRuntime()`, whose `bundlePath` parameter defaults to
+/// `Bundle.main.bundlePath`. So the info dictionary is snapshotted at daemon
+/// start, and `version()` reports the vintage of the bundle the running daemon
+/// was launched from.
+///
+/// **That is a real coupling and it is worth naming**: if `DaemonRuntime` ever
+/// stopped evaluating `Bundle.main` during startup, this gate would silently
+/// invert — an old daemon would begin reporting the *new* app's version, pass
+/// the check, and be sent a verb it does not implement. Anything that moves
+/// that call has to move a `Bundle.main` touch to daemon startup with it.
+///
+/// ## Why a build number, and why 4
+///
+/// `MARKETING_VERSION` is `0.1.0` on all four targets of every build this
+/// project has ever produced, so the short version alone compares equal between
+/// *any* two builds and cannot gate anything. `CURRENT_PROJECT_VERSION` is what
+/// `just bump` moves, and Task 1's R1.4 requires the release introducing a new
+/// verb to bump — which is why `project.yml` moves in the same commit as this
+/// constant and as the verb itself. All three have to travel together or the
+/// gate is a guess.
+///
+/// It is **4, not 3**, and the reason is a defect found while writing this: the
+/// installed app on this machine reports `CFBundleVersion` **3** while tracked
+/// `project.yml` said **2**, so a release's bump was never committed and `just
+/// bump` (which takes its input from `project.yml`) would have re-minted 3 —
+/// a number that has already shipped, on a daemon with none of this. Gating at
+/// `>= 3` would therefore have cleared the very daemon serving this user right
+/// now. 4 is strictly greater than every build number that has ever existed
+/// here, so "reports at least 4" means "was built from this commit or later",
+/// which is the only statement that actually implies the verb exists.
+///
+/// ## And why it is still not sufficient on its own
+///
+/// A build number orders releases; it does not identify source. Two local
+/// builds made without a bump share a number, so on a developer's machine this
+/// gate can clear a daemon that predates the verb. That is why it is the
+/// *second* of `DaemonConnection.recentSafetyStops()`'s gates and not the only
+/// one — the load-bearing one is structural, and is documented there.
+enum DaemonCapability {
+    /// The build number in which `HelperProtocol.recentSafetyStops(reply:)`
+    /// first existed. Moves only when the verb does.
+    static let recentSafetyStopsBuild = 4
+
+    /// The build number out of a string written by `bundleVersionText`, or
+    /// `nil` if there is not one — which is what a daemon predating Plan 7
+    /// Task 10 replies, since its `version` was
+    /// `CFBundleShortVersionString ?? "0"` and composed no build number at all.
+    ///
+    /// Deliberately strict about the shape it accepts rather than scanning for
+    /// any digits anywhere: `"0.1.0"` must not yield `1`.
+    static func buildNumber(inVersionText text: String) -> Int? {
+        guard let open = text.lastIndex(of: "("), text.hasSuffix(")") else { return nil }
+        let inner = text[text.index(after: open)..<text.index(before: text.endIndex)]
+        guard !inner.isEmpty, inner.allSatisfy(\.isNumber) else { return nil }
+        return Int(inner)
+    }
+
+    /// Whether a daemon that replied `versionReply` to `version(reply:)` can be
+    /// sent `recentSafetyStops`.
+    ///
+    /// **Every uncertain answer is "no".** A `nil` reply (the call failed, so
+    /// nothing is known), an unparseable one, and a lower build all mean the
+    /// verb is absent — Task 1's R1.4(b), and the only safe direction to be
+    /// wrong in: being wrong towards "absent" costs a sentence the app would
+    /// have liked to say, and being wrong towards "present" costs the user
+    /// their running sessions.
+    static func supportsRecentSafetyStops(versionReply: String?) -> Bool {
+        guard let versionReply, let build = buildNumber(inVersionText: versionReply) else {
+            return false
+        }
+        return build >= recentSafetyStopsBuild
+    }
 }
 
 // MARK: - Cross-client isolation (Task 10)

@@ -5,7 +5,37 @@ enum ThermalLevel: Int, Comparable, Codable {
     static func < (a: ThermalLevel, b: ThermalLevel) -> Bool { a.rawValue < b.rawValue }
 }
 
-enum SafetyReason: String, Equatable, Codable {
+/// Why a safety guard ended every session on this Mac.
+///
+/// ## `CaseIterable` — sanctioned now, having been declined once, and for a
+/// different job
+///
+/// Plan 7's review contemplated this conformance (Task 12, item 13: *"plus
+/// `SafetyReason: CaseIterable` if Task 6 chose to sanction it"*) and Plan 7
+/// Task 6 **declined** it. That refusal was right for the job it was offered:
+/// the conformance was wanted so a test could assert that no notification
+/// string contains a `SafetyReason`, and `Sources/SessionNotifications.swift`
+/// records at length why that test is vacuous — the raw values below
+/// (`thermal`, `lowBattery`, `maxDuration`) are tokens no user-facing sentence
+/// contains, so it passes today *and* would pass on copy reading "Your Mac was
+/// overheating".
+///
+/// It earns its place here doing a **different job**, and the earlier refusal
+/// should read as superseded rather than reversed by accident. Two callers need
+/// to enumerate reasons, and neither is a string search:
+///
+/// 1. `Tests/SessionTests.swift` sends one `SafetyStopRecord` per reason over a
+///    real XPC round trip, written over `allCases`, so a fourth reason cannot
+///    escape the wire proof by nobody remembering to add it.
+/// 2. `Sources/SessionNotifications.swift` welds this enum to the
+///    reason-carrying notification events as a **bijection** checked over
+///    `allCases` in both directions — the same weld `SessionKind.Family` has
+///    with the CLI's flags and `TriggerConditionKind` has with its own pair. A
+///    fourth reason then fails a test instead of quietly having no banner.
+///
+/// Both are "every case must be accounted for somewhere else", which is exactly
+/// what `CaseIterable` is for and what a hand-written list of three is not.
+enum SafetyReason: String, Equatable, Codable, CaseIterable {
     case thermal, lowBattery, maxDuration
 }
 

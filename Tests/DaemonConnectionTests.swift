@@ -218,3 +218,162 @@ final class ContinuationLatchTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Plan 8 Task 6: the gate in front of a verb an old daemon may not have
+
+/// The version gate, as pure parsing. Everything it decides rests on
+/// `bundleVersionText`'s output shape, so the two are tested against the same
+/// strings that function actually produces.
+final class DaemonCapabilityTests: XCTestCase {
+    /// The parser and the formatter agree, checked by driving one with the
+    /// other rather than with hand-written strings — the failure this project
+    /// keeps closing is two functions that must agree and are written apart.
+    func testTheBuildNumberIsReadBackOutOfWhatTheFormatterWrites() {
+        for build in [0, 1, 4, 17, 1_234] {
+            let text = bundleVersionText(shortVersion: "0.1.0", build: String(build))
+            XCTAssertEqual(DaemonCapability.buildNumber(inVersionText: text), build, text)
+        }
+    }
+
+    /// A daemon predating Plan 7 Task 10 composed no build number at all — its
+    /// `version` was `CFBundleShortVersionString ?? "0"`. That has to read as
+    /// "no build number", not as `1` scavenged out of `0.1.0`.
+    func testAVersionWithNoBuildNumberHasNone() {
+        for text in ["0.1.0", "0", "unknown", "", "0.1.0 ()", "0.1.0 (x)", "0.1.0 (3",
+                     "0.1.0 (3) beta"] {
+            XCTAssertNil(DaemonCapability.buildNumber(inVersionText: text),
+                         "\"\(text)\" yielded a build number")
+        }
+        XCTAssertNil(DaemonCapability.buildNumber(
+            inVersionText: bundleVersionText(shortVersion: "0.1.0", build: nil)))
+    }
+
+    /// **The live state of this Mac.** The daemon serving this user replies a
+    /// bare `"0.1.0"` (Plan 8 Task 1, Step 3c, established read-only), and it
+    /// has none of this. It must never be sent the verb.
+    func testTheDaemonRunningOnThisMacIsRefused() {
+        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: "0.1.0"))
+    }
+
+    /// Every uncertain answer is "no". Being wrong towards absent costs a
+    /// sentence; being wrong towards present costs the user their sessions.
+    func testEveryUncertainAnswerMeansTheVerbIsAbsent() {
+        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: nil),
+                       "a failed version call knows nothing, so it may not clear anything")
+        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: ""))
+        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: "banana"))
+    }
+
+    /// The boundary, in both directions, plus the number itself — 4 rather
+    /// than 3, because 3 has already shipped on a daemon with none of this
+    /// (the installed app on this machine reports `CFBundleVersion` 3).
+    func testOnlyABuildAtOrAboveTheIntroducingOneIsCleared() {
+        XCTAssertGreaterThan(DaemonCapability.recentSafetyStopsBuild, 3,
+                             "build 3 has shipped without this verb; gating at or below it "
+                             + "would clear the daemon this feature must not be sent to")
+        let introduced = DaemonCapability.recentSafetyStopsBuild
+        for build in [0, 1, 2, 3, introduced - 1] {
+            XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(
+                versionReply: bundleVersionText(shortVersion: "0.1.0", build: String(build))),
+                           "build \(build) was cleared")
+        }
+        for build in [introduced, introduced + 1, introduced + 100] {
+            XCTAssertTrue(DaemonCapability.supportsRecentSafetyStops(
+                versionReply: bundleVersionText(shortVersion: "0.1.0", build: String(build))),
+                          "build \(build) was refused")
+        }
+    }
+
+    /// The gate is only implementable because the release introducing the verb
+    /// bumps, so this pins the third leg of that: the constant, the verb and
+    /// `project.yml` travel together or the gate is a guess.
+    func testThisBuildIsNewEnoughToBeAskedItsOwnVerb() {
+        XCTAssertTrue(DaemonCapability.supportsRecentSafetyStops(
+            versionReply: bundleVersionText(of: .main)),
+                      "this build ships the verb but would refuse to ask a daemon of its own "
+                      + "vintage — CURRENT_PROJECT_VERSION was not bumped with it")
+    }
+}
+
+/// The decision itself, and the latch behind it.
+@MainActor
+final class SafetyStopVerbGateTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        SafetyStopVerbGate.resetForTesting()
+    }
+
+    override func tearDown() {
+        SafetyStopVerbGate.resetForTesting()
+        super.tearDown()
+    }
+
+    func testAFreshProcessKnowsNothingAndProbesFirst() {
+        XCTAssertEqual(SafetyStopVerbGate.support, .unknown)
+        XCTAssertEqual(SafetyStopVerbGate.nextStep(support: .unknown, liveSessionsOfThisUser: 0),
+                       .askTheVersionFirst)
+    }
+
+    func testAClearedDaemonIsSent() {
+        XCTAssertEqual(SafetyStopVerbGate.nextStep(support: .present, liveSessionsOfThisUser: 0),
+                       .send)
+    }
+
+    func testAnOldDaemonIsNeverSent() {
+        XCTAssertEqual(SafetyStopVerbGate.nextStep(support: .absent, liveSessionsOfThisUser: 0),
+                       .refuse(.daemonCannotAnswer))
+    }
+
+    /// **The load-bearing gate, and it is checked first.** A live session means
+    /// refuse whatever is known about the daemon — including the state where
+    /// the daemon has already answered once, because being wrong here is what
+    /// costs somebody an eight-hour job (Task 1's R1.5).
+    func testALiveSessionRefusesRegardlessOfWhatIsKnownAboutTheDaemon() {
+        for support in [SafetyStopVerbGate.Support.unknown, .present, .absent] {
+            XCTAssertEqual(SafetyStopVerbGate.nextStep(support: support, liveSessionsOfThisUser: 1),
+                           .refuse(.sessionsAreStillLive),
+                           "support \(support) sent a verb while a session was live")
+            XCTAssertEqual(SafetyStopVerbGate.nextStep(support: support,
+                                                       liveSessionsOfThisUser: 200),
+                           .refuse(.sessionsAreStillLive))
+        }
+    }
+
+    /// **`.absent` is terminal.** This is Task 1's R1.2: the latch has to
+    /// outlive the connection, and nothing observed afterwards may talk it back
+    /// into asking — otherwise one failure per reconnect becomes one teardown
+    /// per reconnect, and the sessions go with them.
+    func testOnceTheDaemonHasFailedNothingTalksTheLatchBackIntoAsking() {
+        SafetyStopVerbGate.record(.absent)
+        XCTAssertEqual(SafetyStopVerbGate.support, .absent)
+
+        SafetyStopVerbGate.record(.present)
+        XCTAssertEqual(SafetyStopVerbGate.support, .absent, "a failed latch was re-armed")
+        SafetyStopVerbGate.record(.unknown)
+        XCTAssertEqual(SafetyStopVerbGate.support, .absent)
+        XCTAssertEqual(SafetyStopVerbGate.nextStep(support: SafetyStopVerbGate.support,
+                                                   liveSessionsOfThisUser: 0),
+                       .refuse(.daemonCannotAnswer))
+    }
+
+    /// The latch is process-wide state, not per-connection and not per-object:
+    /// a second `DaemonConnection` reads the same answer, because "does this
+    /// Mac's daemon implement a verb" is not a property of a connection.
+    func testTheLatchIsProcessWideRatherThanPerConnection() {
+        SafetyStopVerbGate.record(.present)
+        XCTAssertEqual(SafetyStopVerbGate.support, .present)
+        _ = DaemonConnection()
+        _ = DaemonConnection()
+        XCTAssertEqual(SafetyStopVerbGate.support, .present,
+                       "building connections reset a latch that has to outlive them")
+    }
+
+    /// A probe that clears the daemon is remembered, so the version call
+    /// happens at most once per process rather than once per explanation.
+    func testAClearedProbeIsRememberedSoNothingProbesTwice() {
+        SafetyStopVerbGate.record(.present)
+        XCTAssertEqual(SafetyStopVerbGate.nextStep(support: SafetyStopVerbGate.support,
+                                                   liveSessionsOfThisUser: 0),
+                       .send, "a second explanation would re-probe the version")
+    }
+}

@@ -274,4 +274,188 @@ final class DaemonConnection: ObservableObject {
     func version() async -> String? {
         await call { proxy, reply in proxy.version { reply($0) } }
     }
+
+    /// Why this user's sessions were stopped, if a safety guard stopped them
+    /// and if this daemon can say so. `[]` means **"no reason available"** and
+    /// never "no guard fired" — every caller has to treat the two as the same
+    /// answer, which is the honesty rule `sessionNotificationCopy` is built on.
+    ///
+    /// **Every gate this passes through is in `SafetyStopVerbGate`**, including
+    /// why they are in the order they are. What is here is the sequencing: at
+    /// most one version probe, then at most one send, and a failure latched so
+    /// this process never asks again.
+    ///
+    /// It is `async` and returns a value rather than publishing one, and that
+    /// is deliberate: a published property would need a producer, and the only
+    /// producer available is the poll — which is the one thing Task 1's finding
+    /// forbids for this verb.
+    func recentSafetyStops() async -> [SafetyStopRecord] {
+        switch SafetyStopVerbGate.nextStep(support: SafetyStopVerbGate.support,
+                                           liveSessionsOfThisUser: liveSessionsOfThisUser) {
+        case .refuse:
+            return []
+        case .askTheVersionFirst:
+            // Safe to send to any daemon: `version(reply:)` has existed since
+            // v2 and the daemon serving this Mac answers it. This is the only
+            // probe, it happens at most once per process, and its answer is
+            // latched below whichever way it goes.
+            let reply = await version()
+            SafetyStopVerbGate.record(
+                DaemonCapability.supportsRecentSafetyStops(versionReply: reply) ? .present : .absent)
+            // Decided again rather than recursed, and not merely for style: the
+            // probe above suspended, so the session count that cleared the gate
+            // a moment ago is no longer known to be zero. One re-decision, and
+            // `.askTheVersionFirst` is now unreachable because the latch is set.
+            guard case .send = SafetyStopVerbGate.nextStep(
+                support: SafetyStopVerbGate.support,
+                liveSessionsOfThisUser: liveSessionsOfThisUser) else { return [] }
+        case .send:
+            break
+        }
+
+        let records: [SafetyStopRecord]? = await call { proxy, reply in
+            proxy.recentSafetyStops { data, _ in
+                guard let data,
+                      let decoded = try? JSONDecoder().decode([SafetyStopRecord].self, from: data)
+                else {
+                    // The reply arrived, so the daemon does implement the verb
+                    // and the connection is live — an undecodable payload is an
+                    // empty list, exactly as in `refresh()`, and must not be
+                    // mistaken for the verb being absent.
+                    return reply([])
+                }
+                reply(decoded)
+            }
+        }
+        guard let records else {
+            // **Latched on failure, not on having asked** (Task 1, R1.2). A
+            // failed call is what a missing verb looks like from here — there
+            // is no reply to distinguish it from a daemon that merely went
+            // away, and `handleDisconnect` has already run either way.
+            //
+            // A transient failure therefore disables this sentence for the rest
+            // of the process, and that is the intended trade rather than an
+            // oversight: being wrong this way costs one explanation the app
+            // would have liked to give, and being wrong the other way costs the
+            // user every session they own, on every subsequent attempt.
+            SafetyStopVerbGate.record(.absent)
+            return []
+        }
+        return records
+    }
+
+    /// Sessions belonging to this user — the set a connection teardown could
+    /// cost, over-counted on purpose.
+    ///
+    /// What `DaemonRuntime.clientDisconnected` would actually end is narrower:
+    /// the `clientBound` sessions owned by `app-<uid>`. Filtering by uid instead
+    /// of by owner counts this user's CLI and trigger sessions too, so the gate
+    /// refuses in strictly more situations than it has to. That is the correct
+    /// direction to be imprecise in, and it costs nothing: the only caller asks
+    /// at the moment the notification tracker has just observed this user's last
+    /// session end, so this is zero exactly when it matters.
+    private var liveSessionsOfThisUser: Int {
+        let me = UInt32(getuid())
+        return sessions.filter { $0.ownerUID == me }.count
+    }
+}
+
+// MARK: - The gate in front of the one verb an old daemon may not have
+
+/// **When this app may send `recentSafetyStops`, and the per-process memory of
+/// whether it ever may again.**
+///
+/// Task 1 measured that sending a verb an old daemon does not implement
+/// invalidates the connection *server-side*, which ends every `clientBound`
+/// session the caller owns (`Tests/UnimplementedVerbProbeTests.swift`). The
+/// daemon serving this Mac predates every field Plans 4-8 have added, so this
+/// is a live condition, not a hypothetical. Three protections, and the order
+/// they are checked in is part of the design:
+///
+/// 1. **Never polled.** There is no timer anywhere near this. The only caller
+///    is the notification path, which asks only when it has an ending in hand
+///    that it is about to describe — at most a handful of times in a login
+///    session, and never at all for a user who has not switched the toggle on.
+///    This is Task 1's R1.1, and it is the protection that cannot be got wrong
+///    by a later change to this file, because it is the absence of a caller.
+///
+/// 2. **Only while this user owns no live sessions** — checked *first*, before
+///    the version gate, precisely because it is the one that holds even if the
+///    version gate is wrong. It is structural rather than heuristic: the caller
+///    asks exactly when `SessionNotificationTracker` has observed that this
+///    user's last session ended, so the set a teardown could destroy is empty
+///    by construction at the moment the question is asked. If that ever stops
+///    being true, this refuses instead of costing somebody an eight-hour job
+///    (Task 1's R1.5).
+///
+/// 3. **A version gate, probed once and latched.** `DaemonCapability` owns the
+///    reasoning, including why it is sound and why it is not sufficient alone.
+///
+/// ## Why the latch is `static`
+///
+/// Task 1's R1.2, which is unusually specific: *a per-connection latch is not
+/// sufficient*, because the `NSXPCConnection` is rebuilt after every failure
+/// (`reconnectDelay`, 3s) and a latch scoped to one would re-arm on every
+/// reconnect — reproducing the polling hazard at reconnect cadence.
+///
+/// A stored property on `DaemonConnection` would in fact survive that, since
+/// `connect()` replaces the connection and not the object, and `AppDelegate`
+/// builds exactly one. It is `static` anyway, because "this happens to be a
+/// singleton today" is not the same guarantee as "there is one of these", and
+/// the failure mode of getting it wrong is measured in other people's sessions.
+/// Being process-wide is also *what the fact is*: whether the daemon on this
+/// Mac implements a verb is not a property of a connection.
+@MainActor
+enum SafetyStopVerbGate {
+    /// What is known about the daemon's ability to answer. Starts `.unknown`
+    /// once per process; `.absent` is terminal.
+    enum Support: Equatable {
+        case unknown
+        case present
+        case absent
+    }
+
+    /// What to do next, given both facts.
+    enum Step: Equatable {
+        case askTheVersionFirst
+        case send
+        case refuse(Refusal)
+    }
+
+    /// Why not — kept distinct rather than collapsed to a `Bool`, so a test can
+    /// tell "this daemon cannot answer" from "now is not the moment to ask",
+    /// which are different bugs with different fixes.
+    enum Refusal: Equatable {
+        case sessionsAreStillLive
+        case daemonCannotAnswer
+    }
+
+    private(set) static var support: Support = .unknown
+
+    /// Records what was learned. `.absent` is one-way: nothing this process
+    /// observes later can talk it back into asking, which is the difference
+    /// between one failed call and one per attempt for the rest of the session.
+    static func record(_ learned: Support) {
+        guard support != .absent else { return }
+        support = learned
+    }
+
+    /// Test-only. Production has no path back to `.unknown` — see `record`.
+    static func resetForTesting() { support = .unknown }
+
+    /// Pure, so the whole decision is testable without an XPC connection —
+    /// which matters here more than usual, because `DaemonConnection` builds
+    /// its `NSXPCConnection` against a Mach service with no injection point, so
+    /// the surrounding method is verifiable only by reading plus a build.
+    static func nextStep(support: Support, liveSessionsOfThisUser: Int) -> Step {
+        // First, and deliberately ahead of what is known about the daemon: this
+        // is the check that makes a wrong answer from the version gate cost
+        // nothing.
+        guard liveSessionsOfThisUser == 0 else { return .refuse(.sessionsAreStillLive) }
+        switch support {
+        case .absent: return .refuse(.daemonCannotAnswer)
+        case .unknown: return .askTheVersionFirst
+        case .present: return .send
+        }
+    }
 }

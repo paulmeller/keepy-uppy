@@ -40,6 +40,18 @@ final class DaemonRuntime {
     /// `SafetyConfigStore.load(forUserID:)`). There is also nobody to read
     /// for yet at construction time; no agent has connected.
     private var safety = SafetyEngine(config: .default)
+    /// Why this daemon last stopped sessions, for a client that watched them
+    /// disappear and cannot otherwise tell a guard from an expiry.
+    ///
+    /// **Confined to `queue`, exactly like `sessions`, `safety` and `power`
+    /// above**, and for the same reason: XPC replies arrive on arbitrary
+    /// threads, `SafetyStopLog` is a value type with no locking of its own, and
+    /// the one writer below runs on the 5s tick while the one reader is an XPC
+    /// call. Both go through `queue.sync`; nothing hands the log out.
+    ///
+    /// The bounds are the log's own (`Shared/SafetyStopLog.swift`), where they
+    /// are testable — `Helper/` is not reachable from the test target.
+    private var safetyStops = SafetyStopLog()
     /// The daemon's single, process-lifetime holder for **both** power
     /// mechanisms. Confined to `queue` exactly like the two engines above:
     /// `PowerPlanHolder` is explicitly not thread-safe, and the live
@@ -452,6 +464,19 @@ final class DaemonRuntime {
 
     func currentSessions() -> [Session] { queue.sync { sessions.sessions } }
 
+    /// The unexpired safety-stop records, oldest first.
+    ///
+    /// Unfiltered by uid, exactly like `currentSessions()` above — the argument
+    /// is written out on `HelperProtocol.recentSafetyStops(reply:)`, and the two
+    /// verbs have to keep answering that question the same way.
+    ///
+    /// Takes no argument, touches no session, and changes nothing: `records`
+    /// reports the age bound without applying it, so this cannot even mutate the
+    /// log it reads.
+    func recentSafetyStops() -> [SafetyStopRecord] {
+        queue.sync { safetyStops.records(asOf: Date()) }
+    }
+
     /// Whether the daemon is holding the Mac awake by **either** mechanism —
     /// what the menu bar's balloon and `keepy-uppy status` report.
     ///
@@ -582,6 +607,23 @@ final class DaemonRuntime {
         case .stopAll(let reason):
             let ended = sessions.apply(.stopAll, now: now)
             helperLogger.error("Safety stop (\(reason.rawValue)); ended \(ended.count) session(s)")
+            // **The only writer of this log, deliberately.** A record in it
+            // means a guard fired; recording ordinary endings here — expiry, a
+            // manual stop, a condition ending, the agent disappearing — would
+            // make it a different feature needing a discriminator, and would
+            // turn every client's "why did that end?" back into a guess. See
+            // `SafetyStopLog`.
+            //
+            // Every ended session gets a record, including other users', since
+            // `.stopAll` ends theirs too and only a per-session `ownerUID` lets
+            // a client filter to its own. `apply(.stopAll, now:)` returns
+            // exactly the sessions that were live — its expiry sweep runs
+            // afterwards against a table this arm has already emptied — so
+            // nothing that ended for another reason can be mislabelled here.
+            safetyStops.record(ended.map {
+                SafetyStopRecord(sessionID: $0.id, ownerUID: $0.ownerUID,
+                                 reason: reason, endedAt: now)
+            }, now: now)
         }
 
         _ = applyLocked()

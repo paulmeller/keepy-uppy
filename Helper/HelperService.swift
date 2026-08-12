@@ -234,4 +234,20 @@ final class HelperService: NSObject, HelperProtocol {
         connectionProven()
         reply(bundleVersionText(of: .main))
     }
+
+    /// The second method here that reads nothing this Mac's state depends on
+    /// and changes nothing at all — see `HelperProtocol.recentSafetyStops` for
+    /// why it is unfiltered, and for the gate its only caller passes first.
+    ///
+    /// Encoded exactly like `listSessions`, failure included: an encoding
+    /// failure is `(nil, "encoding failure")` and not an empty array, because a
+    /// client that cannot tell "nothing to report" from "I could not tell you"
+    /// is the position this whole feature exists to get the app out of.
+    func recentSafetyStops(reply: @escaping (Data?, String?) -> Void) {
+        connectionProven()
+        guard let data = try? JSONEncoder().encode(runtime.recentSafetyStops()) else {
+            return reply(nil, "encoding failure")
+        }
+        reply(data, nil)
+    }
 }

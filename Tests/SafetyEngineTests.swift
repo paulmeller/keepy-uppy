@@ -251,3 +251,155 @@ final class SafetyEngineTests: XCTestCase {
         XCTAssertFalse(engine.triggersSuppressed)
     }
 }
+
+// MARK: - Plan 8 Task 6: the record, and the log behind it
+
+/// `SafetyStopRecord` is the only thing in this project that carries a
+/// `SafetyReason` outside the daemon, so its encoding is a wire format.
+final class SafetyStopRecordTests: XCTestCase {
+    /// Whole-struct, every field non-default, compared as
+    /// `SafetyStopRecord == SafetyStopRecord` rather than field by field —
+    /// which is the point: a field-wise round trip stops covering a field the
+    /// moment somebody adds one, and this type exists precisely because a
+    /// silently-dropped field is this project's signature defect.
+    func testTheWholeRecordRoundTripsThroughItsEncoding() throws {
+        let original = SafetyStopRecord(
+            sessionID: UUID(uuidString: "3F2504E0-4F89-11D3-9A0C-0305E82C3301")!,
+            ownerUID: 9_501,
+            reason: .lowBattery,
+            endedAt: Date(timeIntervalSinceReferenceDate: 800_000_000))
+        let decoded = try JSONDecoder().decode(
+            SafetyStopRecord.self, from: JSONEncoder().encode(original))
+        XCTAssertEqual(decoded, original)
+    }
+
+    /// Every reason, not one — a raw-value enum can lose a case to a decoder
+    /// that only ever sees the case the test author picked.
+    func testEveryReasonRoundTripsAsItself() throws {
+        for reason in SafetyReason.allCases {
+            let original = SafetyStopRecord(sessionID: UUID(), ownerUID: 501, reason: reason,
+                                            endedAt: Date(timeIntervalSinceReferenceDate: 1))
+            let decoded = try JSONDecoder().decode(
+                SafetyStopRecord.self, from: JSONEncoder().encode(original))
+            XCTAssertEqual(decoded.reason, reason, "\(reason) did not survive its own encoding")
+        }
+    }
+
+    /// The conformance Plan 7 declined and Task 6 sanctioned. Asserted rather
+    /// than assumed, because everything written over `allCases` — the wire
+    /// proof, and Task 7's bijection — is only as complete as this list.
+    func testEveryReasonTheEngineCanProduceIsInAllCases() {
+        XCTAssertEqual(Set(SafetyReason.allCases), [.thermal, .lowBattery, .maxDuration])
+    }
+}
+
+/// The daemon's bounded memory. Pure and in `Shared/` for
+/// `SessionTable.desiredPowerPlan`'s reason: `Helper/` is not reachable from
+/// this target, so the part that can be pure is.
+final class SafetyStopLogTests: XCTestCase {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
+    private func record(_ id: UUID = UUID(), uid: UInt32 = 501,
+                        reason: SafetyReason = .thermal, at: Date) -> SafetyStopRecord {
+        SafetyStopRecord(sessionID: id, ownerUID: uid, reason: reason, endedAt: at)
+    }
+
+    func testAnEmptyLogReportsNothing() {
+        XCTAssertEqual(SafetyStopLog().records(asOf: t0), [])
+    }
+
+    /// Oldest first, and the order records were written in — which is also the
+    /// eviction order, so the two cannot disagree.
+    func testRecordsComeBackOldestFirstInTheOrderTheyWereWritten() {
+        var log = SafetyStopLog()
+        let first = record(at: t0)
+        let second = record(at: t0.addingTimeInterval(1))
+        log.record([first, second], now: t0.addingTimeInterval(1))
+        XCTAssertEqual(log.records(asOf: t0.addingTimeInterval(1)), [first, second])
+
+        let third = record(at: t0.addingTimeInterval(2))
+        log.record([third], now: t0.addingTimeInterval(2))
+        XCTAssertEqual(log.records(asOf: t0.addingTimeInterval(2)), [first, second, third])
+    }
+
+    /// **The count bound is real, and the oldest is what goes** — proved by
+    /// pushing past it rather than by reading the constant back.
+    func testPastTheCountBoundTheOldestRecordsAreEvicted() {
+        var log = SafetyStopLog()
+        let overflow = 5
+        let all = (0..<(SafetyStopLog.maxRecords + overflow)).map {
+            record(at: t0.addingTimeInterval(Double($0)))
+        }
+        log.record(all, now: t0)
+
+        let kept = log.records(asOf: t0)
+        XCTAssertEqual(kept.count, SafetyStopLog.maxRecords)
+        XCTAssertEqual(log.storedCount, SafetyStopLog.maxRecords,
+                       "the bound has to bound the memory, not only the reply")
+        XCTAssertEqual(kept, Array(all.suffix(SafetyStopLog.maxRecords)),
+                       "the survivors are the newest, in order")
+        for evicted in all.prefix(overflow) {
+            XCTAssertFalse(kept.contains(evicted), "an evicted record came back")
+        }
+    }
+
+    /// One maximal episode fits exactly, which is the whole argument for the
+    /// number: a `.stopAll` can end `SessionAdmission.maxSessionsGlobal`
+    /// sessions at once, and an episode that evicted its own oldest records
+    /// would drop whichever uid the table happened to enumerate first.
+    func testOneMaximalEpisodeSurvivesIntact() {
+        var log = SafetyStopLog()
+        let episode = (0..<SessionAdmission.maxSessionsGlobal).map { _ in record(at: t0) }
+        log.record(episode, now: t0)
+        XCTAssertEqual(log.records(asOf: t0), episode)
+    }
+
+    /// The age bound, read through `records(asOf:)` — a record one second past
+    /// it is gone, one second inside it is not.
+    func testARecordOlderThanTheAgeBoundIsNotReported() {
+        var log = SafetyStopLog()
+        let old = record(at: t0)
+        log.record([old], now: t0)
+
+        XCTAssertEqual(log.records(asOf: t0.addingTimeInterval(SafetyStopLog.maxAge)), [old],
+                       "exactly at the bound is still inside it")
+        XCTAssertEqual(log.records(asOf: t0.addingTimeInterval(SafetyStopLog.maxAge + 1)), [],
+                       "a record past the age bound is a reason for the wrong ending")
+    }
+
+    /// Ageing out must free the memory too, not merely stop reporting it —
+    /// otherwise a long-lived daemon accumulates records it will never report.
+    func testWritingLaterEvictsWhatHasAgedOut() {
+        var log = SafetyStopLog()
+        log.record([record(at: t0)], now: t0)
+        XCTAssertEqual(log.storedCount, 1)
+
+        let fresh = record(at: t0.addingTimeInterval(SafetyStopLog.maxAge + 10))
+        log.record([fresh], now: t0.addingTimeInterval(SafetyStopLog.maxAge + 10))
+        XCTAssertEqual(log.storedCount, 1, "the aged-out record is still being held")
+        XCTAssertEqual(log.records(asOf: t0.addingTimeInterval(SafetyStopLog.maxAge + 10)), [fresh])
+    }
+
+    /// A read does not mutate: reporting the age bound must not apply it, so
+    /// two reads at different clocks are both answerable.
+    func testReadingIsNotAWrite() {
+        var log = SafetyStopLog()
+        let one = record(at: t0)
+        log.record([one], now: t0)
+        _ = log.records(asOf: t0.addingTimeInterval(SafetyStopLog.maxAge + 1))
+        XCTAssertEqual(log.records(asOf: t0), [one],
+                       "a read at a later clock consumed a record")
+    }
+
+    /// Records keep their own uid, which is what lets a client filter to its
+    /// own — a `.stopAll` ends every account's sessions, so an unfiltered
+    /// reply is the only one that can serve them all.
+    func testRecordsFromSeveralAccountsAreAllKept() {
+        var log = SafetyStopLog()
+        let mine = record(uid: 501, at: t0)
+        let theirs = record(uid: 502, at: t0)
+        log.record([mine, theirs], now: t0)
+        XCTAssertEqual(log.records(asOf: t0), [mine, theirs])
+        XCTAssertEqual(log.records(asOf: t0).filter { $0.ownerUID == 501 }, [mine])
+    }
+}

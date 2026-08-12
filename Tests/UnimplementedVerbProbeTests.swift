@@ -58,8 +58,15 @@ import XCTest
     func registerAsAgent(reply: @escaping (Bool, String?) -> Void)
     func currentState(reply: @escaping (Bool) -> Void)
     func version(reply: @escaping (String) -> Void)
+    func recentSafetyStops(reply: @escaping (Data?, String?) -> Void)
 
     /// The verb the "old" far side has never heard of.
+    ///
+    /// Still a fictional one, and it stays fictional now that
+    /// `recentSafetyStops` is real. The measurement has to be about *any*
+    /// unimplemented verb, and pointing it at a verb that today's daemon does
+    /// implement would turn this test green the day the finding stopped being
+    /// demonstrated.
     func safetyGuardReason(reply: @escaping (String?, String?) -> Void)
 }
 
@@ -76,6 +83,7 @@ final class UnimplementedVerbProbeTests: XCTestCase {
         func registerAsAgent(reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
         func currentState(reply: @escaping (Bool) -> Void) { reply(true) }
         func version(reply: @escaping (String) -> Void) { reply("old-daemon") }
+        func recentSafetyStops(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
     }
 
     /// Stands in for `HelperListenerDelegate`, including the part that matters
