@@ -12,8 +12,22 @@ final class HelperService: NSObject, HelperProtocol {
 
     private let runtime: DaemonRuntime
     private let clientID: ClientID
+
+    /// The peer's authenticated uid, and which of the daemon's three Mach
+    /// services accepted it. Both are server-side facts, established by the OS
+    /// at accept time and never asserted by the client (`ClientRole`).
+    ///
+    /// This used to be a bare `isAgent: Bool`, which was the whole of what any
+    /// method here needed to know about role. Plan 8 Task 5 needs the role
+    /// itself: spec §4's amendment turns on the caller being *the app*
+    /// specifically, and a `Bool` that answers one question about a three-case
+    /// enum cannot be widened without inventing a second flag beside it.
+    /// Agent-ness is still spelled exactly once — `ClientRole.isAgent` — so
+    /// `reportConditionEnded` and `registerAsAgent` keep meaning precisely
+    /// "arrived on the agent-only Mach service".
     private let userID: UInt32
-    private let isAgent: Bool
+    private let role: ClientRole
+    private var isAgent: Bool { role.isAgent }
 
     /// Called on entry to every `HelperProtocol` method below, before any
     /// other work — including before a method rejects its caller.
@@ -35,12 +49,12 @@ final class HelperService: NSObject, HelperProtocol {
     /// queue anyway).
     private let connectionProven: () -> Void
 
-    init(runtime: DaemonRuntime, clientID: ClientID, userID: UInt32, isAgent: Bool,
+    init(runtime: DaemonRuntime, clientID: ClientID, userID: UInt32, role: ClientRole,
          connectionProven: @escaping () -> Void) {
         self.runtime = runtime
         self.clientID = clientID
         self.userID = userID
-        self.isAgent = isAgent
+        self.role = role
         self.connectionProven = connectionProven
     }
 
@@ -95,13 +109,20 @@ final class HelperService: NSObject, HelperProtocol {
     func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) {
         connectionProven()
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
-        switch runtime.stopSession(id: uuid, requestedBy: clientID) {
+        // The decision is `SessionIsolation.authorize`, in `Shared/` — the same
+        // division `startSession` makes above, and for the same reason: this
+        // file is not reachable from the test target, and an authorisation rule
+        // that no test can read is a rule nobody can check. Since Plan 8 Task 5
+        // that rule has one clause that is *not* ownership (spec §4's
+        // exception: this user's own trigger sessions), which is precisely the
+        // kind of thing that must not be written where it cannot be tested.
+        switch runtime.stopSession(id: uuid, requestedBy: clientID, uid: userID, role: role) {
         case .authorized:
             reply(true, nil)
         case .notFound:
             reply(false, "no such session")
         case .forbidden:
-            helperLogger.error("Rejected stopSession(\(sessionID)) from \(self.clientID.rawValue): caller does not own this session")
+            helperLogger.error("Rejected stopSession(\(sessionID)) from \(self.clientID.rawValue): caller may not stop this session")
             reply(false, "not authorised")
         }
     }
@@ -135,7 +156,8 @@ final class HelperService: NSObject, HelperProtocol {
     func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) {
         connectionProven()
         guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
-        switch runtime.renewLease(id: uuid, until: until, requestedBy: clientID) {
+        switch runtime.renewLease(id: uuid, until: until, requestedBy: clientID,
+                                  uid: userID, role: role) {
         case .renewed:
             reply(true, nil)
         case .notFound:

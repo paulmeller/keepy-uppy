@@ -59,6 +59,13 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // service) accepted this connection, never by anything the client
         // asserts about itself, and never by re-deriving identity from the
         // peer's pid after the fact (spec §4).
+        //
+        // The whole role goes to `HelperService` now, not just this Bool:
+        // spec §4's amendment (Plan 8 Task 5) turns on the caller being the
+        // *app*, which a yes/no about agent-ness cannot express. This local
+        // stays because the two refcount closures below are about agent-ness
+        // alone, and `ClientRole.isAgent` remains the single place that word
+        // is spelled.
         let isAgent = role.isAgent
 
         // Accepting a connection establishes nothing about the peer:
@@ -88,7 +95,7 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         // calls this on entry to every `HelperProtocol` method, which XPC
         // reaches only for a peer that satisfied the requirement.
         newConnection.exportedObject = HelperService(
-            runtime: runtime, clientID: id, userID: userID, isAgent: isAgent,
+            runtime: runtime, clientID: id, userID: userID, role: role,
             connectionProven: { [runtime] in
                 // The runtime calls are the latch's *body*, not something done
                 // after consulting it: they run under its lock, so this

@@ -74,6 +74,13 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     /// isolation fix: `DaemonRuntime.stopSession` used to accept a bare
     /// UUID and end any session regardless of owner). The rejection is
     /// logged and the session is left untouched.
+    ///
+    /// **One exception since Plan 8 Task 5**, and the only place on this
+    /// protocol where a client may act on a session it does not own: the
+    /// menu-bar app may stop a session started by *this same user's* own
+    /// trigger rules. The five-clause conjunction, the argument for it, and the
+    /// five things it deliberately does **not** widen — no other user, caller,
+    /// owner, verb or sweep — are all in `SessionIsolation.authorize`.
     func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void)
 
     /// Ends sessions. Defaults to ending only the caller's own; pass
@@ -194,10 +201,82 @@ enum SessionIsolation {
         case forbidden
     }
 
-    /// A caller may act on (stop, renew) a session only if they own it.
-    static func authorize(sessionID: UUID, requestedBy caller: ClientID, among sessions: [Session]) -> Authorization {
+    /// Which verb is being authorised — because as of Plan 8 Task 5 the two
+    /// are no longer the same question.
+    ///
+    /// One function still answers both, so the ownership rule cannot be
+    /// implemented twice and half-changed; the asymmetry is confined to the
+    /// amendment below, which names `.stop` explicitly.
+    enum Action: Equatable {
+        /// `HelperProtocol.stopSession` — the only verb the amendment widens.
+        case stop
+        /// `HelperProtocol.renewLease` — ownership, and nothing else, forever.
+        case renew
+    }
+
+    /// A caller may act on (stop, renew) a session if they own it — **and, in
+    /// exactly one further case, if the app is being asked to stop a session
+    /// this same user's own trigger rules started.**
+    ///
+    /// - Parameters:
+    ///   - caller: the peer's stable identity, `<role>-<uid>`.
+    ///   - callerUID: the peer's authenticated uid, from
+    ///     `NSXPCConnection.effectiveUserIdentifier`.
+    ///   - callerRole: which of the daemon's three Mach services accepted the
+    ///     peer. Both of these are server-side facts (`ClientRole`), never
+    ///     anything the client says about itself — which is what makes the
+    ///     amendment safe to write at all.
+    static func authorize(sessionID: UUID, action: Action,
+                          requestedBy caller: ClientID,
+                          uid callerUID: UInt32,
+                          role callerRole: ClientRole,
+                          among sessions: [Session]) -> Authorization {
         guard let session = sessions.first(where: { $0.id == sessionID }) else { return .notFound }
-        return session.owner == caller ? .authorized : .forbidden
+
+        // The original rule, unchanged, and still answered first: you may act
+        // on what you own. Every client, agent included (spec §4).
+        if session.owner == caller { return .authorized }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // THE AMENDMENT — spec §4's one exception, and the only place in this
+        // daemon where a client may touch a session it does not own.
+        //
+        // Written as its own clause, deliberately not folded into the `==`
+        // above, because a reader auditing this trust boundary must be able to
+        // see the widening rather than reconstruct it from a compound
+        // expression. It is a conjunction of five facts, three of them in
+        // `Session.startedByTrigger(forUserID:)`:
+        //
+        //   1. the verb is **stop**;
+        //   2. the caller arrived on the **app's** Mach service;
+        //   3. the session's `ownerUID` is the caller's own uid;
+        //   4. the session's owner is that uid's **agent** (unforgeable: only
+        //      the agent can connect on the agent's service);
+        //   5. the session's `origin` is `.trigger`.
+        //
+        // WHY. A trigger session is started on the user's behalf by a rule they
+        // wrote, with no client of theirs in the loop, and the menu-bar app is
+        // the only surface that can show it. Leaving it unstoppable there meant
+        // the answer to "why is my Mac awake, and how do I stop it?" was
+        // `keepy-uppy off --all` — a command that also ends *other users'*
+        // sessions. The narrow exception is strictly safer than the escalation
+        // it replaces.
+        //
+        // WHAT IT DOES NOT WIDEN. No user boundary (clause 3 is a uid
+        // comparison, so another account's trigger session is untouchable). No
+        // other caller (clause 2: the CLI and the agent get nothing new). No
+        // other owner (clause 4: this user's `cli-<uid>` sessions stay theirs,
+        // whatever their payload claims about `origin`). No other verb (clause
+        // 1: `.renew` falls through to `.forbidden` below — the amendment ends
+        // a session, it never extends one). And no sweep:
+        // `sessionsToStop(all: false)` is untouched, so this remains a
+        // per-session decision a person makes on a named row.
+        // ─────────────────────────────────────────────────────────────────────
+        if action == .stop, callerRole == .app, session.startedByTrigger(forUserID: callerUID) {
+            return .authorized
+        }
+
+        return .forbidden
     }
 
     /// The ids `stopAllSessions` should end for a given caller: everyone's,
@@ -212,6 +291,33 @@ enum SessionIsolation {
     /// the session and `off` matched nothing while reporting success. See
     /// `ClientRole.clientID(forUserID:)` (Shared/ClientIdentity.swift) for the
     /// stable, server-derived identity that makes this filter meaningful.
+    ///
+    /// ## This did **not** widen with `authorize`, and the choice was made
+    ///
+    /// Plan 8 Task 5 let the app stop its own user's trigger-started sessions.
+    /// The obvious next step — sweeping them from `stopAllSessions(all: false)`
+    /// too — was considered and rejected. Three reasons, in weight order:
+    ///
+    /// 1. **The sweep's whole safety argument is that it touches only what the
+    ///    caller itself created.** The amendment is a decision a person makes
+    ///    about a session they can see and have named; a sweep is a decision
+    ///    about a set nobody enumerated. Those are different acts, and only the
+    ///    first is what spec §4's exception describes.
+    /// 2. **It would silently rewrite a keystroke somebody already recorded.**
+    ///    `HotKeyAction.stopAppSessions` is a *global* shortcut, labelled "Stop
+    ///    sessions started from the menu", pressed from inside another app with
+    ///    no feedback of any kind. Widening this would make an existing binding
+    ///    start ending trigger sessions with no way to re-consent — and a
+    ///    trigger session is frequently the only thing keeping the Mac awake,
+    ///    that being what triggers are for.
+    /// 3. **One implementation of the amendment, not two.** It lives in
+    ///    `authorize` alone, so there is a single clause to audit and a single
+    ///    place for a future loosening to be noticed.
+    ///
+    /// The cost, stated rather than hidden: the menu now has per-row Stop
+    /// buttons that its own sweep row does not cover. That row is therefore
+    /// labelled for the set it really ends (`menuStopAllLabel`), instead of
+    /// claiming "all mine" over a list where more is stoppable than it sweeps.
     static func sessionsToStop(all: Bool, requestedBy caller: ClientID, among sessions: [Session]) -> [UUID] {
         if all {
             return sessions.map(\.id)

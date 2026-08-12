@@ -245,12 +245,18 @@ every live session, and each row says where its session came from: you started
 it, one of your own rules started it automatically, it came from a terminal, or
 it belongs to another account on this Mac.
 
-**It can show you a session it can't stop.** This app only ends sessions it
-started itself — the daemon scopes every stop to the client that asked, which
-is what stops one client ending another's work — so a session your own trigger
-started has no Stop button, and neither does one from `keepy-uppy on`. End
-those with `keepy-uppy off --all`, or let the condition or the duration end
-them. Switching a rule off doesn't end a session it has already started.
+**A session your own rule started has a Stop button.** So does one you started
+here. The daemon otherwise scopes every stop to the client that asked — that's
+what stops one client ending another's work — and the one exception is this: the
+app may end a session started by *your own* trigger rules, on this account. It
+can't end one from `keepy-uppy on` (that's your terminal's, and `keepy-uppy off`
+ends it), it can't end another account's anything, and it can't extend anything
+it didn't start. Switching a rule off doesn't end a session it has already
+started; stopping the session does.
+
+**It can still show you a session it can't stop.** A `keepy-uppy on` session of
+yours, and another account's sessions, are listed without a Stop button. End
+your own with `keepy-uppy off`, or let the condition or the duration end them.
 
 **Two notifications, both off until you turn one on:** when nothing of yours is
 keeping this Mac awake any more, and when a trigger starts a session. The app
@@ -264,7 +270,10 @@ anyone yet.
 **Two global keyboard shortcuts**, needing no permission of any kind: one
 starts the session the menu's first row starts, the other stops the sessions
 you started from the menu — only those, so a trigger's session and a
-`keepy-uppy on` session keep running. macOS won't tell an app that another app
+`keepy-uppy on` session keep running. That's deliberate, and it's narrower than
+the menu: a trigger's session has its own Stop button up there, one at a time,
+because a keystroke pressed inside another app shows you nothing and shouldn't
+sweep away something you didn't name. macOS won't tell an app that another app
 already owns a combination, so a shortcut that never fires is almost always one
 that's already taken; pick another.
 

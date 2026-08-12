@@ -277,7 +277,7 @@ final class SessionOverXPCTransportTests: XCTestCase {
     /// test is that `Session` crossing as JSON carries a client's *request*, and
     /// a reply that mentioned one axis would pass while the other was dropped on
     /// the wire — which is exactly the failure a new field can have.
-    private final class EchoingHelper: NSObject, HelperProtocol {
+    fileprivate final class EchoingHelper: NSObject, HelperProtocol {
         static func echo(_ power: PowerRequest) -> String {
             "\(power.wakeMode.rawValue)/disks=\(power.keepsDisksAwake)"
         }
@@ -300,7 +300,25 @@ final class SessionOverXPCTransportTests: XCTestCase {
             reply(removalReply.stopped, removalReply.sleepRestored)
         }
 
-        func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
+        /// Not a stub either, since Plan 8 Task 5. The table this authorises
+        /// against, and the identity it authorises *as*, are installed by
+        /// `AuthorizingListenerDelegate` from the connection XPC actually
+        /// accepted — see that type for why this cannot be done from the
+        /// payload.
+        var authorizeStop: ((UUID) -> SessionIsolation.Authorization)?
+
+        func stopSession(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) {
+            guard let authorizeStop else { return reply(false, "unused") }
+            guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
+            // The decision comes back as the error string so the test reads the
+            // daemon's own three-case answer rather than a boolean that folds
+            // `.notFound` and `.forbidden` together.
+            switch authorizeStop(uuid) {
+            case .authorized: reply(true, "authorized")
+            case .notFound: reply(false, "notFound")
+            case .forbidden: reply(false, "forbidden")
+            }
+        }
         func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) { reply(0, "unused") }
         func listSessions(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
         func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
@@ -420,5 +438,160 @@ final class SessionOverXPCTransportTests: XCTestCase {
         XCTAssertEqual(received?.0, 4, "the session count did not survive the round trip")
         XCTAssertEqual(received?.1, false,
                        "the flag `reset` refuses to unregister on did not survive the round trip")
+    }
+}
+
+/// **Plan 8 Task 5's amendment, reached over a real XPC connection.**
+///
+/// `SessionIsolationTests` proves the *decision*: hand `authorize` a uid, a
+/// role and a `ClientID` and it answers correctly. That is a test of a pure
+/// function, and it can pass while the daemon computes the decision from the
+/// wrong inputs — because the inputs are exactly the part it does not exercise.
+/// A caller's uid and role are not in any payload and never can be: `origin` is
+/// client-chosen and `stopSession` carries nothing but a session id string, so
+/// **the only thing that establishes who is asking is the connection itself.**
+///
+/// So this drives the identity the way the daemon does
+/// (`Helper/HelperListenerDelegate.swift`): a listener fixed to one
+/// `ClientRole`, reading `NSXPCConnection.effectiveUserIdentifier` off the
+/// accepted connection — which XPC fills in from the peer's audit credentials,
+/// not from anything the client sent — and composing the two with
+/// `ClientRole.clientID(forUserID:)`. The far side then answers with the
+/// authorisation it computed, so a uid that failed to cross, a role taken from
+/// the wrong end, or an identity assembled differently from the daemon's shows
+/// up as a wrong decision rather than as a green unit test.
+///
+/// An anonymous listener rather than the daemon's Mach service, deliberately
+/// and for the reasons `SessionOverXPCTransportTests` gives: no privileged
+/// service, no code-signing requirement, nothing installed, and — the part that
+/// matters here — no contact of any kind with the live root daemon serving this
+/// Mac.
+final class StopAuthorizationOverXPCTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    /// The daemon's accept path, reduced to the two facts the amendment reads.
+    ///
+    /// `role` is a property of the *listener*, exactly as it is in the product:
+    /// one `NSXPCListener` per Mach service, so a peer's role is established by
+    /// which one accepted it and is never derived from the peer afterwards. The
+    /// uid is read per connection.
+    /// The exported object is `SessionOverXPCTransportTests.EchoingHelper`,
+    /// reused rather than re-implemented: a second complete `HelperProtocol`
+    /// conformance is nine more methods that can drift from the protocol under
+    /// test.
+    private final class AuthorizingListenerDelegate: NSObject, NSXPCListenerDelegate {
+        let role: ClientRole
+        let sessions: [Session]
+        let exported = SessionOverXPCTransportTests.EchoingHelper()
+        /// What the server saw, so the test can assert the uid genuinely
+        /// crossed rather than assuming it did.
+        private(set) var observedUID: UInt32?
+
+        init(role: ClientRole, sessions: [Session]) {
+            self.role = role
+            self.sessions = sessions
+        }
+
+        func listener(_ listener: NSXPCListener, shouldAcceptNewConnection new: NSXPCConnection) -> Bool {
+            let uid = UInt32(new.effectiveUserIdentifier)
+            observedUID = uid
+            let clientID = role.clientID(forUserID: uid)
+            let table = sessions
+            let acceptedAs = role
+            exported.authorizeStop = { id in
+                SessionIsolation.authorize(sessionID: id, action: .stop,
+                                           requestedBy: clientID, uid: uid, role: acceptedAs,
+                                           among: table)
+            }
+            new.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
+            new.exportedObject = exported
+            new.resume()
+            return true
+        }
+    }
+
+    private func session(owner: ClientID, uid: UInt32, origin: SessionOrigin) -> Session {
+        Session(id: UUID(), kind: .indefinite, owner: owner, ownerUID: uid,
+                persistence: .detached, origin: origin, startedAt: t0,
+                triggerID: origin == .trigger ? UUID() : nil,
+                wakeMode: .clamshell, keepsDisksAwake: false)
+    }
+
+    private func decision(for session: Session, askingAs role: ClientRole,
+                          among sessions: [Session]) -> (reply: String?, uid: UInt32?) {
+        let listener = NSXPCListener.anonymous()
+        // `NSXPCListener.delegate` is weak — the same trap the transport tests
+        // above document. A delegate created inline is deallocated before the
+        // first connection arrives, and every connection is silently refused.
+        let delegate = AuthorizingListenerDelegate(role: role, sessions: sessions)
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+        connection.resume()
+        defer { connection.invalidate() }
+
+        let replied = expectation(description: "stopSession reply")
+        replied.assertForOverFulfill = false
+        var answer: String?
+        let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+            XCTFail("XPC error: \(error.localizedDescription)")
+            replied.fulfill()
+        } as? HelperProtocol
+        proxy?.stopSession(session.id.uuidString) { _, detail in
+            answer = detail
+            replied.fulfill()
+        }
+        wait(for: [replied], timeout: 10)
+        return (answer, delegate.observedUID)
+    }
+
+    /// The permitted case. The uid is not written down anywhere in this test:
+    /// it is whatever the connection carried, and the session is built from the
+    /// same value, so the assertion is that the two met.
+    func testTheAppMayStopThisUsersTriggerSessionOverARealConnection() {
+        let uid = UInt32(getuid())
+        let automatic = session(owner: ClientRole.agent.clientID(forUserID: uid),
+                                uid: uid, origin: .trigger)
+        let outcome = decision(for: automatic, askingAs: .app, among: [automatic])
+        XCTAssertEqual(outcome.uid, uid,
+                       "the peer's uid must reach the server from its audit credentials, "
+                       + "which is the whole reason this test exists")
+        XCTAssertEqual(outcome.reply, "authorized")
+    }
+
+    /// Refused case one: the caller's role. Same bytes on the wire, same uid,
+    /// same session — only the listener that accepted the connection differs,
+    /// which is exactly the axis a payload can never carry.
+    func testTheCLIIsRefusedTheSameStopOverTheSameWire() {
+        let uid = UInt32(getuid())
+        let automatic = session(owner: ClientRole.agent.clientID(forUserID: uid),
+                                uid: uid, origin: .trigger)
+        XCTAssertEqual(decision(for: automatic, askingAs: .cli, among: [automatic]).reply,
+                       "forbidden")
+    }
+
+    /// Refused case two: the account boundary, over a real connection. The
+    /// server derives the caller's uid from the peer, so a session belonging to
+    /// a *different* uid cannot be reached however the request is phrased.
+    func testAnotherAccountsTriggerSessionIsRefusedOverARealConnection() {
+        let uid = UInt32(getuid())
+        let theirs = session(owner: ClientRole.agent.clientID(forUserID: uid &+ 1),
+                             uid: uid &+ 1, origin: .trigger)
+        XCTAssertEqual(decision(for: theirs, askingAs: .app, among: [theirs]).reply,
+                       "forbidden")
+    }
+
+    /// Refused case three, and the one that proves the *conjunction* survives
+    /// the trip rather than just the uid: this user's own agent, but a session
+    /// no rule started.
+    func testAnAgentSessionWithManualOriginIsRefusedOverARealConnection() {
+        let uid = UInt32(getuid())
+        let manual = session(owner: ClientRole.agent.clientID(forUserID: uid),
+                             uid: uid, origin: .manual)
+        XCTAssertEqual(decision(for: manual, askingAs: .app, among: [manual]).reply,
+                       "forbidden")
     }
 }

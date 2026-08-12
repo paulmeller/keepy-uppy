@@ -58,21 +58,33 @@ splits that bucket by `ownerUID` and owner role, so a trigger of your own reads
 `… — started automatically` and a `keepy-uppy on` session of your own reads
 `… — started from the command line`.
 
-**None of the three gained a stop button, and that half is still open.** This
-app cannot end a session it did not start — `SessionIsolation` scopes every
-stop to the caller's own `ClientID` — so a running trigger session can only be
-ended by `keepy-uppy off --all`, by its condition, or by its duration.
-Disabling the rule does not end a session it already started. That is a
-`SessionIsolation` change (spec §4), not something to fix by editing this list.
+**The automatic row gained a Stop button in Plan 8 Task 5**, and the other two
+did not. Spec §4 gained one exception: this app may end a session started by
+*this same user's* own trigger rules (`agent-<uid>`, `origin: .trigger`) — and
+nothing else. This user's `keepy-uppy on` session and another account's sessions
+are still listed without a button, and the sweep row and the global hot key
+still end only what this app itself started. Disabling a rule still does not end
+a session it already started; stopping the session does.
 
-- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and shows up in the menu as an unclickable row reading `Indefinite — started automatically` (or `Xh Ym left — started automatically` for a timed `defaultKind`), and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
+- [ ] Settings → Triggers: adding an "App Launched" rule for a real installed app, launching it, confirming a session starts automatically and shows up in the menu as a row reading `Stop “indefinite” — started automatically` (or `Stop “Xh Ym left” — started automatically` for a timed `defaultKind`), and keeps running for `defaultKind`'s picked duration — quitting that app does NOT end it early (a trigger starts a session, it doesn't bind that session's lifetime to the condition; `.processRunning` below is the one deliberate exception)
 - [ ] A trigger does not fire again while its session is still active (leave the triggering app running, confirm no duplicate session appears)
 - [ ] Triggering a real safety stop (or lowering the thermal sensitivity to `cautious` under load) suppresses a trigger from firing again until the configured cooldown elapses, while a manual "Start…" click still works immediately
-- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s and appears in the menu as `While claude is running — started automatically` (unclickable, for the reason above), and that the duration picker plays no part; quitting `claude` ends the session within ~10s (two 5s ticks — `sessionsToEnd` needs `SessionEvidence.negativesBeforeEnding` consecutive confident negatives, so a single bad reading can never end a session)
+- [ ] Settings → Triggers: adding a process-running rule via a quick-add preset (e.g. Claude Code), running `claude` in a terminal, confirming a session starts within ~5s and appears in the menu as `Stop “while claude is running” — started automatically` (a button now, for the reason above), and that the duration picker plays no part; quitting `claude` ends the session within ~10s (two 5s ticks — `sessionsToEnd` needs `SessionEvidence.negativesBeforeEnding` consecutive confident negatives, so a single bad reading can never end a session)
 - [ ] The Cursor CLI and Pi presets show the generic-name collision warning; the other three presets don't
 - [ ] Typing a *path* (`/opt/homebrew/bin/claude`) rather than a name into the process field is rejected in the sheet with an explanation, rather than being accepted as a rule that could never fire
 - [ ] A process-running rule for a `node`/`bun`-wrapped CLI (`claude`, installed by npm as a `claude` symlink to `claude.exe`) really does fire — this is the case `p_comm` matching alone could not see, since the kernel records `claude.exe` there and only `argv[0]` ever says `claude`
 - [ ] `keepy-uppy on --while-process <name>` behaves like `--while-app`, ending within ~10s of that process exiting
+
+*Stopping a trigger session from the menu (Plan 8 Task 5).* The daemon half is
+unit-tested, including over a real XPC round trip; what needs a desk is that the
+click reaches it and that nothing else moved.
+
+- [ ] With a trigger session live, click its `Stop “…” — started automatically` row: it disappears from the menu within one poll (~3s) and `keepy-uppy sessions` no longer lists it. **This is the one behaviour this task exists for** — before it, the row was text
+- [ ] With the "nothing of yours is keeping this Mac awake" notification switched on, and that trigger session the only one live: stopping it from the menu posts **no** banner. (The app explaining your own click back to you is the failure `notifier.appWillStop` prevents, and the trigger row goes through the same path as an app row)
+- [ ] With one trigger session and one you started from the menu, the status line reads `Keeping awake — 2 sessions` — and with a `keepy-uppy on` session of yours alongside them, `Keeping awake — 3 sessions, 2 yours`. "Yours" counts the rows with buttons
+- [ ] With **two** sessions started from the menu plus a trigger session, the sweep row reads `Stop all started from this menu` — not "Stop all mine" — and pressing it leaves the trigger session running
+- [ ] The `.stopAppSessions` global shortcut, pressed with a trigger session live, also leaves it running. Deliberate: a keystroke fired inside another app shows nothing, so it never sweeps a session you did not name
+- [ ] `keepy-uppy off` in a terminal still cannot touch the trigger session, and the app still cannot touch the terminal's
 
 **The frontmost-app, volume and network conditions.** All three read something
 a test target has no way to hold still: which app owns the front, what is
@@ -233,7 +245,7 @@ below, written by the tasks that built them; nothing here repeats them.
 - [ ] "On Session End" (script + webhook) is still in **Triggers**, its footer points at Settings → General → Notifications, and the Notifications footer points back at it
 - [ ] Every setting that existed before the restructure still holds the value it had: default session, wake mode, keep-disks-awake, thermal sensitivity, battery cutoff, maximum length, every trigger rule, and the session-end script and webhook. **This is the check that catches a retyped preference key** — nothing should have reverted to a default
 - [ ] Upgrading from a build made before this plan does not lose any of the above
-- [ ] With another account's session live, its menu row reads `… — started by another user` and is not clickable. (Your own automatic and command-line rows are covered under Settings → Triggers above.)
+- [ ] With another account's session live, its menu row reads `… — started by another user` and is **not** clickable — the boundary Task 5's amendment must never cross. (Your own automatic and command-line rows are covered under Settings → Triggers above; the automatic one is clickable, the command-line one is not.)
 
 *Notifications.* Both toggles ship **off**, and switching one on is the only
 thing in this product that asks macOS for anything.

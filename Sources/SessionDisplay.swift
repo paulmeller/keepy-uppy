@@ -555,20 +555,63 @@ let sessionEndActionsNotificationsSignpost = "To be told on screen instead, see 
 /// "Indefinite — Started manually — Stop" — so the one interactive thing in
 /// the list read as a status line, and the two facts in front of the verb were
 /// noise. Status and action are separate things now.
-func menuStatusLine(mine: [Session], others: [Session], now: Date) -> String {
-    let all = mine.count + others.count
+///
+/// ## What "yours" counts, and the answer to the question Task 4 deferred
+///
+/// The rows with a Stop button. The parameter was `mine:` and counted
+/// `app-<uid>` sessions alone; Plan 7 Task 3 asked whether it should mean
+/// "belongs to your account" instead, and Plan 8 Task 4 asked again and left it
+/// alone **explicitly deferring to this task**, on the grounds that the count
+/// earns its meaning from the buttons directly beneath it and that the
+/// authorization had to move first.
+///
+/// It has moved: `SessionIsolation.authorize` now lets the app stop this user's
+/// own trigger-started sessions too, so those rows have buttons and this counts
+/// them. The sentence is unchanged in *meaning* — "how many of these can I do
+/// something about" — and it is the set underneath it that grew. It is still
+/// not "belongs to your account": this user's `keepy-uppy on` session is theirs
+/// and has no button, so counting it would put a number above a list where the
+/// counted row cannot be acted on, which is the mismatch this rule exists to
+/// avoid.
+func menuStatusLine(yours: [Session], others: [Session], now: Date) -> String {
+    let all = yours.count + others.count
     guard all > 0 else { return "Not keeping awake" }
-    if all == 1, let only = (mine + others).first {
+    if all == 1, let only = (yours + others).first {
         return "Keeping awake — \(remainingTimeText(for: only, now: now).lowercased())"
     }
     if others.isEmpty { return "Keeping awake — \(all) sessions" }
-    if mine.isEmpty { return "Keeping awake — \(all) sessions, none yours" }
-    return "Keeping awake — \(all) sessions, \(mine.count) yours"
+    if yours.isEmpty { return "Keeping awake — \(all) sessions, none yours" }
+    return "Keeping awake — \(all) sessions, \(yours.count) yours"
 }
 
+/// The menu's sweep row, named for **what it actually ends**.
+///
+/// It said "Stop all mine" while `.thisApp` was the only group with a Stop
+/// button, so "mine" and "everything above me with a button" were the same set.
+/// Plan 8 Task 5 separated them: this user's trigger sessions gained per-row
+/// buttons and the status line above counts them as "yours", but the sweep is
+/// still `stopAllSessions(all: false)`, which the daemon scopes to `app-<uid>`
+/// (`SessionIsolation.sessionsToStop`, where the decision not to widen it is
+/// argued). "Stop all mine" would therefore promise more than it delivers, in a
+/// menu that now says "3 sessions, 3 yours" directly above it.
+///
+/// The wording deliberately matches `HotKeyAction.stopAppSessions`'s label
+/// ("Stop sessions started from the menu"), because they end exactly the same
+/// set and two names for one scope is how a user concludes one of them is
+/// broken.
+let menuStopAllLabel = "Stop all started from this menu"
+
 /// Verb first, so the row is visibly a thing you can do. With exactly one
-/// session of your own there is nothing to disambiguate, so it says the plain
+/// stoppable session there is nothing to disambiguate, so it says the plain
 /// thing rather than quoting a description back at you.
+///
+/// The parameter was `isOnlyOneOfMine`, back when the stoppable set and "this
+/// app's own sessions" were the same list. Plan 8 Task 5 separated them — this
+/// user's trigger sessions are stoppable and are not this app's — and the
+/// question the label actually asks is "is this the only row with a button",
+/// which is what the caller now passes. Getting it wrong is not cosmetic in
+/// either direction: "Stop keeping awake" above a second Stop row claims to end
+/// something it will not.
 ///
 /// The wake-mode tag is appended *here*, not composed by the view, for the
 /// same structural reason `Session.renewed(until:)` lives next to the stored
@@ -586,9 +629,9 @@ func menuStatusLine(mine: [Session], others: [Session], now: Date) -> String {
 /// is left exactly as it was: it is the overwhelmingly common case, it has no
 /// parenthetical to misparse, and "annotate the exception, not the rule" means
 /// a user who never opens Settings sees the menu unchanged.
-func menuStopLabel(for session: Session, isOnlyOneOfMine: Bool, now: Date) -> String {
+func menuStopLabel(for session: Session, isOnlyOneOfYours: Bool, now: Date) -> String {
     let tag = menuWakeModeSuffix(session.wakeMode)
-    guard !isOnlyOneOfMine else {
+    guard !isOnlyOneOfYours else {
         return (tag.isEmpty ? "Stop keeping awake" : "Stop this session") + tag
     }
     return "Stop “\(remainingTimeText(for: session, now: now).lowercased())”" + tag
@@ -666,12 +709,21 @@ func menuAutomaticSuffix(for session: Session) -> String {
 /// not this app's, and not a trigger", and it gets `.yoursOtherClient` rather
 /// than falling into whichever branch happens to be last.
 enum MenuSessionGroup: Equatable, CaseIterable {
-    /// Started by this app, for this user. **The only group with a stop
-    /// button**: `SessionIsolation.authorize` compares `Session.owner` against
-    /// the caller's `ClientID`, so this app can only ever stop these, and a
-    /// button on any other row would be a button that silently does nothing.
+    /// Started by this app, for this user. Stoppable by ownership — the rule
+    /// that has always applied, and the one every other client is held to.
+    ///
+    /// It was "the only group with a stop button" until Plan 8 Task 5;
+    /// `.yoursAutomatic` below is now the second, and the *only* second, for
+    /// the reasons `SessionIsolation.authorize` sets out. It is also the only
+    /// group `stopAllSessions(all: false)` sweeps, which is why the menu's
+    /// sweep row names this set rather than claiming "all mine".
     case thisApp
     /// This user's, started by one of their own trigger rules.
+    ///
+    /// **The second group with a stop button, as of Plan 8 Task 5** (spec §4's
+    /// one exception). Stoppable one row at a time, never by a sweep and never
+    /// by the global hot key: ending a session a rule of yours started is a
+    /// decision made about a session you can see.
     case yoursAutomatic
     /// This user's, started by `keepy-uppy` in a terminal.
     case yoursCommandLine
@@ -719,7 +771,13 @@ func menuSessionGroup(for session: Session, userID: UInt32) -> MenuSessionGroup 
     case .app:
         return .thisApp
     case .agent:
-        return session.origin == .trigger ? .yoursAutomatic : .yoursOtherClient
+        // `startedByTrigger` re-checks the two clauses the lines above have
+        // already established, which is deliberate: it is the single definition
+        // of this rule, and since Plan 8 Task 5 the *daemon* enforces the same
+        // one (`SessionIsolation.authorize`). A second hand-written conjunction
+        // here would be the copy that gets loosened without the other noticing —
+        // and the symptom would be a Stop button on a row the daemon refuses.
+        return session.startedByTrigger(forUserID: userID) ? .yoursAutomatic : .yoursOtherClient
     case .cli:
         // Deliberately not conditioned on `origin`. A `cli-<uid>` session did
         // come from the command line whatever it says about itself, and that is
@@ -730,42 +788,59 @@ func menuSessionGroup(for session: Session, userID: UInt32) -> MenuSessionGroup 
     }
 }
 
-/// **"This user's own trigger rule started this session", written once.**
-///
-/// The rule is a two-clause security predicate — this user's `agent-<uid>`, and
-/// `origin == .trigger` — and it was written out by hand in two places: the
-/// `.agent` branch above, and `SessionNotificationTracker.isAutomatic`, whose
-/// own doc comment said so ("exactly what `menuSessionGroup` already does for
-/// the equivalent menu row"). Two copies of a rule is two rules, and the one
-/// that gets loosened first is the one whose file never mentions the other.
-///
-/// It is **defined as** the grouping rather than as a fresh conjunction beside
-/// it, which is the difference between one rule and two that happen to agree
-/// today. Everything `menuSessionGroup` argues — that `ownerUID` and `owner`
-/// are independent server-derived axes, that `origin` is the client-chosen one
-/// and therefore never asked on its own, that a `cli-<uid>` session saying
-/// "trigger" is a claim rather than a fact — holds here without being restated,
-/// and cannot be half-changed.
-///
-/// It lives here, in `Sources/`, and not in `Shared/` beside `Session` itself:
-/// nothing in the daemon, the CLI or the agent asks this question. The agent
-/// *starts* trigger sessions and never classifies them, and the daemon's own
-/// authority over the two unforgeable halves is `ClientRole` and the listener
-/// that stamped them. Same reasoning as `DefaultSessionKindPreference`'s.
-extension Session {
-    func startedByTrigger(forUserID userID: UInt32) -> Bool {
-        menuSessionGroup(for: self, userID: userID) == .yoursAutomatic
-    }
-}
+// MARK: - Where "this user's own trigger rule started this session" went
+//
+// `Session.startedByTrigger(forUserID:)` was defined here, as
+// `menuSessionGroup(...) == .yoursAutomatic`, with a doc comment arguing it
+// belonged in `Sources/` because "nothing in the daemon, the CLI or the agent
+// asks this question".
+//
+// **Plan 8 Task 5 made that false, so it moved to `Shared/Session.swift`.**
+// Spec §4's one exception — the app may stop a session this user's own trigger
+// rules started — is enforced by `SessionIsolation.authorize` inside the root
+// daemon, and the daemon cannot see `Sources/` at all (`project.yml`: the
+// helper target compiles `Helper` + `Shared`). The definition moved down rather
+// than being copied across, and the weld flipped with it: `menuSessionGroup`'s
+// `.agent` branch now asks the predicate, where the predicate used to ask the
+// group. Same one rule, in the one place both the daemon that enforces it and
+// the menu that draws it can reach.
+//
+// This note is kept rather than deleted for the reason the file keeps all of
+// them: the next reader looking for the rule beside the grouping should find
+// out where it went and why, not an absence.
 
-/// The row for a session **this app cannot stop** — every group but `.thisApp`,
-/// which gets a stop button and `menuStopLabel` instead.
+/// The row for a session **this app cannot stop**.
 ///
 /// One shape, `"<kind> — <provenance>"`, with only the provenance varying: the
 /// kind leads because it is the answer to "why is this Mac awake", and the
-/// provenance is the qualifier. These are shown but never clickable, because
-/// `SessionIsolation` scopes every stop to the caller's own sessions and a
-/// button that silently does nothing is worse than a line of text.
+/// provenance is the qualifier.
+///
+/// ## Which groups this still renders, and why they are still not buttons
+///
+/// It used to be "every group but `.thisApp`", on the flat argument that
+/// `SessionIsolation` scopes every stop to the caller's own sessions. **Plan 8
+/// Task 5 made half of that false and the rest more specific**, so this is now a
+/// record of the change rather than the original claim:
+///
+/// * `.thisApp` — a button, by ownership, as it always was.
+/// * `.yoursAutomatic` — **a button since Task 5.** Spec §4 gained one
+///   exception: the app may stop a session this same user's own trigger rules
+///   started (`SessionIsolation.authorize`). `MenuContent` renders these with
+///   `menuStopLabel` + `menuAutomaticSuffix`, exactly like an app-started
+///   automatic session, so the two read as one kind of row.
+/// * `.yoursCommandLine` — still not a button. The owner is `cli-<uid>`: this
+///   user's, but another client's work, with its own way out (`keepy-uppy off`).
+///   The amendment deliberately excludes it, because `origin` is client-chosen
+///   and a terminal saying "trigger" is a claim rather than a fact.
+/// * `.yoursOtherClient` — still not a button. This build cannot even name the
+///   client, so it cannot be the app's business to end its sessions.
+/// * `.anotherUsers` — still not a button, and the boundary that must never
+///   move: the amendment is a uid comparison, so another account's sessions are
+///   exactly as untouchable as before.
+///
+/// All three of those are still refused by `SessionIsolation`, so a button
+/// there would still be a button that silently does nothing — which remains
+/// worse than a line of text.
 ///
 /// **No row explains why it is not a button.** The absence is the existing,
 /// deliberate signal; a row that states its own limits on every rebuild is the
@@ -1392,12 +1467,21 @@ enum HotKeyPreference {
 /// session is `agent-<uid>` — and the shortcut will look broken rather than
 /// scoped. Saying it here costs one clause and is the only warning available,
 /// because a global keystroke pressed in another app shows nothing at all.
+///
+/// **Its last clause used to read "the menu's own Stop button reaches exactly
+/// the same set", and Plan 8 Task 5 made that false.** The menu gained a Stop
+/// button on this user's trigger-started sessions (spec §4's one exception);
+/// the shortcut did not, deliberately — see `SessionIsolation.sessionsToStop`
+/// for why a sweep behind a silent global keystroke is the wrong home for that
+/// widening. So the sentence now says where the trigger sessions *can* be
+/// stopped instead of claiming the two surfaces agree. A user reading this row
+/// after seeing that button would otherwise conclude one of the two is broken.
 func hotKeyActionExplanation(_ action: HotKeyAction) -> String {
     switch action {
     case .startDefaultSession:
         return "Starts the same session the first row of the menu starts, with whatever you've chosen in General and Display."
     case .stopAppSessions:
-        return "Stops the sessions you started from this menu. Sessions started by a trigger rule or from the command line keep running — the menu's own Stop button reaches exactly the same set."
+        return "Stops the sessions you started from this menu. Sessions started by a trigger rule or from the command line keep running — a trigger's session has its own Stop button in the menu, one at a time."
     }
 }
 

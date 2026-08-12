@@ -472,3 +472,52 @@ extension Session {
                 triggerID: triggerID, wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake)
     }
 }
+
+// MARK: - "This user's own trigger rule started this session"
+
+extension Session {
+    /// **The two-clause-plus-origin predicate, written once**, and now the
+    /// hinge of an *authorisation* decision rather than only of a menu row.
+    ///
+    /// ## Why it is here, in `Shared/`, and no longer in `Sources/`
+    ///
+    /// It used to live beside `menuSessionGroup` in `Sources/SessionDisplay.swift`,
+    /// defined *as* that grouping, on the stated argument that "nothing in the
+    /// daemon, the CLI or the agent asks this question". Plan 8 Task 5 made that
+    /// false: spec §4's one exception is that the menu-bar app may **stop** a
+    /// session this same user's own trigger rules started, and the place that
+    /// exception has to be enforced is `SessionIsolation.authorize`, inside the
+    /// root daemon — which cannot see `Sources/` at all (`project.yml`: the
+    /// helper target compiles `Helper` + `Shared`).
+    ///
+    /// So the definition moved down rather than being copied across, and the
+    /// direction of the weld flipped with it: `menuSessionGroup` now asks *this*,
+    /// where this used to ask the group. The alternative was two hand-written
+    /// copies of a security predicate — one deciding which row gets a button and
+    /// one deciding whether the daemon honours the click — which is precisely the
+    /// pair that drifts, because the copy that gets loosened first is always the
+    /// one whose file never mentions the other.
+    ///
+    /// ## Why all three clauses
+    ///
+    /// * `ownerUID == userID` — the account boundary. Nothing here may ever
+    ///   cross it. It is not redundant with the owner comparison below, though
+    ///   it looks it: the daemon stamps both fields from one connection, so they
+    ///   agree for every session it started, but a `Session` is JSON off the
+    ///   wire and the pair *can* arrive disagreeing. That case has a name
+    ///   (`MenuSessionGroup.yoursOtherClient`) and is refused here.
+    /// * `owner == agent-<uid>` — **the unforgeable half.** The daemon stamps
+    ///   `owner` from the listener that accepted the connection
+    ///   (`ClientRole.clientID(forUserID:)`), and only the agent can connect on
+    ///   the agent's Mach service.
+    /// * `origin == .trigger` — the honest half, and the one nothing verifies:
+    ///   `HelperProtocol.startSession` documents `origin` as *client-chosen* and
+    ///   passes it through untouched. Asked on its own it would mean any client
+    ///   of this user could opt its own sessions into being stoppable by the app
+    ///   simply by setting a field, so it is never asked on its own.
+    func startedByTrigger(forUserID userID: UInt32) -> Bool {
+        ownerUID == userID
+            && owner == ClientRole.agent.clientID(forUserID: userID)
+            && origin == .trigger
+    }
+}

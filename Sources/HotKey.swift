@@ -324,7 +324,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
     /// what that is, so this and the menu cannot drift.
     case startDefaultSession
 
-    /// `stopAllSessions(all: false)` — the menu's "Stop all mine".
+    /// `stopAllSessions(all: false)` — the menu's sweep row (`menuStopAllLabel`).
     ///
     /// **The name says what it does, which is narrower than the obvious name,
     /// and the narrowing is deliberate.** `stopAllSessions(all: false)` scopes
@@ -345,6 +345,20 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
     /// cross-user escalation behind an unlabelled global keystroke is the worst
     /// possible home for one. Widening the app's own isolation scope is a
     /// daemon and spec decision and is not smuggled in here.
+    ///
+    /// ## The daemon decision arrived, and this still does not widen
+    ///
+    /// Plan 8 Task 5 amended spec §4: the app may now stop a session this
+    /// user's own trigger rules started, and the menu draws a Stop button on
+    /// exactly those rows. This keystroke was deliberately left out of it, so
+    /// the label above stays literally true. The argument is in
+    /// `SessionIsolation.sessionsToStop`; the half that belongs here is that a
+    /// binding somebody already recorded, under a name that promised one scope,
+    /// must not quietly start ending more than it did — least of all on the one
+    /// surface that shows nothing at all when it fires.
+    ///
+    /// So `.stopMySessions` remains the wrong name for it, for the same reason
+    /// as before, and the paragraph above stands unamended.
     case stopAppSessions
 
     var id: String { rawValue }

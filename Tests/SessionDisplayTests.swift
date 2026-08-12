@@ -551,41 +551,41 @@ final class MenuCopyTests: XCTestCase {
     }
 
     func testIdleSaysSoPlainly() {
-        XCTAssertEqual(menuStatusLine(mine: [], others: [], now: t0), "Not keeping awake")
+        XCTAssertEqual(menuStatusLine(yours: [], others: [], now: t0), "Not keeping awake")
     }
 
     func testOneSessionNamesWhatItIsRatherThanCountingIt() {
-        let line = menuStatusLine(mine: [session(.indefinite, owner: mineID)], others: [], now: t0)
+        let line = menuStatusLine(yours: [session(.indefinite, owner: mineID)], others: [], now: t0)
         XCTAssertEqual(line, "Keeping awake — indefinite")
     }
 
     func testStatusDistinguishesSessionsYouCannotStop() {
-        let line = menuStatusLine(mine: [session(.indefinite, owner: mineID)],
+        let line = menuStatusLine(yours: [session(.indefinite, owner: mineID)],
                                   others: [session(.indefinite, owner: theirsID)], now: t0)
         XCTAssertTrue(line.contains("2 sessions"))
         XCTAssertTrue(line.contains("1 yours"), "the menu must say how many are actually yours: \(line)")
 
-        let noneMine = menuStatusLine(mine: [], others: [session(.indefinite, owner: theirsID),
+        let noneMine = menuStatusLine(yours: [], others: [session(.indefinite, owner: theirsID),
                                                         session(.indefinite, owner: theirsID)], now: t0)
         XCTAssertTrue(noneMine.contains("none yours"), noneMine)
     }
 
     func testTheStopLabelLeadsWithTheVerb() {
-        for label in [menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfMine: true, now: t0),
-                      menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfMine: false, now: t0)] {
+        for label in [menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfYours: true, now: t0),
+                      menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfYours: false, now: t0)] {
             XCTAssertTrue(label.hasPrefix("Stop"), "\(label) must read as an action, not a status")
         }
     }
 
     func testASingleSessionNeedsNoDescriptionQuotedBackAtYou() {
         XCTAssertEqual(
-            menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfMine: true, now: t0),
+            menuStopLabel(for: session(.indefinite, owner: mineID), isOnlyOneOfYours: true, now: t0),
             "Stop keeping awake")
     }
 
     func testSeveralSessionsAreDistinguishableFromEachOther() {
         let timed = session(.duration(until: t0.addingTimeInterval(3600)), owner: mineID)
-        let label = menuStopLabel(for: timed, isOnlyOneOfMine: false, now: t0)
+        let label = menuStopLabel(for: timed, isOnlyOneOfYours: false, now: t0)
         XCTAssertNotEqual(label, "Stop keeping awake")
         XCTAssertTrue(label.contains("1h"), label)
     }
@@ -722,25 +722,76 @@ final class MenuSessionGroupingTests: XCTestCase {
                        "another account's trigger is not this user's automatic session: \(row(theirs))")
     }
 
-    /// The regression guard. The app's own sessions are still the only ones with
-    /// a stop button, because `SessionIsolation` still forbids the rest — and
-    /// this asserts it against that authority rather than against a second
-    /// hand-written list, so the menu cannot come to disagree with the daemon
-    /// about what it is allowed to do.
-    func testOnlyTheAppsOwnSessionsAreStoppable() {
+    /// The regression guard, asserted against the daemon's own authority rather
+    /// than against a second hand-written list, so the menu cannot come to
+    /// disagree with the daemon about what it is allowed to do. A row with a
+    /// button the daemon refuses is a button that silently does nothing; a
+    /// session the daemon would end with no row is a capability nobody can
+    /// reach.
+    ///
+    /// **It was `testOnlyTheAppsOwnSessionsAreStoppable`, welded to
+    /// `sessionsToStop(all: false)`, and both halves of that had to change in
+    /// Plan 8 Task 5.** Two groups have buttons now, not one — spec §4 gained
+    /// its single exception — and the authority is `authorize`, not the sweep:
+    /// the sweep deliberately did *not* widen, so welding to it would now
+    /// assert the opposite of the intended behaviour.
+    func testTheRowsWithAStopButtonAreExactlyWhatTheDaemonWouldLetThisAppStop() {
         let all = [
             session(owner: app(me), ownerUID: me),
             session(owner: agent(me), ownerUID: me, origin: .trigger),
-            session(owner: cli(me), ownerUID: me),
+            session(owner: agent(me), ownerUID: me, origin: .manual),
+            session(owner: cli(me), ownerUID: me, origin: .trigger),
             session(owner: ClientID(rawValue: "shortcuts-\(me)"), ownerUID: me),
             session(owner: app(someoneElse), ownerUID: someoneElse),
+            session(owner: agent(someoneElse), ownerUID: someoneElse, origin: .trigger),
         ]
-        let stoppableInTheMenu = all.filter { menuSessionGroup(for: $0, userID: me) == .thisApp }
-        XCTAssertEqual(stoppableInTheMenu.map(\.id),
-                       SessionIsolation.sessionsToStop(all: false, requestedBy: app(me), among: all),
+        let clickable: Set<MenuSessionGroup> = [.thisApp, .yoursAutomatic]
+        let stoppableInTheMenu = all.filter { clickable.contains(menuSessionGroup(for: $0, userID: me)) }
+        let stoppableByTheDaemon = all.filter {
+            SessionIsolation.authorize(sessionID: $0.id, action: .stop, requestedBy: app(me),
+                                       uid: me, role: .app, among: all) == .authorized
+        }
+        XCTAssertEqual(stoppableInTheMenu.map(\.id), stoppableByTheDaemon.map(\.id),
                        "the rows with a stop button must be exactly the sessions the daemon would "
                        + "let this app stop")
-        XCTAssertEqual(stoppableInTheMenu.count, 1)
+        XCTAssertEqual(stoppableInTheMenu.count, 2, "this app's own session, and this user's trigger")
+    }
+
+    /// The other half of the same weld, and the reason the sweep row has its
+    /// own label: what "Stop all started from this menu" ends is a **strict
+    /// subset** of the rows that have buttons.
+    ///
+    /// Stated as a subset relation rather than as a literal list, so it stays
+    /// true if `sessionsToStop` is ever widened deliberately — and fails loudly
+    /// if a row is ever given a button the sweep would silently sweep past
+    /// without the label being reconsidered.
+    func testTheSweepEndsFewerSessionsThanTheMenuOffersToStop() {
+        let all = [
+            session(owner: app(me), ownerUID: me),
+            session(owner: agent(me), ownerUID: me, origin: .trigger),
+        ]
+        let swept = Set(SessionIsolation.sessionsToStop(all: false, requestedBy: app(me), among: all))
+        let clickable: Set<MenuSessionGroup> = [.thisApp, .yoursAutomatic]
+        let withButtons = Set(all.filter { clickable.contains(menuSessionGroup(for: $0, userID: me)) }
+            .map(\.id))
+        XCTAssertTrue(swept.isSubset(of: withButtons),
+                      "the sweep must never end something the menu does not even offer to stop")
+        XCTAssertEqual(swept, Set([all[0].id]),
+                       "and today it is exactly this app's own sessions — see "
+                       + "SessionIsolation.sessionsToStop for why it was not widened")
+    }
+
+    /// The sweep row must not claim the whole of "yours" while ending part of
+    /// it. It said "Stop all mine" when those were the same set.
+    func testTheSweepRowNamesItsScopeRatherThanClaimingAllOfYours() {
+        XCTAssertFalse(menuStopAllLabel.lowercased().contains("mine"), menuStopAllLabel)
+        XCTAssertFalse(menuStopAllLabel.lowercased().contains("yours"), menuStopAllLabel)
+        XCTAssertTrue(menuStopAllLabel.lowercased().contains("menu"),
+                      "it has to say where the sessions it ends came from: \(menuStopAllLabel)")
+        // Same set, so the same words: a user who reads one and presses the
+        // other must not be surprised.
+        XCTAssertTrue(HotKeyAction.stopAppSessions.label.lowercased().contains("started from the menu"),
+                      HotKeyAction.stopAppSessions.label)
     }
 
     // MARK: - One rule, read in two places
@@ -1015,10 +1066,10 @@ final class WakeModeMenuCopyTests: XCTestCase {
     /// prime the meaning. The multi-session form is exempt: its parenthetical
     /// follows a quoted description, which a tag can only qualify.
     func testTheStopButtonCarriesItsSessionSMode() {
-        let plain = menuStopLabel(for: session(.clamshell), isOnlyOneOfMine: true, now: t0)
+        let plain = menuStopLabel(for: session(.clamshell), isOnlyOneOfYours: true, now: t0)
         XCTAssertEqual(plain, "Stop keeping awake", "the default mode adds nothing")
 
-        let tagged = menuStopLabel(for: session(.system), isOnlyOneOfMine: true, now: t0)
+        let tagged = menuStopLabel(for: session(.system), isOnlyOneOfYours: true, now: t0)
         XCTAssertEqual(tagged, "Stop this session" + menuWakeModeSuffix(.system),
                        "a session of your own can be non-default now that Settings can choose")
         XCTAssertTrue(tagged.contains("lid"), tagged)
@@ -1031,7 +1082,7 @@ final class WakeModeMenuCopyTests: XCTestCase {
     /// needs is the quoted description — so this pins that the fix above did
     /// not spread to a row that never had the problem.
     func testTheMultiSessionStopLabelStillQualifiesItsQuotedDescription() {
-        let tagged = menuStopLabel(for: session(.system), isOnlyOneOfMine: false, now: t0)
+        let tagged = menuStopLabel(for: session(.system), isOnlyOneOfYours: false, now: t0)
         XCTAssertEqual(tagged, "Stop “indefinite”" + menuWakeModeSuffix(.system))
     }
 
@@ -1086,7 +1137,7 @@ final class WakeModeMenuCopyTests: XCTestCase {
                      "a live clamshell session keeps the machine awake lid-shut whoever owns it")
         // …and the tagged row is still tagged, because it is a true statement
         // about that session's own contribution, not about the machine.
-        XCTAssertTrue(menuStopLabel(for: mixed[0], isOnlyOneOfMine: true, now: t0).contains("lid"))
+        XCTAssertTrue(menuStopLabel(for: mixed[0], isOnlyOneOfYours: true, now: t0).contains("lid"))
     }
 
     /// Exhaustive over every combination of up to three modes rather than the
@@ -1509,8 +1560,8 @@ final class MenuDiskAxisCopyTests: XCTestCase {
                                       owner: ClientID(rawValue: "app-501"), ownerUID: 501,
                                       persistence: .clientBound, origin: .manual, startedAt: t0,
                                       triggerID: nil, wakeMode: mode, keepsDisksAwake: disks)
-                let rows = [menuStopLabel(for: session, isOnlyOneOfMine: true, now: t0),
-                            menuStopLabel(for: session, isOnlyOneOfMine: false, now: t0)]
+                let rows = [menuStopLabel(for: session, isOnlyOneOfYours: true, now: t0),
+                            menuStopLabel(for: session, isOnlyOneOfYours: false, now: t0)]
                     + MenuSessionGroup.allCases.map {
                         menuSessionLabel(for: session, group: $0, now: t0)
                     }

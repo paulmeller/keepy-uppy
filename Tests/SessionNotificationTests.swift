@@ -223,9 +223,9 @@ final class SessionNotificationTrackerTests: XCTestCase {
         XCTAssertEqual(tracker.record(current: [], now: t1), [])
     }
 
-    /// "Stop all mine" stops several at once, and `stopAllSessions(all:)`
-    /// replies with a count rather than with ids — so the call site snapshots
-    /// the ids first, and every one of them is covered.
+    /// The menu's sweep row (`menuStopAllLabel`) stops several at once, and
+    /// `stopAllSessions(all:)` replies with a count rather than with ids — so
+    /// the call site snapshots the ids first, and every one of them is covered.
     func testStoppingSeveralAtOnceFromThisAppIsNotAnnounced() {
         var tracker = self.tracker()
         let a = session()

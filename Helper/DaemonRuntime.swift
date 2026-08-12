@@ -214,15 +214,26 @@ final class DaemonRuntime {
         }
     }
 
-    /// Ends a single session, but only if `requestedBy` owns it (Task 10
-    /// isolation fix: this used to take a bare UUID and end any session
-    /// regardless of owner). The authorization check and the mutation run
-    /// inside the same `queue.sync`, so there is no window between "checked
-    /// ownership" and "removed the session" for a concurrent call to widen.
+    /// Ends a single session, but only if `requestedBy` owns it — or if
+    /// `SessionIsolation`'s one amendment applies (spec §4: the app may stop
+    /// its own user's trigger-started sessions). Task 10 isolation fix: this
+    /// used to take a bare UUID and end any session regardless of owner.
+    ///
+    /// The authorization check and the mutation run inside the same
+    /// `queue.sync`, so there is no window between "checked ownership" and
+    /// "removed the session" for a concurrent call to widen.
+    ///
+    /// `uid` and `role` are the peer's other two server-established facts, and
+    /// they are passed rather than re-derived here for the same reason `owner`
+    /// is stamped at accept time: identity is a property of the connection, and
+    /// nothing this far in can re-establish it without racing.
     @discardableResult
-    func stopSession(id: UUID, requestedBy: ClientID) -> SessionIsolation.Authorization {
+    func stopSession(id: UUID, requestedBy: ClientID, uid: UInt32,
+                     role: ClientRole) -> SessionIsolation.Authorization {
         queue.sync {
-            let authorization = SessionIsolation.authorize(sessionID: id, requestedBy: requestedBy, among: sessions.sessions)
+            let authorization = SessionIsolation.authorize(sessionID: id, action: .stop,
+                                                           requestedBy: requestedBy, uid: uid,
+                                                           role: role, among: sessions.sessions)
             if authorization == .authorized {
                 _ = sessions.apply(.stop(id: id), now: Date())
                 _ = applyLocked()
@@ -311,15 +322,24 @@ final class DaemonRuntime {
         }
     }
 
-    /// Renews a lease session's deadline. Ownership-checked exactly like
-    /// `stopSession`, for the same reason: a lease belongs to the client
-    /// that started it.
+    /// Renews a lease session's deadline. Ownership-checked like `stopSession`,
+    /// for the same reason: a lease belongs to the client that started it.
+    ///
+    /// **Not "exactly" like it any more.** The `action: .renew` argument is
+    /// what keeps spec §4's amendment off this verb: the app may end a session
+    /// this user's trigger rules started, and may not extend one. Stopping
+    /// moves the Mac towards being allowed to sleep; renewing holds it awake
+    /// for longer on another client's behalf, which nothing in that exception
+    /// argues for.
     @discardableResult
-    func renewLease(id: UUID, until: Date, requestedBy: ClientID) -> LeaseRenewalResult {
+    func renewLease(id: UUID, until: Date, requestedBy: ClientID, uid: UInt32,
+                    role: ClientRole) -> LeaseRenewalResult {
         queue.sync {
             let now = Date()
             _ = sessions.apply(.tick, now: now)
-            let authorization = SessionIsolation.authorize(sessionID: id, requestedBy: requestedBy, among: sessions.sessions)
+            let authorization = SessionIsolation.authorize(sessionID: id, action: .renew,
+                                                           requestedBy: requestedBy, uid: uid,
+                                                           role: role, among: sessions.sessions)
             switch authorization {
             case .notFound: return .notFound
             case .forbidden: return .forbidden

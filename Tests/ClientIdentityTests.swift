@@ -159,16 +159,24 @@ final class StableIdentityStopScopingTests: XCTestCase {
     /// `authorize` (behind `off --session <id>` and `renewLease`) reads the
     /// same identity, so a separate invocation can now target a specific
     /// session it started earlier too.
+    ///
+    /// The second assertion is the cross-role half, and it survived Plan 8
+    /// Task 5 untouched: the app still cannot stop this user's *command-line*
+    /// session. That amendment is `agent-<uid>`-owned trigger sessions and
+    /// nothing else — `origin` is `.manual` here, and the owner is the CLI on
+    /// both counts.
     func testASeparateInvocationIsAuthorizedOnItsEarlierSession() {
         let started = serverStartedSession(role: .cli, userID: uid)
         XCTAssertEqual(
-            SessionIsolation.authorize(sessionID: started.id,
+            SessionIsolation.authorize(sessionID: started.id, action: .stop,
                                        requestedBy: ClientRole.cli.clientID(forUserID: uid),
+                                       uid: uid, role: .cli,
                                        among: [started]),
             .authorized)
         XCTAssertEqual(
-            SessionIsolation.authorize(sessionID: started.id,
+            SessionIsolation.authorize(sessionID: started.id, action: .stop,
                                        requestedBy: ClientRole.app.clientID(forUserID: uid),
+                                       uid: uid, role: .app,
                                        among: [started]),
             .forbidden)
     }

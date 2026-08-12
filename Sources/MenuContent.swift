@@ -64,33 +64,74 @@ struct MenuContent: View {
         return daemon.sessions.map { ($0, menuSessionGroup(for: $0, userID: userID)) }
     }
 
-    /// The sessions this app started, which `SessionIsolation` makes the only
-    /// ones it can stop.
+    /// The sessions this app started itself — and, separately from being
+    /// stoppable, the exact set `stopAllSessions(all: false)` sweeps.
     private var mine: [Session] { grouped.filter { $0.group == .thisApp }.map(\.session) }
 
-    /// Everything else — this user's own automatic and command-line sessions
-    /// and another account's alike. They share a list because they share a
-    /// fate: shown, never clickable. What they no longer share is a *label*.
+    /// This user's own trigger-started sessions: **stoppable one row at a time
+    /// as of Plan 8 Task 5**, which is spec §4's single exception to "every
+    /// client may stop only its own sessions" (`SessionIsolation.authorize`).
     ///
-    /// `menuStatusLine`'s "yours" still counts `mine` only, so a user with a
-    /// trigger session and an app session reads "2 sessions, 1 yours". That is
-    /// the count of what the menu can act on rather than of what belongs to
-    /// them.
+    /// A separate list from `mine` rather than folded into it, because the two
+    /// are not interchangeable anywhere the daemon is concerned: these are
+    /// `agent-<uid>`, the sweep row below will not touch them, and neither will
+    /// the `.stopAppSessions` hot key.
+    private var yoursAutomatic: [Session] {
+        grouped.filter { $0.group == .yoursAutomatic }.map(\.session)
+    }
+
+    /// Every row that has a Stop button, in the order the menu draws them —
+    /// and therefore what `menuStatusLine` calls "yours".
     ///
-    /// **Asked again and deliberately left alone.** "Yours" earns its meaning
-    /// from the stop buttons directly beneath it: the number says how many of
-    /// those rows you can do something about, and `SessionIsolation.authorize`
-    /// is what decides that — not this view. Widening it to "belongs to your
-    /// account" would put a count above a list where most of the counted rows
-    /// have no button, which is the same mismatch in the other direction.
+    /// **This is the answer to the question Plan 7 Task 3 raised and Plan 8
+    /// Task 4 deferred here on purpose.** "Yours" earns its meaning from the
+    /// stop buttons directly beneath it: the number says how many of those rows
+    /// you can do something about, and `SessionIsolation.authorize` is what
+    /// decides that — not this view. Task 4 declined to widen the count while
+    /// the authorization still said `app-<uid>` alone, precisely so that the
+    /// count and the buttons would change on the same day. This is that day.
     ///
-    /// It is the authorization that has to move first, and Plan 8's Task 5 moves
-    /// it: once this app may stop its own user's trigger-started sessions, those
-    /// rows gain buttons and "yours" should count them the same day, in the same
-    /// change. Doing it here would leave the sentence true for one release and
-    /// wrong in whichever direction Task 5 lands.
+    /// It is still not "belongs to your account": this user's `keepy-uppy on`
+    /// session is theirs and has no button, so counting it would put a number
+    /// above a list where the counted row cannot be acted on.
+    private var stoppable: [Session] { mine + yoursAutomatic }
+
+    /// Everything else — this user's command-line sessions, this user's
+    /// sessions from a client this build cannot name, and another account's.
+    /// They share a list because they share a fate: shown, never clickable,
+    /// because `SessionIsolation` refuses all three and a button that silently
+    /// does nothing is worse than a line of text. What they do not share is a
+    /// *label*; `menuSessionLabel` gives each its own, and records there which
+    /// groups these are and why each is still refused.
     private var others: [(session: Session, group: MenuSessionGroup)] {
-        grouped.filter { $0.group != .thisApp }
+        grouped.filter { $0.group != .thisApp && $0.group != .yoursAutomatic }
+    }
+
+    /// One definition of what a Stop row *is*, used by both loops below.
+    ///
+    /// Written once rather than twice because of the first line in it: the
+    /// notifier must be told **before** the XPC call and **synchronously**, or
+    /// the commonest way for the last session to end — this very click —
+    /// produces a banner explaining the click back to the person who just made
+    /// it (`SessionNotifications`, the `requestedStops` window). Two copies of
+    /// this button is one copy that will one day be written without that line,
+    /// and the symptom would be a notification bug in the one path nobody
+    /// re-tests.
+    ///
+    /// `menuAutomaticSuffix` is appended for both kinds of row, so a trigger
+    /// session's Stop button reads `Stop “indefinite” — started automatically`:
+    /// the same provenance clause the unclickable row carried before it became
+    /// clickable, so nothing about *why* the session exists is lost by gaining
+    /// a button.
+    @ViewBuilder
+    private func stopRow(for session: Session, now: Date) -> some View {
+        Button {
+            notifier.appWillStop(sessionIDs: [session.id])
+            Task { await daemon.stopSession(session.id) }
+        } label: {
+            Text(menuStopLabel(for: session, isOnlyOneOfYours: stoppable.count == 1, now: now)
+                 + menuAutomaticSuffix(for: session))
+        }
     }
 
     var body: some View {
@@ -103,7 +144,7 @@ struct MenuContent: View {
         if !daemon.isConnected {
             Text("Not connected to Keepy Uppy daemon")
         } else {
-            Text(menuStatusLine(mine: mine, others: others.map(\.session), now: now))
+            Text(menuStatusLine(yours: stoppable, others: others.map(\.session), now: now))
 
             // The status region's second line, and the only place the menu
             // speaks about the machine rather than about a session. It is
@@ -129,11 +170,13 @@ struct MenuContent: View {
         if daemon.isConnected && !daemon.sessions.isEmpty {
             Divider()
 
-            // The suffix here is still empty in every case anyone can currently
-            // produce — this app sends `origin: .manual` — and it is kept
-            // because `DaemonConnection.startSession` takes the origin as a
-            // parameter, so an app-started automatic session is one argument
-            // away. Its real caller is the automatic row below.
+            // `stopRow`'s `menuAutomaticSuffix` is still empty for every row in
+            // *this* loop, in every case anyone can currently produce — this app
+            // sends `origin: .manual` — and it is kept because
+            // `DaemonConnection.startSession` takes the origin as a parameter,
+            // so an app-started automatic session is one argument away. Its real
+            // caller is the `yoursAutomatic` loop below, which is now a loop of
+            // buttons rather than of labels.
             //
             // It is `origin` alone, and not the `startedByTrigger(forUserID:)`
             // rule the menu and the notifier share, *because* these rows are
@@ -143,43 +186,47 @@ struct MenuContent: View {
             // only a binary meeting `SigningRequirement` is admitted as
             // `app-<uid>`, so this is us reading our own session's origin, not
             // taking another client's word for it.
-            ForEach(mine) { session in
-                Button {
-                    // Marked BEFORE the call, and synchronously, so no poll can
-                    // observe the ending before the mark exists. Without it the
-                    // commonest way for the last session to end — this very
-                    // click — produces a banner explaining the click back to
-                    // the person who just made it.
-                    notifier.appWillStop(sessionIDs: [session.id])
-                    Task { await daemon.stopSession(session.id) }
-                } label: {
-                    Text(menuStopLabel(for: session, isOnlyOneOfMine: mine.count == 1, now: now)
-                         + menuAutomaticSuffix(for: session))
-                }
-            }
+            ForEach(mine) { session in stopRow(for: session, now: now) }
 
             // Only worth offering once there is more than one to sweep; with a
             // single session it would just duplicate the line above it, which
             // is how the old menu ended up with two different stop buttons.
+            //
+            // The condition stays `mine.count`, not `stoppable.count`: this row
+            // ends `mine` and nothing else, so with one app session and three
+            // trigger sessions it would still be a duplicate of the single row
+            // above it.
             if mine.count > 1 {
-                Button("Stop all mine") {
+                Button(menuStopAllLabel) {
                     // The ids are snapshotted here because
                     // `stopAllSessions(all:)` replies with a count and not with
                     // ids: after the call there is nothing left to name. `mine`
                     // is exactly the set it will stop — `SessionIsolation`
                     // scopes it to this client's own `ClientID`, which is what
-                    // that group means.
+                    // that group means, and Task 5's amendment deliberately did
+                    // **not** widen the sweep (`SessionIsolation.sessionsToStop`
+                    // carries the argument). Hence the label: `yoursAutomatic`
+                    // below has buttons this row does not press.
                     notifier.appWillStop(sessionIDs: mine.map(\.id))
                     Task { await daemon.stopAllSessions(all: false) }
                 }
             }
 
-            // Shown, never clickable. `stopAllSessions(all: false)` scopes to
-            // this client by design (`SessionIsolation`), so offering to stop
-            // these would be a button that silently does nothing — the same
-            // failure the old "Stop All" label had. That is still true of this
-            // user's own trigger-started session, which the app can now *name*
-            // but still has no authority to end.
+            // Clickable since Plan 8 Task 5, one at a time — spec §4's single
+            // exception, enforced by `SessionIsolation.authorize` in the daemon
+            // and drawn here. They come after the sweep row rather than being
+            // mixed in above it because the sweep does not touch them, and a
+            // "stop all" sitting under rows it will not stop is the kind of
+            // near-miss this menu was rebuilt to remove.
+            ForEach(yoursAutomatic) { session in stopRow(for: session, now: now) }
+
+            // Shown, never clickable — this user's command-line sessions, this
+            // user's sessions from a client this build cannot name, and another
+            // account's. `SessionIsolation` refuses every stop of all three
+            // (the amendment covers `agent-<uid>` trigger sessions of this user
+            // and nothing else), so offering a button here would be a button
+            // that silently does nothing — the same failure the old "Stop All"
+            // label had.
             //
             // One flat list in the daemon's own order, not three sections: the
             // rows differ by a clause each, and grouping them would be
