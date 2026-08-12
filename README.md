@@ -23,12 +23,18 @@ clamshell, on battery, with nothing plugged in. That takes a privileged daemon
 and a system-level power setting, which is exactly what Keepy Uppy ships.
 
 **It's a command line first, an app second.** The daemon is the product. The
-menu bar is optional. Everything works over SSH, from a script, from CI, from a
-Shortcut — because the CLI talks to the same daemon the UI does.
+menu bar is optional. Every session, every guard and every trigger is reachable
+from a script, from CI, from a Shortcut and over SSH — because the CLI talks to
+the same daemon the UI does.
 
 ```sh
-ssh mac-mini 'keepy-uppy on --for 8h'
+ssh mac-mini 'zsh -lc "keepy-uppy on --for 8h"'
 ```
+
+The login shell isn't decoration. A command sent over `ssh` runs in a non-login
+shell whose `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`, so a bare `keepy-uppy`
+isn't found there no matter where you installed it. Ask for a login shell, as
+above, or give the full path to the binary inside the app bundle.
 
 **It knows when to stop.** Most keep-awake tools do what you tell them, right
 up until your laptop is at 96°C in a backpack with 3% battery. Keepy Uppy has
@@ -74,6 +80,15 @@ Headless box that'll never run the app?
 ```sh
 "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" setup
 ```
+
+To type `keepy-uppy` instead of all that, Settings → CLI & Advanced links it
+into `/usr/local/bin`. That directory is root-owned on a stock Mac, so the
+button usually can't do it for you — it hands you the one `sudo` command that
+can, with the space in "Keepy Uppy.app" already quoted, for you to read and
+paste yourself. Every verb works through the link except `setup` and `reset`:
+those two have to find the app bundle they were started from, a link on your
+`PATH` isn't inside one, and they refuse there rather than report an uninstall
+that didn't happen.
 
 ## The whole CLI
 
@@ -136,7 +151,7 @@ and the menu bar tags the ones that aren't holding the lid.
 
 Pick the default for a headless box or a docked laptop you'll shut; pick a flag
 when the Mac is open in front of you and you'd rather it behaved normally in
-every other respect. Settings → General picks the mode for sessions you start
+every other respect. Settings → Display picks the mode for sessions you start
 from the menu bar.
 
 One more flag, on an axis of its own — it combines with any wake mode and any
@@ -159,9 +174,9 @@ Folders permission for a feature whose whole point is running while you're
 away. So the flag means disks attached to this Mac, and nothing here pretends
 otherwise.
 
-The same switch sits under the mode picker in Settings, for the sessions you
-start from the menu. A trigger's session always keeps this Mac awake with the
-lid closed and never asks for disks, so a rule you saved before either axis
+The same switch sits under the mode picker on the Display tab, for the sessions
+you start from the menu. A trigger's session always keeps this Mac awake with
+the lid closed and never asks for disks, so a rule you saved before either axis
 existed still does exactly what it always did.
 
 **It can't stop your Mac asking for a password.** macOS only lets a
@@ -210,18 +225,56 @@ same "while I'm at the office" intent by address block instead, with no
 permission at all, and it keeps working when you dock to Ethernet, which a
 network name never could.
 
-Which leaves something worth saying out loud: **Keepy Uppy asks for no privacy
-permissions.** No Location, no Bluetooth, no Accessibility, no prompts to
-dismiss and nothing to grant per-trigger. The single thing macOS does ask you
-to approve is the pair of background Login Items, once, when you enable it.
+Which leaves something worth saying out loud: **nothing in Keepy Uppy needs a
+privacy permission to work.** No Location, no Bluetooth, no Accessibility,
+nothing to grant per-trigger — every trigger, every session and the whole
+command line run without a single one. Exactly one optional feature asks for
+anything: switching on a notification is what raises macOS's notification
+prompt, at that moment and nowhere else, and saying no to it costs you the
+notifications and nothing else. The one thing macOS asks you to approve to
+*use* Keepy Uppy is still the pair of background Login Items, once, when you
+enable it.
 
 *Six of those nine conditions are on `main` only — the current download has
 three. See [Status](#status).*
 
+## The menu bar, if you want one
+
+The app is optional, and it's where you watch what's running. The menu lists
+every live session, and each row says where its session came from: you started
+it, one of your own rules started it automatically, it came from a terminal, or
+it belongs to another account on this Mac.
+
+**It can show you a session it can't stop.** This app only ends sessions it
+started itself — the daemon scopes every stop to the client that asked, which
+is what stops one client ending another's work — so a session your own trigger
+started has no Stop button, and neither does one from `keepy-uppy on`. End
+those with `keepy-uppy off --all`, or let the condition or the duration end
+them. Switching a rule off doesn't end a session it has already started.
+
+**Two notifications, both off until you turn one on:** when nothing of yours is
+keeping this Mac awake any more, and when a trigger starts a session. The app
+is what announces them, so a session that ends while it's quit ends without a
+word. Stopping a session yourself in the menu is never announced — you were
+there — but stopping one with `keepy-uppy off` in a terminal is, because from
+the app that looks exactly like a session expiring. And no notification ever
+says *why* a session ended: only the daemon knows that, and it doesn't tell
+anyone yet.
+
+**Two global keyboard shortcuts**, needing no permission of any kind: one
+starts the session the menu's first row starts, the other stops the sessions
+you started from the menu — only those, so a trigger's session and a
+`keepy-uppy on` session keep running. macOS won't tell an app that another app
+already owns a combination, so a shortcut that never fires is almost always one
+that's already taken; pick another.
+
+*Notifications, the shortcuts and the Install button are on `main` only — the
+current download has none of them. See [Status](#status).*
+
 ## Safety, in detail
 
-Configurable in Settings → Safety, and enforced by the daemon regardless of
-which client asked for the session:
+Configurable in Settings → Safety & Guards, and enforced by the daemon
+regardless of which client asked for the session:
 
 - **Overheating** — ends sessions once the Mac is genuinely throttling.
   Tighter with the lid closed.
@@ -274,7 +327,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **580 unit tests**.
+by **791 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -300,9 +353,9 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 580 tests on `main`, and
+**v0.1 — new, and moving fast.** Signed and notarized, 791 tests on `main`, and
 a privilege boundary that's been through three adversarial review passes. What
-it hasn't had yet is months on other people's hardware, and four claims above
+it hasn't had yet is months on other people's hardware, and six claims above
 have never been watched happen on a real machine:
 
 - closed-lid behaviour over a long job — the headline claim;
@@ -310,14 +363,20 @@ have never been watched happen on a real machine:
 - a VPN going *down* under a live session (there was exactly one VPN on the Mac
   this was written on and it was already up; planting a fake one needs root);
 - a USB device appearing at all — nothing is plugged into that Mac, so the
-  enumeration was verified against zero devices.
+  enumeration was verified against zero devices;
+- a keyboard shortcut arriving: from inside the process, a registration that
+  works and one the window server will never deliver to are the same `noErr`,
+  so only a human pressing the key settles it;
+- a notification appearing on screen — nothing here has ever asked for the
+  grant that would let one.
 
-All four are designed for and covered as pure logic, which is not the same
-thing. [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the
-list of what only hardware can settle.
+All six are designed for and covered as far as a test process can reach, which
+is not the same thing.
+[`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
+what only hardware can settle.
 
 **Most of this page is `main`, not the download.** The build on
-[Releases](../../releases) is **v0.1.0**, and `main` is more than fifty commits
+[Releases](../../releases) is **v0.1.0**, and `main` is more than sixty commits
 past it — its own notes say 182 tests. It knows `--for`, `--until`,
 `--while-app` and three trigger conditions, and that is the lot: no
 `--while-process` and no `keepy-uppy finished`, so none of the AI-coding-agent
@@ -325,14 +384,20 @@ wiring above; no wake modes, no `--keep-disks-awake`, and neither of the
 Settings controls that go with them; and none of
 `--while-display`, `--while-ac-power`, `--while-cpu-busy`, `--while-volume`,
 `--while-subnet`, `--while-vpn` or `--while-usb`, nor the six trigger
-conditions that arrived with them. Nothing since has been notarized into a
-release, so build it yourself if you want any of it now.
+conditions that arrived with them. Its Settings window has three tabs rather
+than five, and none of the app's newer surfaces: no notifications, no keyboard
+shortcuts, and no button to put `keepy-uppy` on your `PATH`. Nothing since has
+been notarized into a release, so build it yourself if you want any of it now.
 
 If something misbehaves, an issue with the daemon log is genuinely useful:
 
 ```sh
 log show --predicate 'subsystem BEGINSWITH "au.com.workwireless.keepy-uppy"'
 ```
+
+Settings → CLI & Advanced has a Copy button for that command, with the app's
+version and the running daemon's beside it — the pair worth quoting in the
+issue, since they can legitimately differ until the Mac is restarted.
 
 ## License
 

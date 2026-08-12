@@ -26,21 +26,25 @@ predates the detached-session sub-cap that replaced it.
 - [ ] Daemon and agent both register and appear as "Keepy Uppy" in Login Items
 - [ ] Approving once is enough; no later prompts
 
-**Settings → General (the default wake mode):**
+**Settings → Display (the default wake mode):**
+
+Plan 7 moved this picker — and Plan 6's disk toggle beneath it — out of General
+and onto a Display tab of its own. The items below are unchanged apart from
+where you go to find the control.
 
 The picker's *copy* is pinned by `SessionDisplayTests`; how it lays out, and
 what changing it does to a menu and to a session already running, is not
 observable from any test.
 
-- [ ] Under "Default session" there is a "Keeps this Mac awake" picker offering exactly three options — "Even with the lid closed", "Only with the lid open", "Only with the lid open, screen on" — and the footer text under it changes as you move between them
+- [ ] The Display tab leads with a "Keeps this Mac awake" picker offering exactly three options — "Even with the lid closed", "Only with the lid open", "Only with the lid open, screen on" — and the footer text under it changes as you move between them
 - [ ] Both footer paragraphs (the changing explanation, then "Sessions you start from the menu from now on use this…") wrap and stay readable at the Settings window's default width with the longest option selected — they are the two longest strings in the window and neither is truncated or clipped
 - [ ] Pick "Only with the lid open", open the menu: every "Keep awake …" row now ends "(lid open only)". Start one, and its stop row reads "Stop this session (lid open only)" with the machine-wide line "Closing the lid will still let this Mac sleep." above it
 - [ ] Change the picker back to "Even with the lid closed" while that session is still running: the running session's tag and the lid line do **not** change (a mode is fixed when the session starts — that is exactly what "from now on" in the footer is warning about), and the next session started from the menu has no tag
 - [ ] With the picker on "Only with the lid open", let a **trigger** fire: the session it starts is still lid-safe, so the "Closing the lid…" line is absent while it runs. Triggers deliberately ignore this preference
 - [ ] The longest rows this menu can produce are not truncated: with two of your own "Only with the lid open, screen on" sessions live, a stop row reads `Stop “7h 59m left” (screen on, lid open only)`, and a `keepy-uppy on --while-app com.apple.dt.Xcode --keep-display-awake` session alongside them reads `While Xcode is running — started from the command line (screen on, lid open only)`
 
-**Settings → Safety:**
-- [ ] Settings → Safety: lowering the battery cutoff and confirming (via `keepy-uppy status`) the daemon picks it up within ~5s without restarting anything
+**Settings → Safety & Guards:**
+- [ ] Settings → Safety & Guards: lowering the battery cutoff and confirming (via `keepy-uppy status`) the daemon picks it up within ~5s without restarting anything
 
 **Settings → Triggers:**
 
@@ -139,7 +143,7 @@ and it covers Ethernet on the same network as well.
 - [ ] Add-trigger sheet → "This Mac is on a network": the footnote says plainly that this is how a Wi-Fi network is named here, and why it is matched by address block rather than by name — a user looking for a Wi-Fi trigger must not be left hunting for one
 - [ ] While on Wi-Fi, "This Mac…" offers the block that Mac's Wi-Fi address sits in, and a rule built from it fires — i.e. the Wi-Fi case really is served by this condition
 - [ ] **Nothing, anywhere in the app, ever raises a Location Services prompt** — including opening the Add sheet on this row, saving a network rule, and letting the agent run with one live
-- [ ] The broader version of that, because the README now promises it: save one rule of **every** condition kind, leave the agent running for an hour with an external drive and a USB device attached, and confirm no privacy dialog of any kind appears (Location, Bluetooth, Files and Folders, removable volumes, Accessibility). Then open System Settings → Privacy & Security and confirm Keepy Uppy appears under nothing but Login Items — a grant that was never asked for still shows up there once something triggers it
+- [ ] The broader version of that, because the README now promises it: save one rule of **every** condition kind, leave the agent running for an hour with an external drive and a USB device attached, and confirm no privacy dialog of any kind appears (Location, Bluetooth, Files and Folders, removable volumes, Accessibility). Then open System Settings → Privacy & Security and confirm Keepy Uppy appears under nothing but Login Items — a grant that was never asked for still shows up there once something triggers it. Run this with both notification toggles left at their default of **off**: switching one on is the one thing in the app that raises a prompt, and the README's claim is scoped to exactly that exception
 - [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field
@@ -216,7 +220,44 @@ here, and running it is what finishes `wakeModeSettingsExplanation`'s copy for
 - [ ] An external drive that would otherwise spin down stays spun up through a long idle period with such a session live (an enclosure with its own firmware timer may still spin down — that is the documented limitation, not a bug)
 - [ ] A network share is NOT kept alive, and the README says so — this item exists to confirm we did not quietly ship a half-working touch
 - [ ] With a `--keep-disks-awake` session live, `keepy-uppy status --json` still prints exactly `{"keepingAwake": true}` — a script written before this plan must not start finding a new field, and `sessions` is where the axis is reported (`wake=…; attached disks held awake`)
-- [ ] Settings → General's "Keep attached disks awake" switch is what a menu-started session uses, and the menu's start rows carry `(disks stay awake)` while it is on — a live session's own row deliberately does not, because the assertion is machine-wide and `pmset -g assertions` is where that truth lives
+- [ ] Settings → Display's "Keep attached disks awake" switch is what a menu-started session uses, and the menu's start rows carry `(disks stay awake)` while it is on — a live session's own row deliberately does not, because the assertion is machine-wide and `pmset -g assertions` is where that truth lives
+
+**Plan 7 (tabs, notifications, the CLI on your `PATH`):**
+
+The hot-key and Diagnostics halves of this plan have sections of their own
+below, written by the tasks that built them; nothing here repeats them.
+
+- [ ] Settings shows five tabs — General, Triggers, Display, Safety & Guards, CLI & Advanced — all five labels fully visible at the window's fixed width, and switching tabs does not resize the window sideways
+- [ ] The wake-mode picker is on **Display**, with Plan 6's "Keep attached disks awake" toggle **directly beneath it**, and the picker's scope note ("Sessions you start from the menu from now on use this…") is on the pane and unchanged — a tab called Display must not read as machine-wide lid policy
+- [ ] Every `README.md` pointer to those two controls says **Display**, not General, and no pointer anywhere still says "Settings → Safety"
+- [ ] "On Session End" (script + webhook) is still in **Triggers**, its footer points at Settings → General → Notifications, and the Notifications footer points back at it
+- [ ] Every setting that existed before the restructure still holds the value it had: default session, wake mode, keep-disks-awake, thermal sensitivity, battery cutoff, maximum length, every trigger rule, and the session-end script and webhook. **This is the check that catches a retyped preference key** — nothing should have reverted to a default
+- [ ] Upgrading from a build made before this plan does not lose any of the above
+- [ ] With another account's session live, its menu row reads `… — started by another user` and is not clickable. (Your own automatic and command-line rows are covered under Settings → Triggers above.)
+
+*Notifications.* Both toggles ship **off**, and switching one on is the only
+thing in this product that asks macOS for anything.
+
+- [ ] Notifications, never turned on: no prompt has ever appeared — not at launch, not on first run, not when a session ends
+- [ ] Turning "When nothing of yours is keeping this Mac awake" on raises the system prompt **at that moment** and nowhere else
+- [ ] Allow it, then **stop a session from the menu yourself: nothing is announced.** That is the suppression working, not a bug
+- [ ] …then run `keepy-uppy off` in a Terminal with one session live: the notification **does** arrive, once. Not once per session when two end together, and not at all while another session of yours is still live
+- [ ] Refuse it: the toggle stays on and a reason appears beneath it naming System Settings, with a button that opens the right pane. What it must **not** do is sit there looking as though notifications are working
+- [ ] Grant it afterwards in System Settings: the reason clears without restarting the app (the pane re-reads the grant every time it appears, so closing and reopening Settings is enough)
+- [ ] With the app quit, end a `keepy-uppy` session: nothing is announced, and the README says that is how it works
+- [ ] No notification ever claims to know *why* a session ended — in particular, a session ended by a safety guard produces the same wording as one that expired
+- [ ] "When a trigger starts a session" fires for a rule of yours firing, and not for a session you started yourself
+
+*The CLI on your `PATH`.* That `setup` and `reset` refuse through the link is
+already established end to end against a real symlink
+(`.superpowers/sdd/plan7-task-5-report.md` §3); what follows is the half that
+needs a real `/usr/local/bin` and a real `ssh`.
+
+- [ ] CLI & Advanced → Install: on a Mac where `/usr/local/bin` is writable it installs with no password; where it is not (**which is the stock configuration — `root:wheel drwxr-xr-x`**), the pane hands you an exact command that works when pasted into Terminal, space in "Keepy Uppy.app" and all
+- [ ] After installing, `keepy-uppy status` runs by name in a **new** Terminal window
+- [ ] `ssh mac-mini 'keepy-uppy status'` **fails**, and `ssh mac-mini 'zsh -lc "keepy-uppy status"'` works. This confirms Task 4's PATH finding on real hardware, and confirms the README no longer promises the first form
+- [ ] The pane says "Installed" only while the link really resolves into this app bundle: move the app to the Desktop and it must stop claiming so
+- [ ] Put an unrelated `keepy-uppy` at that path by hand: **no button appears at all** — not Install and not Remove — and the sentence above it says what is there instead. This app only ever removes a link it can prove points at its own binary
 
 **Global keyboard shortcuts (Plan 7):**
 
@@ -258,6 +299,10 @@ is. Nothing else in this file substitutes for it.
 - [ ] Press ⌘W while recording: it is captured as a binding rather than closing
   the Settings window. Press Escape while recording: it cancels and leaves the
   previous binding alone
+- [ ] Press a bare key with no modifier while recording: it is refused with a
+  reason, and the binding that was there before is still there. A shortcut with
+  no modifier would take that key away from every app on this Mac, which is why
+  it is refused rather than warned about
 - [ ] Quit the app and press a bound combination: nothing happens. (The system
   unregisters at process termination — `UnregisterEventHotKey`'s own header
   paragraph — so this confirms the registration died with the process. The
