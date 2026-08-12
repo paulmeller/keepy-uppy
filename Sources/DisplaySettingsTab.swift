@@ -43,7 +43,11 @@ struct DisplaySettingsTab: View {
             // thermal picker already uses: three short phrases can distinguish
             // the options but cannot explain what they cost.
             Section {
-                Picker("Keeps this Mac awake", selection: $defaultWakeModeRaw) {
+                // The literal used to live here. The Add-trigger sheet grew a
+                // picker over the same three modes in Plan 8 Task 10, and two
+                // controls selecting one thing under two labels is how a user
+                // learns they are two settings.
+                Picker(wakeModePickerTitle, selection: $defaultWakeModeRaw) {
                     ForEach(wakeModeSettingsOrder, id: \.self) { mode in
                         Text(wakeModeSettingsTitle(mode)).tag(mode.rawValue)
                     }

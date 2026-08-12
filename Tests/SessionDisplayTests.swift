@@ -103,8 +103,10 @@ final class SessionDisplayTests: XCTestCase {
 /// ("While it's running — keep awake indefinitely") that promised a stop the
 /// system never performs. These pin the semantics, not the prose.
 final class TriggerCopyTests: XCTestCase {
-    private func rule(_ condition: TriggerCondition, _ kind: DefaultSessionKind) -> TriggerRule {
-        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: true)
+    private func rule(_ condition: TriggerCondition, _ kind: DefaultSessionKind,
+                      effect: TriggerEffect? = nil) -> TriggerRule {
+        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: true,
+                    effect: effect ?? TriggerEffect.default(for: condition))
     }
 
     func testConditionTitlesDescribeTheStartingEventNotAnOngoingState() {
@@ -158,8 +160,7 @@ final class TriggerCopyTests: XCTestCase {
     /// create it.
     func testEveryConditionKindHasATitleAndASubtitle() {
         for kind in TriggerConditionKind.allCases {
-            let rule = TriggerRule(id: UUID(), condition: kind.sampleCondition,
-                                   defaultKind: .oneHour, enabled: true)
+            let rule = self.rule(kind.sampleCondition, .oneHour)
             XCTAssertFalse(triggerConditionTitle(rule.condition).isEmpty, "\(kind)")
             XCTAssertFalse(triggerEffectSubtitle(rule).isEmpty, "\(kind)")
         }
@@ -171,8 +172,7 @@ final class TriggerCopyTests: XCTestCase {
     /// would be describing something that never happens.
     func testABindingConditionsSubtitleNeverPromisesADuration() {
         for kind in TriggerConditionKind.allCases where kind.bindsSessionLifetime {
-            let rule = TriggerRule(id: UUID(), condition: kind.sampleCondition,
-                                   defaultKind: .fourHours, enabled: true)
+            let rule = self.rule(kind.sampleCondition, .fourHours)
             XCTAssertFalse(triggerEffectSubtitle(rule).contains("4 hours"), "\(kind)")
         }
     }
@@ -200,21 +200,32 @@ final class TriggerCopyTests: XCTestCase {
         }
     }
 
-    /// The two copy tables that only a *binding* condition may fill in. Each is
-    /// an exhaustive switch, so a new condition cannot skip them silently; this
-    /// pins that whichever branch it lands in matches the lifetime table, since
-    /// a binding condition with no footnote leaves the Add sheet showing
-    /// neither a duration picker nor a reason there isn't one.
-    func testTheBoundCopyExistsForExactlyTheBindingConditions() {
+    /// The copy tables that only a condition a rule *may bind to* fills in. Each
+    /// is an exhaustive switch, so a new condition cannot skip them silently;
+    /// this pins that whichever branch it lands in matches the candidate table,
+    /// since a condition the Add sheet offers "while it lasts" for, with no
+    /// footnote, leaves the sheet showing neither a duration picker nor a reason
+    /// there isn't one.
+    ///
+    /// **Keyed off `candidateBoundSessionKind`, not `bindsSessionLifetime`**,
+    /// since Plan 8 Task 10. Those were the same set until this task gave
+    /// `.appLaunched`, `.externalDisplayConnected` and `.acPowerConnected`
+    /// candidates: a rule on any of the three can now bind, so all three need the
+    /// sentences, while the *default* table they are absent from is unchanged.
+    func testTheBoundCopyExistsForExactlyTheConditionsARuleMayBindTo() {
         for kind in TriggerConditionKind.allCases {
             let condition = kind.sampleCondition
-            XCTAssertEqual(triggerBoundEffectSubtitle(condition) != nil, kind.bindsSessionLifetime,
-                           "\(kind): the row subtitle and the lifetime table disagree")
-            XCTAssertEqual(triggerBindingFootnote(condition) != nil, kind.bindsSessionLifetime,
-                           "\(kind): the Add sheet footnote and the lifetime table disagree")
-            if kind.bindsSessionLifetime {
+            let mayBind = condition.candidateBoundSessionKind != nil
+            XCTAssertEqual(triggerBoundEffectSubtitle(condition) != nil, mayBind,
+                           "\(kind): the row subtitle and the candidate table disagree")
+            XCTAssertEqual(triggerBindingFootnote(condition) != nil, mayBind,
+                           "\(kind): the Add sheet footnote and the candidate table disagree")
+            XCTAssertEqual(triggerWhileTitle(condition) != nil, mayBind,
+                           "\(kind): the 'while' title and the candidate table disagree")
+            if mayBind {
                 XCTAssertFalse(triggerBoundEffectSubtitle(condition)?.isEmpty ?? true, "\(kind)")
                 XCTAssertFalse(triggerBindingFootnote(condition)?.isEmpty ?? true, "\(kind)")
+                XCTAssertFalse(triggerWhileTitle(condition)?.isEmpty ?? true, "\(kind)")
             }
         }
     }
@@ -477,6 +488,174 @@ final class TriggerCopyTests: XCTestCase {
         XCTAssertEqual(empty, "Ends automatically when the process exits — no duration to pick.")
         XCTAssertEqual(triggerBindingFootnote(.processRunning(processName: "claude")),
                        "Ends automatically when claude exits — no duration to pick.")
+    }
+
+    // MARK: - The row reads the rule, not the condition
+    //
+    // Plan 8 Task 10 made the lifetime a property of the rule. `triggerConditionTitle`
+    // above answers for a condition alone, which is all the Add sheet's picker
+    // has; the *list* has a rule, and a row that went on reading the condition's
+    // default would put "While Backup is mounted" over a rule that will actually
+    // run for four hours — the exact broken promise that function's doc comment
+    // exists to prevent, written by a user instead of by a developer.
+
+    private func rule(_ condition: TriggerCondition, _ kind: DefaultSessionKind,
+                      _ lifetime: TriggerLifetime) -> TriggerRule {
+        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: true,
+                    effect: TriggerEffect(power: TriggerEffect.defaultPower, lifetime: lifetime))
+    }
+
+    /// A rule that keeps its condition's own answer reads exactly as it did
+    /// before this task, for every condition there is.
+    func testARuleWithTheDefaultLifetimeReadsExactlyAsItDidBefore() {
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            let r = rule(condition, .fourHours, TriggerEffect.defaultLifetime(for: kind))
+            XCTAssertEqual(triggerRuleTitle(r), triggerConditionTitle(condition), "\(kind)")
+        }
+    }
+
+    /// A rule that asked to bind on a condition that does not by default reads
+    /// as bound — title and subtitle both.
+    func testARuleThatAskedToBindReadsAsBound() {
+        let r = rule(.acPowerConnected, .fourHours, .whileConditionHolds)
+        XCTAssertEqual(triggerRuleTitle(r), "While power is connected")
+        XCTAssertEqual(triggerEffectSubtitle(r),
+                       "Keeps this Mac awake until power is disconnected")
+        XCTAssertFalse(triggerEffectSubtitle(r).contains("4 hours"),
+                       "defaultKind is ignored for a bound rule, so the row must not quote it")
+    }
+
+    /// ...and a rule that asked for a duration on a condition that binds by
+    /// default reads as timed. This is the direction that used to be
+    /// unrepresentable, and the one where a stale title lies loudest.
+    func testARuleThatAskedForADurationReadsAsTimed() {
+        let r = rule(.volumeMounted(name: "Backup"), .fourHours, .forDuration)
+        XCTAssertEqual(triggerRuleTitle(r), "When Backup is mounted")
+        XCTAssertFalse(triggerRuleTitle(r).lowercased().contains("while "),
+                       "a rule that will stop after four hours must not promise a 'while'")
+        XCTAssertTrue(triggerEffectSubtitle(r).contains("for 4 hours"), triggerEffectSubtitle(r))
+    }
+
+    /// The general form, over every condition and both lifetimes: the title's
+    /// voice and the subtitle's shape must agree with each other and with what
+    /// `sessionKind(firing:now:)` will actually start. A row that says "while"
+    /// over a session with a deadline, or "for 4 hours" over one bound to a
+    /// volume, are the two ways this can be wrong and both are here.
+    func testEveryRowsVoiceMatchesTheSessionItWillActuallyStart() {
+        let now = Date(timeIntervalSince1970: 8_000_000)
+        for kind in TriggerConditionKind.allCases {
+            for lifetime in TriggerLifetime.allCases {
+                let condition = kind.sampleCondition
+                let r = rule(condition, .fourHours, lifetime)
+                let bound = sessionKind(firing: r, now: now) != r.defaultKind.sessionKind(now: now)
+                XCTAssertEqual(triggerRuleTitle(r).lowercased().hasPrefix("while "), bound,
+                               "\(kind)/\(lifetime): the title's voice and the session disagree")
+                XCTAssertEqual(triggerEffectSubtitle(r).hasPrefix("Starts a session"), !bound,
+                               "\(kind)/\(lifetime): the subtitle and the session disagree")
+                XCTAssertEqual(triggerEffectSubtitle(r).contains("4 hours"), !bound,
+                               "\(kind)/\(lifetime): a bound row must not quote a duration it "
+                               + "will discard, and a timed one must quote the one it will use")
+            }
+        }
+    }
+
+    /// Every condition has both voices, and they are different sentences —
+    /// otherwise the row would look identical under both lifetimes and the
+    /// distinction would be invisible.
+    func testEveryConditionHasTwoDistinctVoicesWhereItHasTwo() {
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            let event = triggerStartEventTitle(condition)
+            XCTAssertTrue(event.lowercased().hasPrefix("when "),
+                          "\(kind): the start-event title must describe an event — \(event)")
+            guard let whileTitle = triggerWhileTitle(condition) else { continue }
+            XCTAssertTrue(whileTitle.lowercased().hasPrefix("while "), "\(kind): \(whileTitle)")
+            XCTAssertNotEqual(event, whileTitle, "\(kind)")
+        }
+    }
+
+    // MARK: - The Add sheet's two new choices
+
+    /// The lifetime choice is offered for exactly the conditions a rule may bind
+    /// to. `.appFrontmost` is the one refusal, and offering it there would be
+    /// offering a session that ends when you glance at another window.
+    func testTheLifetimeChoiceIsOfferedForExactlyTheConditionsThatCanBind() {
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            XCTAssertEqual(triggerLifetimeChoiceIsOffered(condition),
+                           condition.candidateBoundSessionKind != nil, "\(kind)")
+        }
+        XCTAssertFalse(triggerLifetimeChoiceIsOffered(.appFrontmost(bundleID: "com.apple.dt.Xcode")))
+    }
+
+    /// **The predicate that keeps the sheet honest.** The duration picker must be
+    /// shown for exactly the rules that will run for a duration — including a
+    /// `.appFrontmost` sheet whose lifetime state says otherwise, because
+    /// `TriggerEffect.chosen` will overrule it. Hiding it there would leave a
+    /// user with a duration they never picked.
+    func testTheDurationPickerIsShownForExactlyTheRulesThatWillUseOne() {
+        let now = Date(timeIntervalSince1970: 9_000_000)
+        for kind in TriggerConditionKind.allCases {
+            for lifetime in TriggerLifetime.allCases {
+                let condition = kind.sampleCondition
+                let effect = TriggerEffect.chosen(power: TriggerEffect.defaultPower,
+                                                  lifetime: lifetime, for: condition)
+                let saved = TriggerRule(id: UUID(), condition: condition, defaultKind: .fourHours,
+                                        enabled: true, effect: effect)
+                let willUseADuration =
+                    sessionKind(firing: saved, now: now) == saved.defaultKind.sessionKind(now: now)
+                XCTAssertEqual(triggerDurationPickerIsShown(chosen: lifetime, for: condition),
+                               willUseADuration, "\(kind)/\(lifetime)")
+            }
+        }
+    }
+
+    /// The two picker rows have to be tellable apart, and neither may be a wire
+    /// name — `whileConditionHolds` on a radio button is the leak
+    /// `wireNameLeaks` exists to catch one level up.
+    func testTheLifetimeOptionsAreDistinctAndCarryNoWireName() {
+        let labels = TriggerLifetime.allCases.map(triggerLifetimeOptionLabel)
+        XCTAssertEqual(Set(labels).count, labels.count)
+        for (lifetime, label) in zip(TriggerLifetime.allCases, labels) {
+            XCTAssertFalse(label.isEmpty, "\(lifetime)")
+            XCTAssertFalse(label.lowercased().contains(lifetime.rawValue.lowercased()), label)
+        }
+        XCTAssertFalse(triggerLifetimeTitle.isEmpty)
+        XCTAssertNotEqual(triggerLifetimeTitle, triggerDurationTitle,
+                          "two pickers stacked under one label is how a user learns one of them "
+                          + "does nothing")
+    }
+
+    /// The row's third line: nothing at all for the request every trigger used
+    /// to make, so an ordinary list gains no noise.
+    func testTheRowSaysNothingAboutPowerWhenTheRuleAsksForWhatTriggersAlwaysAsked() {
+        XCTAssertNil(triggerPowerNote(TriggerEffect.defaultPower))
+        XCTAssertNil(triggerPowerNote(PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false)))
+    }
+
+    /// ...and something for every other request, in the Settings pane's own
+    /// words. A per-rule wake mode that showed up nowhere after the sheet closed
+    /// would be a write-only setting: there is no edit sheet for a saved rule,
+    /// so this row is the only place it can ever be read back.
+    func testTheRowReportsEveryNonDefaultPowerRequestInTheSettingsPanesWords() {
+        for mode in WakeMode.allCases {
+            for disks in [false, true] {
+                let power = PowerRequest(wakeMode: mode, keepsDisksAwake: disks)
+                guard power != TriggerEffect.defaultPower else { continue }
+                guard let note = triggerPowerNote(power) else {
+                    return XCTFail("\(mode)/\(disks) is not the default and must be reported")
+                }
+                XCTAssertFalse(note.isEmpty, "\(mode)/\(disks)")
+                if mode != TriggerEffect.defaultPower.wakeMode {
+                    XCTAssertTrue(note.contains(wakeModeSettingsTitle(mode)),
+                                  "the row must use the Display pane's own words: \(note)")
+                }
+                XCTAssertEqual(note.contains(keepDisksAwakeSettingsTitle), disks, note)
+                XCTAssertFalse(note.lowercased().contains(mode.rawValue.lowercased()),
+                               "a wire name reached the row: \(note)")
+            }
+        }
     }
 }
 
@@ -1566,6 +1745,23 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
         XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("can switch"),
                       "…and must now point at what does: " + wakeModeSettingsScopeNote)
     }
+
+    /// **The clause Plan 8 Task 10 falsified.** The note used to end "an
+    /// automatic trigger *always* keeps this Mac awake with the lid closed",
+    /// which was underwritten by two literals in `Agent/EvidenceLoopRunner.swift`
+    /// and stopped being true the moment the Add sheet grew a wake-mode picker.
+    /// An unconditional promise here would tell somebody their lid-open trigger
+    /// survives a lid close, which is the class of misreading that loses work.
+    ///
+    /// It must still say "lid closed", because that is still what a rule gets
+    /// when nobody changes it — what it may not say is that it is guaranteed.
+    func testTheScopeNoteNoLongerPromisesEveryTriggerIsLidSafe() {
+        XCTAssertTrue(wakeModeSettingsScopeNote.contains("lid closed"), wakeModeSettingsScopeNote)
+        XCTAssertFalse(wakeModeSettingsScopeNote.lowercased().contains("always"),
+                       "a trigger carries its rule's own mode now: " + wakeModeSettingsScopeNote)
+        XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("trigger"),
+                      wakeModeSettingsScopeNote)
+    }
 }
 
 /// The stored disk default, and the pane that writes it.
@@ -1668,6 +1864,19 @@ final class KeepDisksAwakeCopyTests: XCTestCase {
         XCTAssertTrue(keepDisksAwakeSettingsScopeNote.contains(keepDisksAwakeFlag),
                       "the command line asks per session, and the note should name the flag: "
                       + keepDisksAwakeSettingsScopeNote)
+    }
+
+    /// The sibling of `testTheScopeNoteNoLongerPromisesEveryTriggerIsLidSafe`,
+    /// and the same falsification. This note used to end "an automatic trigger
+    /// **never** asks for it", underwritten by `keepsDisksAwake: false` in
+    /// `Agent/EvidenceLoopRunner.swift`. The Add sheet now offers the same toggle
+    /// per rule, so the unconditional version tells a user that a machine-wide
+    /// effect they just switched on cannot happen.
+    func testTheScopeNoteNoLongerPromisesNoTriggerEverHoldsDisksAwake() {
+        XCTAssertTrue(keepDisksAwakeSettingsScopeNote.lowercased().contains("trigger"),
+                      keepDisksAwakeSettingsScopeNote)
+        XCTAssertFalse(keepDisksAwakeSettingsScopeNote.lowercased().contains("never"),
+                       "a rule can ask for this now: " + keepDisksAwakeSettingsScopeNote)
     }
 }
 
@@ -2378,10 +2587,17 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
         thermalSensitivity: .cautious, batteryCutoff: 37, maxSessionDuration: 3 * 3600,
         lidClosedStricter: false, gracePeriod: 42, cooldown: 43, batteryHysteresis: 7)
 
+    /// Every field away from its default, `effect` included — which also makes
+    /// this the one preference round trip that exercises `TriggerRule`'s
+    /// **non-default** wire shape (`conditionV2` plus `effect`) end to end
+    /// through `UserDefaults`, rather than only through `JSONEncoder`.
     private static let distinctiveRule = TriggerRule(
         id: UUID(uuidString: "8A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9")!,
         condition: .processRunning(processName: "claude"),
-        defaultKind: .eightHours, enabled: false)
+        defaultKind: .eightHours, enabled: false,
+        effect: TriggerEffect(power: PowerRequest(wakeMode: .systemAndDisplay,
+                                                  keepsDisksAwake: true),
+                              lifetime: .forDuration))
 
     private static let distinctiveCompletionConfig = SessionCompletionConfig(
         scriptPath: "/usr/local/bin/tell-me.sh", webhookURL: "https://example.com/hook")

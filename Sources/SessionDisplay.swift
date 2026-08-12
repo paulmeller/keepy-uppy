@@ -200,13 +200,67 @@ let vpnDetectionLimitationNote = "Detects VPNs macOS knows about — anything yo
 /// Which ones say "while" is pinned against `bindsSessionLifetime` in
 /// `SessionDisplayTests`, not against a list of case names, so a ninth
 /// condition cannot pick the wrong voice quietly.
+///
+/// **This is now the voice a rule gets when it has no stored effect**, which is
+/// what keeps every assertion above true unchanged. A rule that chose the other
+/// lifetime gets `triggerRuleTitle` below, which reads the same two tables in
+/// the other order — because the failure this comment describes is symmetric.
+/// "While Backup is mounted" over a rule that will actually run for four hours
+/// is the identical broken promise, just written by a user instead of by a
+/// developer.
 func triggerConditionTitle(_ condition: TriggerCondition) -> String {
+    if TriggerEffect.defaultLifetime(for: condition.kind) == .whileConditionHolds,
+       let bound = triggerWhileTitle(condition) { return bound }
+    return triggerStartEventTitle(condition)
+}
+
+/// The first line of a trigger row, in the voice the *rule* earns.
+///
+/// `triggerConditionTitle` answers for a condition alone, which is all the Add
+/// sheet's picker has; this answers for a saved rule, which is the only thing
+/// the list shows.
+func triggerRuleTitle(_ rule: TriggerRule) -> String {
+    if rule.effect.lifetime == .whileConditionHolds,
+       let bound = triggerWhileTitle(rule.condition) { return bound }
+    return triggerStartEventTitle(rule.condition)
+}
+
+/// Every condition as the *event* that starts a session — the voice for a rule
+/// that runs for a duration and then stops regardless of the condition.
+///
+/// Exhaustive, so a tenth condition must be given both voices rather than
+/// silently inheriting one.
+func triggerStartEventTitle(_ condition: TriggerCondition) -> String {
     switch condition {
     case .appLaunched(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) launches"
     case .externalDisplayConnected: return "When an external display connects"
     case .acPowerConnected: return "When power is connected"
-    case .processRunning(let processName): return "While \(processName) is running"
+    case .processRunning(let processName): return "When \(processName) starts running"
     case .appFrontmost(let bundleID): return "When \(appDisplayName(bundleID: bundleID)) comes to the front"
+    case .volumeMounted(let name): return "When \(name) is mounted"
+    case .onSubnet(let cidr): return "When this Mac joins \(cidr)"
+    case .vpnActive: return "When a VPN connects"
+    case .usbDevicePresent(let vendorID, let productID):
+        return "When \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is attached"
+    }
+}
+
+/// Every condition as an ongoing *state* — the voice for a rule whose session
+/// really does end when the condition does — or `nil` where that lifetime is not
+/// offered at all.
+///
+/// `nil` for exactly `.appFrontmost`, and the reason is
+/// `TriggerCondition.candidateBoundSessionKind`'s: a session bound to what is in
+/// front ends after an eleven-second glance at a browser. `SessionDisplayTests`
+/// pins this against that table over `allCases`, so a condition that can bind
+/// cannot end up with no way to say so.
+func triggerWhileTitle(_ condition: TriggerCondition) -> String? {
+    switch condition {
+    case .appLaunched(let bundleID): return "While \(appDisplayName(bundleID: bundleID)) is running"
+    case .externalDisplayConnected: return "While an external display is connected"
+    case .acPowerConnected: return "While power is connected"
+    case .appFrontmost: return nil
+    case .processRunning(let processName): return "While \(processName) is running"
     case .volumeMounted(let name): return "While \(name) is mounted"
     case .onSubnet(let cidr): return "While this Mac is on \(cidr)"
     case .vpnActive: return "While a VPN is connected"
@@ -217,28 +271,38 @@ func triggerConditionTitle(_ condition: TriggerCondition) -> String {
 
 /// The second line of a trigger row: what starting it actually does.
 ///
-/// A condition that binds its session's lifetime gets `triggerBoundEffectSubtitle`
-/// instead of the duration phrase — `defaultKind` is stored on the rule but
-/// ignored when it fires, so describing it here would be describing a duration
-/// that will never take effect. The branch is keyed off `boundSessionKind`, the
-/// same table `sessionKind(firing:now:)` reads, rather than off a second
-/// `.processRunning` match as it was.
+/// A rule bound to its condition gets `triggerBoundEffectSubtitle` instead of the
+/// duration phrase — `defaultKind` is stored on such a rule but ignored when it
+/// fires, so describing it here would be describing a duration that will never
+/// take effect.
+///
+/// The branch is keyed off the **rule's own lifetime**, not off the condition's
+/// default, which is the whole of what Plan 8 Task 10 changed here: the same
+/// condition now reads as timed under one rule and as bound under another, and
+/// this row is where a user would first notice if it did not.
 func triggerEffectSubtitle(_ rule: TriggerRule) -> String {
-    if let bound = triggerBoundEffectSubtitle(rule.condition) { return bound }
+    if rule.effect.lifetime == .whileConditionHolds,
+       let bound = triggerBoundEffectSubtitle(rule.condition) { return bound }
     return "Starts a session that keeps this Mac awake \(rule.defaultKind.durationPhrase)"
 }
 
-/// What a lifetime-binding condition's row says instead of a duration, or `nil`
-/// for a condition that has a duration to report.
+/// What a bound rule's row says instead of a duration, or `nil` for a condition
+/// no rule may bind to.
 ///
 /// Exhaustive, so a new condition must decide; and `SessionDisplayTests` pins
-/// which branch it lands in against `bindsSessionLifetime`, so "binds but reads
-/// as timed" and "timed but reads as bound" are both test failures rather than a
-/// row that quietly misdescribes what the daemon will do.
+/// which branch it lands in against `candidateBoundSessionKind`, so "can bind but
+/// has no sentence for it" is a test failure rather than a row that quietly
+/// misdescribes what the daemon will do.
 func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
     switch condition {
-    case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost:
+    case .appFrontmost:
         return nil
+    case .appLaunched(let bundleID):
+        return "Keeps this Mac awake until \(appDisplayName(bundleID: bundleID)) quits"
+    case .externalDisplayConnected:
+        return "Keeps this Mac awake until the display is disconnected"
+    case .acPowerConnected:
+        return "Keeps this Mac awake until power is disconnected"
     case .processRunning(let processName):
         return "Keeps this Mac awake until \(processName) exits"
     case .volumeMounted(let name):
@@ -252,18 +316,35 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
     }
 }
 
-/// The Add sheet's replacement for the duration picker: for a binding condition
-/// there is no duration to pick, and a picker that was shown and then discarded
-/// is worse than one that isn't there. This is the sentence that goes where it
-/// would have been, so its absence is explained rather than merely noticed.
+/// What the Add sheet says under the lifetime choice, once "while it lasts" is
+/// the choice: there is no duration to pick, and a picker that was shown and
+/// then discarded is worse than one that isn't there. This is the sentence that
+/// goes where it would have been, so its absence is explained rather than merely
+/// noticed.
+///
+/// **"— no duration to pick" is still exactly true**, and it is worth saying why,
+/// because Plan 8 Task 10 turned the surrounding UI from "you have no choice"
+/// into "you have a choice and this is it". The sentence describes the selection
+/// the user is looking at, not the sheet: with "while it lasts" chosen there is
+/// genuinely nothing to pick, and the duration picker is genuinely not shown.
+/// Picking the other option brings it back.
 ///
 /// Distinct from `triggerBoundEffectSubtitle` because it is read while the sheet
 /// is still being filled in — the process name is typically empty — where the row
 /// subtitle only ever describes a saved rule.
 func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
     switch condition {
-    case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost:
+    case .appFrontmost:
         return nil
+    case .appLaunched(let bundleID):
+        // Empty is the ordinary state of this field while the sheet is open,
+        // exactly as it is for the four below.
+        let subject = bundleID.isEmpty ? "the app" : appDisplayName(bundleID: bundleID)
+        return "Ends automatically when \(subject) quits — no duration to pick."
+    case .externalDisplayConnected:
+        return "Ends automatically when the display is disconnected — no duration to pick."
+    case .acPowerConnected:
+        return "Ends automatically when power is disconnected — no duration to pick."
     case .processRunning(let processName):
         let subject = processName.isEmpty ? "the process" : processName
         return "Ends automatically when \(subject) exits — no duration to pick."
@@ -285,6 +366,79 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
         // every moment the sheet is open.
         return "Ends automatically when the device is unplugged — no duration to pick."
     }
+}
+
+// MARK: - The Add sheet's two new choices
+//
+// The sheet is a SwiftUI `body` and is not testable, so every string and every
+// enablement predicate it reads lives here — the boundary this project already
+// holds for `AddTriggerSheet.pickerError`, `InputField` and `subnetProblem`.
+
+/// Whether the Add sheet offers the lifetime choice at all.
+///
+/// Keyed off `TriggerCondition.candidateBoundSessionKind` — the one table that
+/// answers "could a rule on this condition bind to it?" — rather than off a
+/// second list of case names. `.appFrontmost` is the only condition that answers
+/// no, and offering it there would be offering a session that ends when you look
+/// at another window.
+func triggerLifetimeChoiceIsOffered(_ condition: TriggerCondition) -> Bool {
+    condition.candidateBoundSessionKind != nil
+}
+
+/// Whether the Add sheet shows the duration picker.
+///
+/// It is not `!triggerLifetimeChoiceIsOffered(...)` and it is not
+/// `chosen == .forDuration` either: it is what the rule will *actually* store,
+/// via `TriggerEffect.chosen`, so the picker cannot be hidden for a rule that
+/// will end up running for a duration anyway. That is the one way the two
+/// controls could disagree, and it is the way that leaves a user with a duration
+/// they never picked.
+func triggerDurationPickerIsShown(chosen lifetime: TriggerLifetime,
+                                  for condition: TriggerCondition) -> Bool {
+    TriggerEffect.chosen(power: TriggerEffect.defaultPower, lifetime: lifetime,
+                         for: condition).lifetime == .forDuration
+}
+
+/// The lifetime picker's own label.
+let triggerLifetimeTitle = "Keep awake"
+
+/// The lifetime picker's two rows. Deliberately short and condition-free: the
+/// sentence naming what actually ends the session is `triggerBindingFootnote`,
+/// directly beneath, and repeating the condition in the row label would be a
+/// second set of words for the same fact.
+func triggerLifetimeOptionLabel(_ lifetime: TriggerLifetime) -> String {
+    switch lifetime {
+    case .whileConditionHolds: return "While it lasts"
+    case .forDuration: return "For a set time"
+    }
+}
+
+/// The duration picker's label in the Add sheet.
+///
+/// It used to be "Keep awake", which `triggerLifetimeTitle` now carries — two
+/// pickers stacked under one label is how a user comes to believe one of them
+/// does nothing.
+let triggerDurationTitle = "For how long"
+
+/// The third line of a trigger row: what this rule asks of the machine, when
+/// that is not what every trigger used to ask. `nil` for the default request, so
+/// a list of ordinary rules gains no noise.
+///
+/// It reuses `wakeModeSettingsTitle` and `keepDisksAwakeSettingsTitle` rather
+/// than describing the same three modes and the same toggle a second time. A
+/// second set of words for one setting is how the Settings pane and this list
+/// come to describe them differently.
+func triggerPowerNote(_ power: PowerRequest) -> String? {
+    guard power != TriggerEffect.defaultPower else { return nil }
+    var parts: [String] = []
+    if power.wakeMode != TriggerEffect.defaultPower.wakeMode {
+        parts.append(wakeModeSettingsTitle(power.wakeMode))
+    }
+    if power.keepsDisksAwake { parts.append(keepDisksAwakeSettingsTitle) }
+    // Unreachable-empty by construction: the guard above already established
+    // that at least one axis differs from the default, and the default is
+    // `.clamshell` with disks free, so at least one branch fires.
+    return parts.joined(separator: " · ")
 }
 
 /// What the Triggers pane says when the store holds rules this build cannot
@@ -1190,6 +1344,14 @@ enum DefaultWakeModePreference {
 /// out of `Shared/`, where the daemon and CLI compile.
 let wakeModeSettingsOrder: [WakeMode] = [.clamshell, .system, .systemAndDisplay]
 
+/// The wake-mode picker's own label, in **both** places one appears: the Display
+/// pane and the Add-trigger sheet.
+///
+/// Named once for the reason `keepDisksAwakeSettingsTitle` is: two controls that
+/// select the same three modes and are labelled differently teach a user they are
+/// different settings.
+let wakeModePickerTitle = "Keeps this Mac awake"
+
 /// The picker row. Named for what the user gets, not for the mechanism: the
 /// raw values are camelCase wire strings, and "assertion" and "SleepDisabled"
 /// are implementation vocabulary that mean nothing in a Settings window.
@@ -1249,9 +1411,17 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
 
 /// Whose sessions this actually governs, and **when**. Three of the four
 /// clients ignore it: `keepy-uppy on` chooses per invocation with a flag, and a
-/// trigger-started session is built by `Agent/EvidenceLoopRunner.swift` with an
-/// explicit `wakeMode: .clamshell`, so it is lid-safe whatever is stored here.
-/// Said as the positive fact about triggers, which stays true under the union.
+/// trigger-started session carries its rule's own `TriggerEffect.power`.
+///
+/// **The trigger clause changed in Plan 8 Task 10 and the old one was a
+/// promise.** It read "an automatic trigger always keeps this Mac awake with the
+/// lid closed", which was true while `Agent/EvidenceLoopRunner.swift` hardcoded
+/// `wakeMode: .clamshell`. A rule can now ask for either of the other two modes
+/// in the Add sheet, so the unconditional version would tell a user their
+/// lid-open trigger survives a lid close. It still says "lid closed", because
+/// that is still what a rule gets when nobody changes it
+/// (`TriggerEffect.defaultPower`) and it is still the positive fact that stays
+/// true under the union — what it no longer says is "always".
 ///
 /// "from now on" is not filler, and the clause after it changed in Plan 8 Task
 /// 9. Nothing **in this pane** reaches a running session — moving this picker
@@ -1268,7 +1438,7 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
 /// solves their problem is strictly better than one that tells them there isn't
 /// one. Two surfaces still tell the truth about what is in force right now (that
 /// session's own tag in the menu, and `menuLidCaveat`).
-let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on use this. A session that's already running keeps the mode it started with, though the menu can switch one to lid-closed. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."
+let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on use this. A session that's already running keeps the mode it started with, though the menu can switch one to lid-closed. The command line picks a mode per session with its own flags, and each trigger carries its own choice — new triggers keep this Mac awake with the lid closed unless you change it when you add one."
 
 // MARK: - The stored disk default
 
@@ -1344,7 +1514,15 @@ let keepDisksAwakeSettingsFootnote = "Attached disks stay spun up while the sess
 /// change and the note above it did: the menu's promote row is a *wake-mode* row
 /// and offers nothing on this axis, so there is nothing here to point a reader
 /// at that the existing clause does not.
-let keepDisksAwakeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line asks per session with \(keepDisksAwakeFlag), and an automatic trigger never asks for it."
+///
+/// **The trigger clause did have to change, in Plan 8 Task 10.** It read "an
+/// automatic trigger never asks for it", which was true while
+/// `Agent/EvidenceLoopRunner.swift` hardcoded `keepsDisksAwake: false`. The Add
+/// sheet now offers the same toggle per rule, so the unconditional version would
+/// be telling a user that a machine-wide effect they had just switched on could
+/// not happen. It still says a trigger does not follow *this* setting, which is
+/// the fact the sentence is for.
+let keepDisksAwakeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line asks per session with \(keepDisksAwakeFlag), and an automatic trigger asks only if the rule that starts it does — new triggers don't unless you say so when you add one."
 
 // MARK: - The CLI & Advanced pane
 

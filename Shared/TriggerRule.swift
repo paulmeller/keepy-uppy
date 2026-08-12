@@ -147,19 +147,13 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     /// has been bitten by four times. One line per condition, and the choice is
     /// argued in the task that adds it.
     ///
-    /// Offering *both* per rule ("for 4 hours" vs "while it holds") is a real
-    /// improvement and is a Plan 7 UI decision — it needs a new stored field on
-    /// `TriggerRule`, which is exactly the defaulted-field trap above. Do not
-    /// smuggle it in here.
-    ///
-    /// Read `TriggerRule`'s own doc comment before designing that field. A
-    /// field added the ordinary way is *dropped* by any older build that
-    /// touches the file — decoded cleanly, ignored, and written back without
-    /// it — so the rule silently reverts to whichever lifetime this table
-    /// gives it, and the newer build then obeys the reverted rule. The store's
-    /// skip-and-preserve machinery does not catch that, because nothing
-    /// failed. Making the change undecodable to older builds is what routes it
-    /// through the machinery that does.
+    /// **This table is now the *default*, not the whole answer.** Plan 8 Task 10
+    /// added `TriggerEffect.lifetime`, so a rule may ask for the other reading;
+    /// what this property decides is what a rule that has never been told
+    /// otherwise does, which is exactly what keeps every rule written before that
+    /// change behaving as it always did. `TriggerCondition.
+    /// candidateBoundSessionKind` is the other half — "what *could* this
+    /// condition bind to?" — and is what the Add sheet offers.
     ///
     /// The two Plan 5 conditions that have met this question so far, and
     /// answered it opposite ways, which is the point of asking:
@@ -245,10 +239,19 @@ extension TriggerCondition {
     /// Non-nil for exactly the kinds `bindsSessionLifetime` names — the two are
     /// separate statements because only this one can see the associated value a
     /// bound `SessionKind` needs, and `TriggerRuleTests` pins them against each
-    /// other over `allCases`. This is the single place the carve-out lives;
-    /// `sessionKind(firing:now:)`, `triggerEffectSubtitle` and the Add sheet all
-    /// read it rather than re-matching `.processRunning`, which is what they
-    /// each used to do.
+    /// other over `allCases`.
+    ///
+    /// **Its job changed in Plan 8 Task 10 and it is worth being exact about
+    /// what it is now.** Nothing in the firing path reads it any more —
+    /// `sessionKind(firing:now:)` reads the rule's own
+    /// `TriggerEffect.lifetime` and `candidateBoundSessionKind` below. What this
+    /// property still states, in one place, is *what a rule that carries no
+    /// stored effect does*, which is the entire backward-compatibility promise of
+    /// that task: `testARuleWithNoStoredEffectBehavesExactlyAsItDidBefore` fires
+    /// every condition's rule through the new pipeline and compares the result
+    /// against `boundSessionKind ?? defaultKind`, i.e. against the line this file
+    /// shipped with. Deleting it would delete the only independent statement that
+    /// comparison has to check against.
     var boundSessionKind: SessionKind? {
         switch self {
         case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost:
@@ -265,52 +268,256 @@ extension TriggerCondition {
             return .whileUSBDevicePresent(vendorID: vendorID, productID: productID)
         }
     }
+
+    /// The `SessionKind` this condition *could* bind its session's lifetime to,
+    /// whether or not it does so by default — or `nil` when binding to it is not
+    /// something anybody should be offered.
+    ///
+    /// `boundSessionKind` above answers "what does this condition bind to when
+    /// nobody said otherwise", and returns `nil` for `.externalDisplayConnected`
+    /// and `.acPowerConnected` **even though `.whileExternalDisplay` and
+    /// `.whileOnACPower` exist**, deliberately: rules people saved before those
+    /// kinds existed mean "start a 4-hour session when the display connects", and
+    /// quietly turning them into "…and end it when I unplug" changes behaviour
+    /// under them. That argument is about *existing rules*, and it says nothing
+    /// at all about whether somebody writing a new rule should be allowed to ask
+    /// for the other thing. This property is that second question.
+    ///
+    /// An exhaustive `switch`, for `bindsSessionLifetime`'s reason: a new
+    /// condition's author must *state* whether "while this holds" is a session
+    /// anybody would want, rather than have `nil` answered on their behalf.
+    ///
+    /// The three that are new here, and are a genuinely new capability rather
+    /// than a re-spelling:
+    ///
+    /// * `.appLaunched` → `.whileAppRunning`. "Keep this Mac awake while Final
+    ///   Cut is open" was expressible from the command line
+    ///   (`keepy-uppy on --while-app`) and from nowhere else; a rule could start
+    ///   a session when the app launched but never end one when it quit.
+    /// * `.externalDisplayConnected` → `.whileExternalDisplay`.
+    /// * `.acPowerConnected` → `.whileOnACPower`.
+    ///
+    /// `.appFrontmost` stays **`nil`**, and the argument is already written out
+    /// at `TriggerConditionKind.bindsSessionLifetime` — frontmost flickers every
+    /// time a window is switched, so with a 5s tick and
+    /// `SessionEvidence.negativesBeforeEnding == 2` an eleven-second glance at a
+    /// browser would end the session. That is not a default worth changing, it is
+    /// a choice not worth offering, so it is absent here as well as there.
+    var candidateBoundSessionKind: SessionKind? {
+        switch self {
+        case .appLaunched(let bundleID):
+            return .whileAppRunning(bundleID: bundleID)
+        case .externalDisplayConnected:
+            return .whileExternalDisplay
+        case .acPowerConnected:
+            return .whileOnACPower
+        case .appFrontmost:
+            return nil
+        case .processRunning(let processName):
+            return .whileProcessRunning(processName: processName)
+        case .volumeMounted(let name):
+            return .whileVolumeMounted(name: name)
+        case .onSubnet(let cidr):
+            return .whileOnSubnet(cidr: cidr)
+        case .vpnActive:
+            return .whileVPNActive
+        case .usbDevicePresent(let vendorID, let productID):
+            return .whileUSBDevicePresent(vendorID: vendorID, productID: productID)
+        }
+    }
+}
+
+/// How long a trigger-started session lasts: until the thing that started it
+/// stops being true, or for the duration the rule stores.
+///
+/// The two readings of a trigger, which used to be decided *for* the user by
+/// the condition they picked (`TriggerConditionKind.bindsSessionLifetime`) and
+/// are now a choice on the rule.
+enum TriggerLifetime: String, Codable, CaseIterable, Equatable {
+    /// End when `TriggerCondition.candidateBoundSessionKind` says to — "keep
+    /// this Mac awake while the backup drive is mounted".
+    case whileConditionHolds
+    /// Ignore the condition once it has fired and run for `defaultKind` —
+    /// "when power is connected, keep this Mac awake for four hours".
+    case forDuration
+}
+
+/// What a rule's session should be, beyond which condition starts it.
+///
+/// **Both meanings in one type, and that is the whole reason this field
+/// exists.** A per-rule wake mode and a per-rule "for 4 hours vs while it
+/// holds" were deferred together, by `TriggerConditionKind.bindsSessionLifetime`
+/// and by `TriggerRule`'s downgrade note, with an explicit instruction that they
+/// land in one change: each needs a stored field, and each stored field is a
+/// wire-format break. Two breaks would need the second to be undecodable to
+/// builds carrying the first, which is a compatibility matrix nobody wants.
+///
+/// **No member has a default**, following `PowerRequest`, `ObserverSet` and
+/// `Session`. A third axis must be answered at every construction site rather
+/// than substituted — this project has been bitten four times by the other
+/// arrangement, most recently by `Session`'s three defaulted fields (Plan 6).
+/// What supplies the answer for a rule that never had one is
+/// `TriggerEffect.default(for:)` below, at exactly one place: decode time.
+///
+/// **A third member added here is a wire break of its own, and it needs the same
+/// treatment one level up.** This type's own `Codable` is synthesized, so an
+/// unknown key inside `effect` is silently dropped by this build exactly as an
+/// unknown key anywhere used to be. That is survivable only because a rule
+/// carrying an `effect` at all is *already* written under `TriggerRule`'s new
+/// condition key, so it is already opaque to every build that predates this one;
+/// the build that would drop a fourth axis is this one, and the move that stops
+/// it is `TriggerRule.CodingKeys.conditionV3`.
+struct TriggerEffect: Codable, Equatable {
+    /// The whole power request, not a wake mode. `Agent/EvidenceLoopRunner.swift`
+    /// used to hardcode this pair, and named this type while doing it: "If a rule
+    /// ever gains its own power request, this is the line that reads it."
+    let power: PowerRequest
+    let lifetime: TriggerLifetime
+
+    /// What `Agent/EvidenceLoopRunner.swift` hardcoded until Plan 8 Task 10, and
+    /// what a rule that has never been told otherwise still gets. **The two axes
+    /// are answered in opposite directions on purpose**, and the argument moved
+    /// here from the line that used to spell them out:
+    ///
+    /// * `wakeMode: .clamshell` because a trigger fires while nobody is watching,
+    ///   so its session has to be the one that survives a lid close —
+    ///   over-applying there protects the work the rule exists for.
+    /// * `keepsDisksAwake: false` because holding attached disks out of idle
+    ///   costs battery (the IOKit header says so outright) and shows up nowhere
+    ///   on screen, so a trigger that held them awake would be a machine-wide
+    ///   effect nobody requested and nobody could explain. The same "nobody asked
+    ///   for it" reasoning behind `Session`'s decode-time default.
+    ///
+    /// What changed is only who may override it: a rule can now ask for either
+    /// axis explicitly, and the Add sheet is where it does. Absence still means
+    /// exactly this.
+    static let defaultPower = PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false)
+
+    /// The effect a rule with no stored one behaves as. **Its whole contract is
+    /// that it reproduces this file's behaviour before Plan 8 Task 10, for every
+    /// condition there is**, which
+    /// `testARuleWithNoStoredEffectBehavesExactlyAsItDidBefore` checks against
+    /// `TriggerCondition.boundSessionKind` over `allCases` rather than against a
+    /// remembered list.
+    ///
+    /// It takes the whole condition rather than a `TriggerConditionKind` because
+    /// that is what every call site has; `defaultLifetime(for:)` is split out
+    /// because the Add sheet has only the kind while the picker is still being
+    /// changed.
+    static func `default`(for condition: TriggerCondition) -> TriggerEffect {
+        TriggerEffect(power: defaultPower, lifetime: defaultLifetime(for: condition.kind))
+    }
+
+    static func defaultLifetime(for kind: TriggerConditionKind) -> TriggerLifetime {
+        kind.bindsSessionLifetime ? .whileConditionHolds : .forDuration
+    }
+
+    /// The effect a *user's* choices amount to, with the one combination nobody
+    /// may store filtered out at the boundary that stores it.
+    ///
+    /// `.whileConditionHolds` on a condition with no
+    /// `candidateBoundSessionKind` — `.appFrontmost`, and only it — is not a
+    /// rule this build knows how to run: there is no bound `SessionKind` to
+    /// start, so `sessionKind(firing:now:)` would fall back to `defaultKind` and
+    /// the rule would say one thing and do another. The Add sheet does not offer
+    /// the choice (`triggerLifetimeChoiceIsOffered`), and this is the belt to
+    /// that brace, so a caller that offers it anyway stores something truthful
+    /// rather than something misleading.
+    static func chosen(power: PowerRequest,
+                       lifetime: TriggerLifetime,
+                       for condition: TriggerCondition) -> TriggerEffect {
+        TriggerEffect(power: power,
+                      lifetime: condition.candidateBoundSessionKind == nil ? .forDuration : lifetime)
+    }
 }
 
 /// One saved trigger.
 ///
-/// **Adding a field here is a downgrade hazard, and it is the next thing
-/// somebody is going to do.** `Codable` is synthesized for this type, and a
-/// synthesized `init(from:)` *ignores* keys it does not recognise. So a rule
-/// written by a newer build that carries an extra field decodes here cleanly:
-/// it is `.readable`, not `.unreadable`, it is not counted by
-/// `unreadableCount`, the pane shows it, the agent fires it — and the next
-/// `save()` re-encodes it from these four properties and writes it back
-/// **without the field**. Same for a new key inside a known condition's
-/// payload. Pinned by `testARuleWithAnUnknownFieldIsAcceptedAndLosesTheField`.
+/// ## The wire format, and why this type has a hand-written `Codable`
+///
+/// **Adding a field here is a downgrade hazard**, and Plan 8 Task 10 is the
+/// change that added one. The hazard, unchanged: a synthesized `init(from:)`
+/// *ignores* keys it does not recognise, so a rule written by a newer build that
+/// carries an extra field decodes in an older one cleanly — it is `.readable`,
+/// not `.unreadable`, it is not counted by `unreadableCount`, the pane shows it,
+/// the agent fires it, and the next `save()` re-encodes it from the properties
+/// that build knows and writes it back **without the field**. Same for a new key
+/// inside a known condition's payload. Pinned by
+/// `testARuleWithAnUnknownFieldIsAcceptedAndLosesTheField`.
 ///
 /// That is a worse failure than the one `StoredTriggerRule` was built to fix,
 /// because it looks like success. Losing an unknown *condition* costs the rule
 /// and says so; losing an unknown *field* changes what a rule means and says
 /// nothing — and the newer build then reads the mutated rule back and obeys it.
 ///
-/// It is not hypothetical: `TriggerConditionKind.bindsSessionLifetime` records
-/// that Plan 7 ("for 4 hours" vs "while it holds", per rule) needs exactly such
-/// a field. If it is added the way `Session.swift` adds its optional fields —
-/// `decodeIfPresent(...) ?? default`, which is right *there* because those
-/// fields are only ever written and read by one process pair — an older build
-/// will silently rewrite every rule that uses it back to the default.
+/// ### What this comment used to prescribe, and why that was wrong
 ///
-/// **Design the field so an older build fails to decode it.** That is the one
-/// move that turns this into the failure this file already handles well: the
-/// rule becomes `.unreadable`, is preserved verbatim, is hidden rather than
-/// misinterpreted, and is counted in the pane's notice. Two ways to get it,
-/// both cheap at design time and neither available afterwards:
-/// carry the new meaning inside `condition` under a new wire name (an unknown
-/// case already throws), or add the field as a *required* `decode(...)` and
-/// accept that rules written by the new build are opaque to old ones — which
-/// is the honest description of what they are.
+/// It used to say, flatly: *"design the field so an older build fails to decode
+/// it"*, on the grounds that an undecodable rule lands in
+/// `StoredTriggerRule.unreadable` — preserved verbatim, hidden rather than
+/// misinterpreted, counted in the pane's notice. **That is true of every build
+/// from Plan 5 onward and false of the only build that has ever shipped.**
+/// Measured against `git show v0.1.0:Shared/TriggerRule.swift`: v0.1.0 has no
+/// `StoredTriggerRule` at all. Its `load()` is a single
+/// `try? JSONDecoder().decode([TriggerRule].self)` with `else { return [] }`,
+/// and its `save()` writes the whole list back. So against v0.1.0 "make it
+/// undecodable" does not mean "the rule survives, unreadable" — it means the
+/// array decode fails, the pane shows *no* triggers, and the next edit writes
+/// the empty list over **every rule the user has**. Verified by
+/// `testAnOldStoreDestroysEverythingWhenOneElementIsUndecodable`.
+///
+/// The prescription also only ever considered new→old. The other direction is
+/// just as fatal and was silent: a *required* `decode(...)` for the new key
+/// makes every payload an older build wrote throw **here**, so the new build
+/// cannot show the user a single rule they already have.
+///
+/// ### What this type actually does: a conditional wire shape
+///
+/// `encode(to:)` writes one of two shapes, and which one is decided by the
+/// rule's own contents:
+///
+/// * **effect equals `TriggerEffect.default(for: condition)`** — the four keys
+///   `id`, `condition`, `defaultKind`, `enabled`, and nothing else. Key for key
+///   identical to what this type wrote before Task 10, so a rule from any
+///   previous build round-trips unchanged and an old build reads it exactly as
+///   it always did. This is the shape every existing user's rules are in, and
+///   every rule anybody writes without touching the new controls.
+/// * **effect differs** — `effect`, plus the condition under `conditionV2`
+///   rather than `condition`. An older build's
+///   `decode(TriggerCondition.self, forKey: .condition)` then finds no
+///   `condition` key and **throws**, which is the one move that routes the rule
+///   into the machinery that preserves it.
+///
+/// So the population exposed to v0.1.0's destruction is not "everything this
+/// build writes", it is "rules that use a capability v0.1.0 could not honour
+/// anyway" — the smallest exposure available. Worth stating so nobody reads that
+/// as a new problem: a rule using any of Plan 5's six conditions is *already*
+/// undecodable to v0.1.0 and already exposed. This design does not enlarge that
+/// population, and it does not have to fix it, because fixing it means changing
+/// a build that shipped.
+///
+/// `decode` is the mirror: `condition` **or** `conditionV2`, and `effect` with a
+/// default, so every payload any older build wrote still reads here.
+///
+/// ### The costs, stated rather than discovered later
+///
+/// A hand-written codec must be updated for **every** future field, which is the
+/// same class of silent omission this type is guarding against — so
+/// `testEveryFieldOfARuleSurvivesARoundTripWithNothingAtItsDefault` round-trips
+/// a whole struct with every value non-default and compares as a struct, and it
+/// is the test that catches a field the encoder forgot.
+///
+/// The next break repeats the trick with `conditionV3`, with `decode` reading
+/// all three keys. That is deliberately a ladder and not a version number: there
+/// is no schema version on disk, and the key a build looks for *is* the version
+/// negotiation.
 ///
 /// Round-tripping unknown keys per rule — a `[String: JSONValue]` bag captured
-/// in a hand-written `init(from:)` and re-emitted by `encode(to:)` — was
-/// considered and rejected. It fixes the wrong half: the bytes would survive,
-/// but the older build still cannot *honour* the field, so it goes on
-/// displaying and firing the rule under the old meaning while the file says
-/// otherwise. It also buys nothing for the builds that will actually meet Plan
-/// 7's files — v1 is already shipped and has no such bag — and it costs this
-/// type its synthesized `Codable`, replacing it with an encoder that must be
-/// hand-updated for every future field, which is the same class of silent
-/// omission. Making the change undecodable costs nothing and fails safe.
+/// in `init(from:)` and re-emitted by `encode(to:)` — was considered again here
+/// and rejected again. It fixes the wrong half: the bytes would survive, but the
+/// older build still cannot *honour* the field, so it goes on displaying and
+/// firing the rule under the old meaning while the file says otherwise. And it
+/// buys nothing against v0.1.0, which has no such bag and never will.
 struct TriggerRule: Codable, Equatable, Identifiable {
     let id: UUID
     var condition: TriggerCondition
@@ -330,8 +537,68 @@ struct TriggerRule: Codable, Equatable, Identifiable {
     /// a privileged power-assertion write. Materialize with
     /// `defaultKind.sessionKind(now:)` at fire time (agent) or display time
     /// (Settings UI).
+    ///
+    /// Still stored, and still ignored, when `effect.lifetime` is
+    /// `.whileConditionHolds` — see `sessionKind(firing:now:)`.
     var defaultKind: DefaultSessionKind
     var enabled: Bool
+    /// What this rule's session should be, beyond which condition starts it.
+    /// **No memberwise default**: see the type, and see this type's own doc
+    /// comment for what its presence does to the encoded shape.
+    var effect: TriggerEffect
+
+    enum CodingKeys: String, CodingKey {
+        case id, condition, defaultKind, enabled
+        /// The condition of a rule that carries a non-default `effect`, and the
+        /// entire mechanism of the conditional wire shape. It holds exactly what
+        /// `condition` holds; the only thing that matters about it is that no
+        /// build written before `effect` existed looks for it, so such a build's
+        /// required `condition` decode throws.
+        case conditionV2
+        case effect
+    }
+
+    init(id: UUID, condition: TriggerCondition, defaultKind: DefaultSessionKind,
+         enabled: Bool, effect: TriggerEffect) {
+        self.id = id
+        self.condition = condition
+        self.defaultKind = defaultKind
+        self.enabled = enabled
+        self.effect = effect
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        defaultKind = try container.decode(DefaultSessionKind.self, forKey: .defaultKind)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        // `decodeIfPresent` answers nil only for an absent key or an explicit
+        // null; a *present* condition this build has never heard of still
+        // throws, which is what keeps `testAnUnknownConditionNameIsPreserved…`
+        // true and keeps such a rule in `StoredTriggerRule.unreadable`.
+        if let old = try container.decodeIfPresent(TriggerCondition.self, forKey: .condition) {
+            condition = old
+        } else {
+            condition = try container.decode(TriggerCondition.self, forKey: .conditionV2)
+        }
+        effect = try container.decodeIfPresent(TriggerEffect.self, forKey: .effect)
+            ?? TriggerEffect.default(for: condition)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        // The whole conditional shape, in one branch. Everything else about this
+        // method is the old four keys.
+        if effect == TriggerEffect.default(for: condition) {
+            try container.encode(condition, forKey: .condition)
+        } else {
+            try container.encode(condition, forKey: .conditionV2)
+            try container.encode(effect, forKey: .effect)
+        }
+        try container.encode(defaultKind, forKey: .defaultKind)
+        try container.encode(enabled, forKey: .enabled)
+    }
 }
 
 /// Just enough of JSON's data model to hold a value verbatim and hand it back
@@ -668,25 +935,41 @@ func triggersToFire(
     }
 }
 
-/// The `SessionKind` a firing rule actually starts: whatever the condition
-/// binds its session's lifetime to, and otherwise `defaultKind` materialized
-/// at this instant.
+/// The `SessionKind` a firing rule actually starts: what the rule asked for.
 ///
-/// A condition that binds ignores `defaultKind` entirely. It is still stored on
-/// the rule (the Settings UI needs somewhere to persist it, and the schema
-/// didn't need to change), but for each of the five binding conditions —
-/// `.processRunning`, `.volumeMounted`, `.onSubnet`, `.vpnActive`,
-/// `.usbDevicePresent` — ending the session when
-/// the thing being watched goes away, rather than after some picked duration,
-/// is the entire reason to use that trigger over a plain `--for`. The Add
-/// sheet hides the duration picker for exactly these conditions rather than
-/// showing one it would discard.
+/// This used to read the *condition's* table (`boundSessionKind`), because the
+/// condition was the only thing that could express the choice. Plan 8 Task 10
+/// moved the choice onto the rule, so this reads `effect.lifetime` — and a rule
+/// with no stored effect gets `TriggerEffect.default(for:)`, whose entire
+/// contract is that it reproduces the old line for every condition there is.
 ///
-/// This used to match `.processRunning` here, and again in two places in
-/// `Sources/SessionDisplay.swift`, and a fourth time in the Add sheet. All four
-/// now read `TriggerCondition.boundSessionKind`, which is what made the second
-/// and third binding conditions one line in one table rather than four edits
-/// each.
+/// A rule that asked to bind ignores `defaultKind` entirely. It is still stored
+/// (the Settings UI needs somewhere to persist it, and it is what the rule falls
+/// back to if the lifetime is changed back), but for a bound session, ending
+/// when the thing being watched goes away rather than after some picked duration
+/// is the entire reason to write the rule that way. The Add sheet hides the
+/// duration picker while that is the choice, rather than showing one it would
+/// discard.
+///
+/// **The one combination that cannot be honoured, and what happens if it is
+/// asked for anyway.** `.whileConditionHolds` on a condition with no
+/// `candidateBoundSessionKind` — `.appFrontmost`, and only it — has no bound
+/// `SessionKind` to start. There is exactly one other thing this function can
+/// return, so it returns it: `defaultKind`, materialized now. That is stated
+/// here rather than left to be discovered, and it is deliberately the *safe*
+/// direction — a session with a deadline rather than one that never ends.
+///
+/// It is not reachable from the Add sheet, which does not offer the choice
+/// (`triggerLifetimeChoiceIsOffered`), nor from `TriggerEffect.chosen`, which
+/// filters it at the boundary that stores it. What can still produce it is a
+/// hand-edited store or a future build that gives `.appFrontmost` a candidate
+/// and is then downgraded to this one. `testARuleThatAskedToBindToAConditionWith
+/// NoCandidateFallsBackToItsDuration` pins the answer.
 func sessionKind(firing rule: TriggerRule, now: Date) -> SessionKind {
-    rule.condition.boundSessionKind ?? rule.defaultKind.sessionKind(now: now)
+    switch rule.effect.lifetime {
+    case .whileConditionHolds:
+        return rule.condition.candidateBoundSessionKind ?? rule.defaultKind.sessionKind(now: now)
+    case .forDuration:
+        return rule.defaultKind.sessionKind(now: now)
+    }
 }

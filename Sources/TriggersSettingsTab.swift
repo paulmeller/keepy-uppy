@@ -199,11 +199,25 @@ struct TriggersSettingsTab: View {
                         .help(rule.enabled ? "Turn this trigger off" : "Turn this trigger on")
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(triggerConditionTitle(rule.condition))
+                        // `triggerRuleTitle`, not `triggerConditionTitle`: the
+                        // same condition reads as timed under one rule and as
+                        // bound under another now that the lifetime is the
+                        // rule's to choose, and this row is where a user would
+                        // first notice a title promising a stop that will not
+                        // come.
+                        Text(triggerRuleTitle(rule))
                             .fontWeight(.medium)
                         Text(triggerEffectSubtitle(rule))
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                        // Absent for the request every trigger used to make, so
+                        // an ordinary list gains no noise — see
+                        // `triggerPowerNote`.
+                        if let power = triggerPowerNote(rule.effect.power) {
+                            Text(power)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     // A disabled rule stays legible but visibly inactive,
                     // rather than looking identical to an active one.
@@ -331,7 +345,37 @@ private struct AddTriggerSheet: View {
         }
     }()
     @State private var sessionKind: DefaultSessionKind = .indefinite
+    /// The lifetime **only if the user picked one**, so that "untouched" is a
+    /// state this sheet can represent rather than a value it has to guess.
+    ///
+    /// A plain `@State private var lifetime: TriggerLifetime = .forDuration`
+    /// would be a second copy of the condition's default sitting next to
+    /// `conditionKind`'s initial value, free to drift from it the day either
+    /// changes — and drift here is not cosmetic: a sheet nobody touched must
+    /// save `TriggerEffect.default(for:)` exactly, because that is what keeps the
+    /// rule on the pre-Task-10 wire shape and out of reach of an older build's
+    /// undecodable path. See `TriggerRule`'s doc comment.
+    ///
+    /// Cleared whenever the condition changes, so the picker visibly returns to
+    /// the new condition's own answer instead of silently carrying an override
+    /// from a condition the user has moved on from.
+    @State private var chosenLifetime: TriggerLifetime?
+    @State private var wakeMode = TriggerEffect.defaultPower.wakeMode
+    @State private var keepsDisksAwake = TriggerEffect.defaultPower.keepsDisksAwake
     @State private var pickerError: String?
+
+    private var lifetime: TriggerLifetime {
+        chosenLifetime ?? TriggerEffect.defaultLifetime(for: conditionKind)
+    }
+
+    /// What the Add button will store. One expression, read by the button and by
+    /// nothing else, so the sheet cannot save a different effect from the one it
+    /// has been describing.
+    private var effect: TriggerEffect {
+        TriggerEffect.chosen(power: PowerRequest(wakeMode: wakeMode,
+                                                 keepsDisksAwake: keepsDisksAwake),
+                             lifetime: lifetime, for: condition)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -515,24 +559,64 @@ private struct AddTriggerSheet: View {
                         .settingsFootnote()
                 }
 
-                // A condition that binds its session's lifetime has no duration
-                // to pick — `sessionKind(firing:now:)` would discard whatever
-                // was chosen — so the picker is replaced by the sentence saying
-                // what will end the session instead. Keyed off the one table
-                // rather than off `== .processRunning`, which is what this line
-                // and three others used to match on.
-                if conditionKind.bindsSessionLifetime {
-                    if let footnote = triggerBindingFootnote(condition) {
-                        Text(footnote)
-                            .settingsFootnote()
+                // Until Plan 8 Task 10 this was not a choice: a condition that
+                // bound its session's lifetime simply had its duration picker
+                // *replaced* by the sentence saying what would end the session
+                // instead. It is now a real choice wherever binding is possible
+                // at all, and the sentence moves under the option it describes.
+                //
+                // Both predicates are functions in `Sources/SessionDisplay.swift`
+                // rather than expressions here, because a `body` is not testable
+                // and "the duration picker is hidden for a rule that will run for
+                // a duration" is exactly the bug nobody would see.
+                if triggerLifetimeChoiceIsOffered(condition) {
+                    Picker(triggerLifetimeTitle, selection: lifetimeBinding) {
+                        ForEach(TriggerLifetime.allCases, id: \.self) {
+                            Text(triggerLifetimeOptionLabel($0)).tag($0)
+                        }
                     }
-                } else {
-                    Picker("Keep awake", selection: $sessionKind) {
+                }
+
+                if triggerDurationPickerIsShown(chosen: lifetime, for: condition) {
+                    Picker(triggerDurationTitle, selection: $sessionKind) {
                         ForEach(DefaultSessionKind.allCases) { Text($0.label).tag($0) }
                     }
+                } else if let footnote = triggerBindingFootnote(condition) {
+                    Text(footnote)
+                        .settingsFootnote()
+                }
+
+                // The power request, reusing the Display pane's words for the
+                // same three modes and the same toggle. A second set of words
+                // here is how that pane and this sheet come to describe them
+                // differently.
+                Picker(wakeModePickerTitle, selection: $wakeMode) {
+                    ForEach(wakeModeSettingsOrder, id: \.self) { mode in
+                        Text(wakeModeSettingsTitle(mode)).tag(mode)
+                    }
+                }
+                Text(wakeModeSettingsExplanation(wakeMode))
+                    .settingsFootnote()
+
+                Toggle(keepDisksAwakeSettingsTitle, isOn: $keepsDisksAwake)
+                // Only once it is on, which is the one difference from the
+                // Display pane's arrangement and is a layout decision, not an
+                // editorial one: this sheet already carries up to three
+                // condition footnotes plus the wake-mode explanation, and that
+                // paragraph is the longest string in the window. It says what
+                // the toggle *cannot* promise — system-wide, not your drive,
+                // and no answer to an enclosure's own firmware — which is
+                // exactly the sentence somebody who has just switched it on
+                // needs and somebody who left it off does not.
+                if keepsDisksAwake {
+                    Text(keepDisksAwakeSettingsFootnote)
+                        .settingsFootnote()
                 }
             }
             .formStyle(.grouped)
+            // Clears the lifetime override rather than recomputing it, so the
+            // picker returns to whatever the *new* condition's own answer is.
+            .onChange(of: conditionKind) { _ in chosenLifetime = nil }
 
             Divider()
 
@@ -542,7 +626,8 @@ private struct AddTriggerSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button("Add") {
                     onAdd(TriggerRule(id: UUID(), condition: condition,
-                                      defaultKind: sessionKind, enabled: true))
+                                      defaultKind: sessionKind, enabled: true,
+                                      effect: effect))
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -551,6 +636,10 @@ private struct AddTriggerSheet: View {
             .padding(20)
         }
         .frame(width: 460)
+    }
+
+    private var lifetimeBinding: Binding<TriggerLifetime> {
+        Binding(get: { lifetime }, set: { chosenLifetime = $0 })
     }
 
     /// Which input a condition needs filling in, so the sheet shows exactly

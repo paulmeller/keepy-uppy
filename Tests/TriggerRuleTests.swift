@@ -95,8 +95,16 @@ final class TriggerRuleTests: XCTestCase {
         }
     }
 
-    private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite, enabled: Bool = true) -> TriggerRule {
-        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled)
+    /// `effect` is an `Optional` with no default value of its own rather than
+    /// `= TriggerEffect.default(for: ...)`, which Swift cannot express anyway
+    /// (a default argument cannot read another argument) — and the shape is the
+    /// right one regardless: "not stated" and "stated as the default" are the
+    /// same rule here, and both are what the ~40 tests written before Plan 8
+    /// Task 10 meant. The tests that are *about* the field pass it.
+    private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .indefinite,
+                      enabled: Bool = true, effect: TriggerEffect? = nil) -> TriggerRule {
+        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: enabled,
+                    effect: effect ?? TriggerEffect.default(for: condition))
     }
 
     /// One `triggersToFire` evaluation with every observer defaulted to
@@ -1174,5 +1182,599 @@ final class TriggerRuleTests: XCTestCase {
                                r.defaultKind.sessionKind(now: now), "\(kind)")
             }
         }
+    }
+
+    // MARK: - The candidate table
+    //
+    // `boundSessionKind` answers "what does this condition bind to when nobody
+    // said otherwise". `candidateBoundSessionKind` answers "what *could* a rule
+    // on this condition bind to". The first is about rules people already saved;
+    // the second is about rules they have not written yet, and conflating them is
+    // what kept `.whileExternalDisplay` and `.whileOnACPower` unreachable from
+    // the Triggers pane for four plans.
+
+    /// The relationship, in the direction that must hold: a condition that binds
+    /// by default must be *able* to bind, and to the same thing. The reverse does
+    /// not hold and that is the point of having two tables.
+    func testWhateverBindsByDefaultIsAlsoACandidateAndTheyAgree() {
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            guard let bound = condition.boundSessionKind else { continue }
+            XCTAssertEqual(condition.candidateBoundSessionKind, bound,
+                           "\(kind): the default table and the candidate table disagree")
+        }
+    }
+
+    /// The three the old table refused *for existing rules' sake*, and which a
+    /// new rule may now ask for. Each is a real new capability rather than a
+    /// re-spelling: before this, no trigger could end a session when the app
+    /// quit, the display was unplugged, or the charger came out.
+    func testTheThreeNewCandidatesAreExactlyTheOnesTheDefaultTableRefuses() {
+        XCTAssertEqual(TriggerCondition.appLaunched(bundleID: "com.apple.dt.Xcode")
+                        .candidateBoundSessionKind,
+                       .whileAppRunning(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertEqual(TriggerCondition.externalDisplayConnected.candidateBoundSessionKind,
+                       .whileExternalDisplay)
+        XCTAssertEqual(TriggerCondition.acPowerConnected.candidateBoundSessionKind,
+                       .whileOnACPower)
+        for condition: TriggerCondition in [.appLaunched(bundleID: "com.apple.dt.Xcode"),
+                                            .externalDisplayConnected, .acPowerConnected] {
+            XCTAssertNil(condition.boundSessionKind,
+                         "\(condition) must still not bind by default — rules people already "
+                         + "saved mean 'start a timed session', and changing that under them is "
+                         + "the objection the default table exists for")
+        }
+    }
+
+    /// `.appFrontmost` is the one condition with no candidate at all, and it is a
+    /// deliberate refusal rather than an omission: frontmost flickers, so a
+    /// session bound to it ends after an eleven-second glance at a browser. A
+    /// later change of heart has to turn this red first.
+    func testFrontmostAppIsTheOnlyConditionWithNoCandidateAtAll() {
+        let withoutCandidate = TriggerConditionKind.allCases
+            .filter { $0.sampleCondition.candidateBoundSessionKind == nil }
+        XCTAssertEqual(withoutCandidate, [.appFrontmost])
+    }
+
+    /// A candidate must carry the condition's associated value through, not a
+    /// stand-in — a `.whileVolumeMounted(name: "")` would end the instant it
+    /// started.
+    func testACandidateCarriesTheConditionsOwnValue() {
+        XCTAssertEqual(TriggerCondition.volumeMounted(name: "Backup").candidateBoundSessionKind,
+                       .whileVolumeMounted(name: "Backup"))
+        XCTAssertEqual(TriggerCondition.onSubnet(cidr: "10.0.0.0/8").candidateBoundSessionKind,
+                       .whileOnSubnet(cidr: "10.0.0.0/8"))
+        XCTAssertEqual(TriggerCondition.usbDevicePresent(vendorID: 0x05ac, productID: 0x024f)
+                        .candidateBoundSessionKind,
+                       .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f))
+    }
+
+    // MARK: - The default effect reproduces the old behaviour exactly
+    //
+    // The whole backward-compatibility claim of Plan 8 Task 10, stated as a test
+    // over every condition rather than as a sentence about a few of them.
+
+    /// A rule with no stored effect starts precisely what the pre-Task-10 line
+    /// started — `condition.boundSessionKind ?? defaultKind.sessionKind(now:)` —
+    /// and asks the machine for precisely what `EvidenceLoopRunner` used to
+    /// hardcode. Both halves, for every condition there is.
+    func testARuleWithNoStoredEffectBehavesExactlyAsItDidBefore() {
+        let now = Date(timeIntervalSince1970: 5_000_000)
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            let r = rule(condition, kind: .fourHours)
+            XCTAssertEqual(sessionKind(firing: r, now: now),
+                           condition.boundSessionKind ?? r.defaultKind.sessionKind(now: now),
+                           "\(kind): a rule nobody edited now starts a different session")
+            XCTAssertEqual(r.effect.power,
+                           PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false),
+                           "\(kind): the two literals EvidenceLoopRunner used to hardcode")
+        }
+    }
+
+    /// ...and the same claim about a rule that came off *disk* in the old
+    /// four-key shape, which is the form every rule any user has is actually in.
+    func testAStoredRuleWithNoEffectKeyDecodesToTheOldBehaviour() throws {
+        let now = Date(timeIntervalSince1970: 5_000_000)
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            let element = storedElement(rule(condition, kind: .fourHours))
+            XCTAssertEqual(Set(element.keys), ["id", "condition", "defaultKind", "enabled"],
+                           "\(kind): a rule with the default effect must be written in the exact "
+                           + "four-key shape every previous build wrote and reads")
+            let data = try JSONSerialization.data(withJSONObject: element)
+            let decoded = try JSONDecoder().decode(TriggerRule.self, from: data)
+            XCTAssertEqual(decoded.effect, TriggerEffect.default(for: condition), "\(kind)")
+            XCTAssertEqual(sessionKind(firing: decoded, now: now),
+                           condition.boundSessionKind ?? decoded.defaultKind.sessionKind(now: now),
+                           "\(kind)")
+        }
+    }
+
+    func testTheDefaultLifetimeIsTheConditionsOwnAnswer() {
+        for kind in TriggerConditionKind.allCases {
+            XCTAssertEqual(TriggerEffect.defaultLifetime(for: kind) == .whileConditionHolds,
+                           kind.bindsSessionLifetime, "\(kind)")
+            XCTAssertEqual(TriggerEffect.default(for: kind.sampleCondition).lifetime,
+                           TriggerEffect.defaultLifetime(for: kind), "\(kind)")
+        }
+    }
+
+    // MARK: - A rule chooses, and the pipeline obeys
+
+    /// The first half of the new capability: a condition that binds by default
+    /// can be told to run for a duration instead.
+    func testARuleCanAskForADurationOnAConditionThatBindsByDefault() {
+        let now = Date(timeIntervalSince1970: 6_000_000)
+        for kind in TriggerConditionKind.allCases where kind.bindsSessionLifetime {
+            let condition = kind.sampleCondition
+            let r = rule(condition, kind: .fourHours,
+                         effect: TriggerEffect(power: TriggerEffect.defaultPower,
+                                               lifetime: .forDuration))
+            XCTAssertEqual(sessionKind(firing: r, now: now), .duration(until: now.addingTimeInterval(4 * 3600)),
+                           "\(kind) was told to run for four hours and did not")
+        }
+    }
+
+    /// The second half, and the one that reaches three `SessionKind`s no trigger
+    /// could produce before: a condition that does *not* bind by default can be
+    /// told to.
+    func testARuleCanAskToBindOnAConditionThatDoesNotByDefault() {
+        let now = Date(timeIntervalSince1970: 6_000_000)
+        for kind in TriggerConditionKind.allCases where !kind.bindsSessionLifetime {
+            let condition = kind.sampleCondition
+            guard let candidate = condition.candidateBoundSessionKind else {
+                XCTAssertEqual(kind, .appFrontmost, "only .appFrontmost may have no candidate")
+                continue
+            }
+            let r = rule(condition, kind: .fourHours,
+                         effect: TriggerEffect(power: TriggerEffect.defaultPower,
+                                               lifetime: .whileConditionHolds))
+            XCTAssertEqual(sessionKind(firing: r, now: now), candidate, "\(kind)")
+        }
+    }
+
+    /// The combination nobody may reach from the UI, and what the pure function
+    /// does when it is handed one anyway — a hand-edited store, or a future build
+    /// that gives `.appFrontmost` a candidate and is then downgraded to this one.
+    ///
+    /// It falls back to the duration, which is the only other thing it can
+    /// return and is the safe direction: a session with a deadline rather than
+    /// one that never ends. Pinned so that "silently indefinite" cannot become
+    /// the answer by accident.
+    func testARuleThatAskedToBindToAConditionWithNoCandidateFallsBackToItsDuration() {
+        let now = Date(timeIntervalSince1970: 7_000_000)
+        let r = rule(.appFrontmost(bundleID: "com.apple.dt.Xcode"), kind: .oneHour,
+                     effect: TriggerEffect(power: TriggerEffect.defaultPower,
+                                           lifetime: .whileConditionHolds))
+        XCTAssertNil(r.condition.candidateBoundSessionKind)
+        XCTAssertEqual(sessionKind(firing: r, now: now), .duration(until: now.addingTimeInterval(3600)))
+    }
+
+    /// ...and the boundary that stores rules refuses to write it in the first
+    /// place, so the fallback above is a backstop rather than a route.
+    func testChosenRefusesALifetimeTheConditionCannotHonour() {
+        let effect = TriggerEffect.chosen(power: TriggerEffect.defaultPower,
+                                          lifetime: .whileConditionHolds,
+                                          for: .appFrontmost(bundleID: "com.apple.dt.Xcode"))
+        XCTAssertEqual(effect.lifetime, .forDuration)
+
+        // ...and keeps it everywhere it can be honoured, including the three
+        // conditions that do not bind by default.
+        for kind in TriggerConditionKind.allCases where kind != .appFrontmost {
+            XCTAssertEqual(TriggerEffect.chosen(power: TriggerEffect.defaultPower,
+                                                lifetime: .whileConditionHolds,
+                                                for: kind.sampleCondition).lifetime,
+                           .whileConditionHolds, "\(kind)")
+        }
+    }
+
+    /// The power axis, through the one function the agent reads. It is not
+    /// test-reachable in `Agent/EvidenceLoopRunner.swift` — that file is in no
+    /// target the tests link — so what is pinned here is that the rule carries
+    /// the request at all, and the line that reads it is verified by reading plus
+    /// a green agent build.
+    func testARuleCarriesWhateverPowerRequestItWasGiven() {
+        for mode in WakeMode.allCases {
+            for disks in [false, true] {
+                let power = PowerRequest(wakeMode: mode, keepsDisksAwake: disks)
+                let r = rule(.acPowerConnected,
+                             effect: TriggerEffect(power: power, lifetime: .forDuration))
+                XCTAssertEqual(r.effect.power, power)
+            }
+        }
+    }
+}
+
+/// **What an older build does with a rule this one wrote, proved rather than
+/// argued.**
+///
+/// `TriggerRule`'s doc comment used to prescribe making the new field
+/// undecodable to older builds outright, on the grounds that such a rule lands
+/// in `StoredTriggerRule.unreadable` and is preserved. That is true of every
+/// build from Plan 5 onward and **false of the only build that has ever
+/// shipped**, which has no `StoredTriggerRule` at all — so this file replicates
+/// both older stores rather than reasoning about either.
+///
+/// The replicas are written from `git show v0.1.0:Shared/TriggerRule.swift`, not
+/// from memory: v0.1.0 is the only old build that exists, and a replica of a
+/// remembered one would prove nothing.
+final class TriggerRuleDowngradeTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        XCTAssertTrue(PreferencesSuite.removeAllValuesForTesting(),
+                      "refused to clear the suite — it is the shipping one")
+    }
+
+    // MARK: - The replicas
+
+    /// v0.1.0's whole `TriggerCondition`: three cases, synthesized `Codable`.
+    private enum V010Condition: Codable, Equatable {
+        case appLaunched(bundleID: String)
+        case externalDisplayConnected
+        case acPowerConnected
+    }
+
+    /// v0.1.0's whole `TriggerRule`: four fields, synthesized `Codable`.
+    ///
+    /// `DefaultSessionKind` is the shipping type rather than a fourth replica
+    /// because it is byte-identical at v0.1.0 — same four cases, same raw values
+    /// — which `testTheReplicaMatchesTheBuildItClaimsToBe` checks rather than
+    /// assumes.
+    private struct V010Rule: Codable, Equatable {
+        let id: UUID
+        var condition: V010Condition
+        var defaultKind: DefaultSessionKind
+        var enabled: Bool
+    }
+
+    /// Plan 5's `StoredTriggerRule`, over the v0.1.0 rule shape: the
+    /// skip-and-preserve machinery as it exists in every build between v0.1.0
+    /// and this one. `JSONValue` is the shipping type because it is the same
+    /// type those builds have.
+    private enum V010StoredRule: Codable, Equatable {
+        case readable(V010Rule)
+        case unreadable(JSONValue)
+
+        var rule: V010Rule? {
+            if case .readable(let rule) = self { return rule }
+            return nil
+        }
+
+        init(from decoder: Decoder) throws {
+            if let rule = try? V010Rule(from: decoder) {
+                self = .readable(rule)
+                return
+            }
+            self = .unreadable(try JSONValue(from: decoder))
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .readable(let rule): try rule.encode(to: encoder)
+            case .unreadable(let json): try json.encode(to: encoder)
+            }
+        }
+    }
+
+    /// v0.1.0's whole `TriggerStore.load()`, verbatim:
+    /// `guard let data = …, let rules = try? decode([TriggerRule].self) else { return [] }`.
+    /// Its `save()` then writes whatever this returned back over the file.
+    private func v010Load(_ data: Data) -> [V010Rule] {
+        (try? JSONDecoder().decode([V010Rule].self, from: data)) ?? []
+    }
+
+    private func rule(_ condition: TriggerCondition, kind: DefaultSessionKind = .fourHours,
+                      effect: TriggerEffect? = nil) -> TriggerRule {
+        TriggerRule(id: UUID(), condition: condition, defaultKind: kind, enabled: true,
+                    effect: effect ?? TriggerEffect.default(for: condition))
+    }
+
+    private var nonDefaultEffect: TriggerEffect {
+        TriggerEffect(power: PowerRequest(wakeMode: .systemAndDisplay, keepsDisksAwake: true),
+                      lifetime: .whileConditionHolds)
+    }
+
+    /// The shape a v0.1.0 build actually wrote, hand-built from that build's
+    /// source rather than produced by this one's encoder — which is the only way
+    /// step 5 below can claim anything.
+    private var v010Payload: Data {
+        Data("""
+        {"id":"7F0C6C9E-3C6E-4A3C-9E52-2F5B1E0A77D1","condition":{"acPowerConnected":{}},\
+        "defaultKind":"fourHours","enabled":true}
+        """.utf8)
+    }
+
+    private func writeStoredPayload(_ elements: [Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: elements) else {
+            return XCTFail("could not build the payload")
+        }
+        PreferencesSuite.defaults.set(data, forKey: TriggerStore.key)
+    }
+
+    private func storedPayload() -> [Any] {
+        guard let data = PreferencesSuite.defaults.data(forKey: TriggerStore.key),
+              let elements = try? JSONSerialization.jsonObject(with: data) as? [Any]
+        else { return [] }
+        return elements
+    }
+
+    private func jsonObject(_ rule: TriggerRule) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(rule)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw XCTSkip("a rule did not encode as a JSON object")
+        }
+        return object
+    }
+
+    /// The replica is only evidence if it is a replica. `DefaultSessionKind` is
+    /// shared with the shipping build, so its wire names are pinned here against
+    /// the four v0.1.0 shipped.
+    func testTheReplicaMatchesTheBuildItClaimsToBe() {
+        XCTAssertEqual(Set(DefaultSessionKind.allCases.map(\.rawValue)),
+                       ["indefinite", "oneHour", "fourHours", "eightHours"])
+        XCTAssertNoThrow(try JSONDecoder().decode(V010Rule.self, from: v010Payload),
+                         "the replica cannot read the payload v0.1.0 wrote")
+    }
+
+    // MARK: - (2) A rule with the default effect survives the downgrade
+
+    /// **The load-bearing one.** Every rule any user has today, and every rule
+    /// anybody writes without touching the new controls, must read back in
+    /// v0.1.0 exactly as it does now — because against *that* build
+    /// "undecodable" does not mean "hidden", it means "deleted on the next
+    /// save".
+    func testARuleWithTheDefaultEffectStillDecodesInTheOldestBuild() throws {
+        let mine = rule(.acPowerConnected, kind: .eightHours)
+        let decoded = try JSONDecoder().decode(V010Rule.self, from: JSONEncoder().encode(mine))
+
+        XCTAssertEqual(decoded.id, mine.id)
+        XCTAssertEqual(decoded.condition, .acPowerConnected)
+        XCTAssertEqual(decoded.defaultKind, .eightHours)
+        XCTAssertEqual(decoded.enabled, true)
+    }
+
+    /// ...and the object it wrote has the old key set and nothing else, which is
+    /// the fact the decode above depends on. Stated separately so a decoder that
+    /// happened to tolerate an extra key could not hide an encoder that added
+    /// one.
+    func testADefaultEffectRuleIsWrittenInExactlyTheOldFourKeyShape() throws {
+        for kind in TriggerConditionKind.allCases {
+            let object = try jsonObject(rule(kind.sampleCondition))
+            XCTAssertEqual(Set(object.keys), ["id", "condition", "defaultKind", "enabled"], "\(kind)")
+        }
+    }
+
+    // MARK: - (3) A rule that uses the new field does not
+
+    func testARuleWithANonDefaultEffectIsUndecodableToTheOldestBuild() throws {
+        let mine = rule(.acPowerConnected, effect: nonDefaultEffect)
+        let data = try JSONEncoder().encode(mine)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(V010Rule.self, from: data)) { error in
+            guard case DecodingError.keyNotFound(let key, _) = error else {
+                return XCTFail("expected a missing-key failure, got \(error)")
+            }
+            XCTAssertEqual(key.stringValue, "condition",
+                           "the whole mechanism is that the old build's required `condition` "
+                           + "decode finds nothing")
+        }
+    }
+
+    func testANonDefaultEffectRuleMovesItsConditionToTheNewKeyAndCarriesTheEffect() throws {
+        let object = try jsonObject(rule(.acPowerConnected, effect: nonDefaultEffect))
+        XCTAssertEqual(Set(object.keys), ["id", "conditionV2", "effect", "defaultKind", "enabled"])
+        XCTAssertNil(object["condition"])
+    }
+
+    /// Both directions of the one rule that decides the wire shape, over every
+    /// condition: default effect ⇒ old shape ⇒ old build reads it; anything else
+    /// ⇒ new shape ⇒ old build throws. No condition may be an exception.
+    func testTheWireShapeFollowsTheEffectForEveryCondition() throws {
+        for kind in TriggerConditionKind.allCases {
+            let condition = kind.sampleCondition
+            let defaulted = try JSONEncoder().encode(rule(condition))
+            let chosen = try JSONEncoder().encode(
+                rule(condition, effect: TriggerEffect(
+                    power: PowerRequest(wakeMode: .system, keepsDisksAwake: true),
+                    lifetime: TriggerEffect.default(for: condition).lifetime)))
+
+            let defaultedObject = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: defaulted) as? [String: Any])
+            let chosenObject = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: chosen) as? [String: Any])
+            XCTAssertNotNil(defaultedObject["condition"], "\(kind)")
+            XCTAssertNil(defaultedObject["effect"], "\(kind)")
+            XCTAssertNotNil(chosenObject["conditionV2"], "\(kind)")
+            XCTAssertNotNil(chosenObject["effect"], "\(kind)")
+        }
+    }
+
+    // MARK: - (4) …and every build with the preserve machinery keeps it
+
+    /// A Plan 5-or-later build reading a rule this one wrote: the element fails
+    /// to decode, so it lands in `unreadable`, is counted, is hidden from the
+    /// pane, and comes back **verbatim** when that build saves. This is the job
+    /// the whole design is aimed at, and it is checked against a replica of that
+    /// build's store rather than against this one's, because this build can read
+    /// its own payload perfectly well.
+    func testAnIntermediateBuildHidesTheNewRuleAndWritesItBackUntouched() throws {
+        let ordinary = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"), kind: .oneHour)
+        let advanced = rule(.acPowerConnected, effect: nonDefaultEffect)
+        let payload = try JSONEncoder().encode([ordinary, advanced])
+
+        let stored = try JSONDecoder().decode([V010StoredRule].self, from: payload)
+        XCTAssertEqual(stored.count, 2)
+        XCTAssertEqual(stored.compactMap(\.rule).count, 1,
+                       "the ordinary rule must still be readable to that build")
+        XCTAssertEqual(stored.filter { $0.rule == nil }.count, 1,
+                       "…and the one using the new field must be hidden, not misread")
+        XCTAssertEqual(stored.compactMap(\.rule).first?.id, ordinary.id)
+
+        // What that build's `save()` writes back.
+        let rewritten = try JSONEncoder().encode(stored)
+        let before = try XCTUnwrap(JSONSerialization.jsonObject(with: payload) as? [[String: Any]])
+        let after = try XCTUnwrap(JSONSerialization.jsonObject(with: rewritten) as? [[String: Any]])
+        XCTAssertEqual(NSArray(array: after), NSArray(array: before),
+                       "the preserved element came back changed")
+
+        // …and this build reads its own rule back out of what that build wrote.
+        let roundTripped = try JSONDecoder().decode([TriggerRule].self, from: rewritten)
+        XCTAssertEqual(roundTripped, [ordinary, advanced])
+    }
+
+    /// The same chain through the **real** `TriggerStore`, using the next rung of
+    /// the ladder `TriggerRule.CodingKeys` documents: a payload from a future
+    /// build that moved the condition to `conditionV3`. This build cannot decode
+    /// it, and must therefore hide it, count it, and keep it.
+    func testThisBuildHidesAndKeepsARuleFromTheNextBreakInTheLadder() throws {
+        let mine = rule(.acPowerConnected, kind: .oneHour)
+        let future: [String: Any] = [
+            "id": "3C6E4A3C-7F0C-6C9E-9E52-2F5B1E0A77D1",
+            "conditionV3": ["volumeMounted": ["name": "Backup"]],
+            "effect": ["power": ["wakeMode": "system", "keepsDisksAwake": true],
+                       "lifetime": "whileConditionHolds",
+                       "thermalCeiling": 0.75],
+            "defaultKind": "oneHour", "enabled": true,
+        ]
+        writeStoredPayload([try jsonObject(mine), future])
+
+        XCTAssertEqual(TriggerStore.load(), [mine], "one unreadable element costs one rule")
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 1)
+        XCTAssertFalse(TriggerStore.storedPayloadIsUndecodable)
+
+        TriggerStore.save(TriggerStore.load())
+
+        let survivor = storedPayload().compactMap { $0 as? [String: Any] }
+            .first { $0["conditionV3"] != nil }
+        XCTAssertEqual(NSDictionary(dictionary: try XCTUnwrap(survivor)),
+                       NSDictionary(dictionary: future),
+                       "the future rule was not written back verbatim")
+    }
+
+    // MARK: - (5) The other direction: this build reads what v0.1.0 wrote
+
+    /// The half the old doc comment never considered. A *required* `decode` for
+    /// the new key — the route it recommended — would throw here, so the new
+    /// build could not show a user a single rule they already have. Measured
+    /// before this task was designed; pinned so nobody re-adopts that route.
+    func testAPayloadWrittenByTheOldestBuildStillReadsHere() throws {
+        let decoded = try JSONDecoder().decode(TriggerRule.self, from: v010Payload)
+
+        XCTAssertEqual(decoded.condition, .acPowerConnected)
+        XCTAssertEqual(decoded.defaultKind, .fourHours)
+        XCTAssertTrue(decoded.enabled)
+        XCTAssertEqual(decoded.effect, TriggerEffect.default(for: .acPowerConnected),
+                       "an absent effect is the one that reproduces the old behaviour")
+        XCTAssertEqual(sessionKind(firing: decoded, now: Date(timeIntervalSince1970: 100)),
+                       .duration(until: Date(timeIntervalSince1970: 100 + 4 * 3600)))
+    }
+
+    /// A rule with **neither** condition key is not a rule, and must fail rather
+    /// than default to something. The one thing the two-key decode must not
+    /// become is "tolerant".
+    func testARuleWithNoConditionAtAllStillFails() {
+        let data = Data("""
+        {"id":"7F0C6C9E-3C6E-4A3C-9E52-2F5B1E0A77D1","defaultKind":"oneHour","enabled":true}
+        """.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(TriggerRule.self, from: data))
+    }
+
+    /// A *present* condition this build has never heard of must still throw,
+    /// which is what keeps such a rule preserved rather than silently reshaped.
+    /// `decodeIfPresent` answers nil only for an absent key or an explicit null,
+    /// and this is the test that says so out loud.
+    func testAnUnknownConditionUnderTheOldKeyStillFails() {
+        let data = Data("""
+        {"id":"7F0C6C9E-3C6E-4A3C-9E52-2F5B1E0A77D1",\
+        "condition":{"wifiNetwork":{"ssid":"Studio"}},"defaultKind":"oneHour","enabled":true}
+        """.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(TriggerRule.self, from: data))
+    }
+
+    // MARK: - (6) The whole struct, with nothing at its default
+
+    /// The test that catches a field the hand-written encoder forgot.
+    ///
+    /// `TriggerRule` lost its synthesized `Codable` in Plan 8 Task 10, which
+    /// buys the conditional wire shape and costs exactly this: an encoder that
+    /// must be updated for every future field, with no compiler to say so. Every
+    /// value here is away from its default, and the comparison is of the whole
+    /// struct, so a dropped field cannot pass by matching a default.
+    func testEveryFieldOfARuleSurvivesARoundTripWithNothingAtItsDefault() throws {
+        for lifetime in TriggerLifetime.allCases {
+            for mode in WakeMode.allCases {
+                for disks in [false, true] {
+                    let original = TriggerRule(
+                        id: UUID(uuidString: "0BE0F0B2-4B26-4C0E-8F0B-2E5C1A9D3E77")!,
+                        condition: .usbDevicePresent(vendorID: 0x05ac, productID: 0x024f),
+                        defaultKind: .eightHours,
+                        enabled: false,
+                        effect: TriggerEffect(
+                            power: PowerRequest(wakeMode: mode, keepsDisksAwake: disks),
+                            lifetime: lifetime))
+                    let decoded = try JSONDecoder().decode(
+                        TriggerRule.self, from: JSONEncoder().encode(original))
+                    XCTAssertEqual(decoded, original, "\(lifetime) \(mode) \(disks)")
+                }
+            }
+        }
+    }
+
+    /// The same round trip through the real store, so the wire shape is proved
+    /// against `UserDefaults` and not only against `JSONEncoder`.
+    func testBothWireShapesRoundTripThroughTheRealStore() {
+        let ordinary = rule(.volumeMounted(name: "Backup"))
+        let advanced = rule(.appLaunched(bundleID: "com.apple.dt.Xcode"),
+                            effect: nonDefaultEffect)
+        TriggerStore.save([ordinary, advanced])
+
+        XCTAssertEqual(TriggerStore.load(), [ordinary, advanced])
+        XCTAssertEqual(TriggerStore.loadStored().unreadableCount, 0)
+    }
+
+    // MARK: - (7) The v0.1.0 destruction path, pinned so nobody widens it
+
+    /// **Why "a rule the user never touched stays byte-compatible" is a
+    /// data-preservation guarantee and not a nicety.**
+    ///
+    /// v0.1.0 has no element-wise skipping: one element it cannot decode fails
+    /// the whole array, `load()` answers `[]`, and the next `save()` writes that
+    /// over the file. So against the only shipped build an undecodable element is
+    /// not hidden — every rule the user has is deleted.
+    func testAnOldStoreDestroysEverythingWhenOneElementIsUndecodable() throws {
+        let ordinary = rule(.acPowerConnected, kind: .oneHour)
+        let advanced = rule(.externalDisplayConnected, effect: nonDefaultEffect)
+        let payload = try JSONEncoder().encode([ordinary, advanced])
+
+        XCTAssertTrue(v010Load(payload).isEmpty,
+                      "v0.1.0 answers [] for the whole file, and its save() then writes that back")
+    }
+
+    /// ...and the assertion that bounds the exposure: a file of rules that all
+    /// have the default effect survives v0.1.0 completely intact. This is the
+    /// requirement the conditional wire shape exists to meet, and it is what
+    /// makes the design smaller than "everything this build writes goes opaque".
+    func testAnOldStoreKeepsEveryDefaultEffectRuleIntact() throws {
+        let rules = [rule(.acPowerConnected, kind: .oneHour),
+                     rule(.externalDisplayConnected, kind: .eightHours),
+                     rule(.appLaunched(bundleID: "com.apple.dt.Xcode"), kind: .indefinite)]
+        let survivors = v010Load(try JSONEncoder().encode(rules))
+
+        XCTAssertEqual(survivors.count, rules.count, "v0.1.0 lost a rule it should have kept")
+        XCTAssertEqual(survivors.map(\.id), rules.map(\.id))
+        XCTAssertEqual(survivors.map(\.defaultKind), rules.map(\.defaultKind))
+    }
+
+    /// The exposure that already existed and which this change must not enlarge:
+    /// a rule using any of Plan 5's six conditions is *already* undecodable to
+    /// v0.1.0, whatever its effect. Stated as a test so "the new field made this
+    /// worse" is answerable with a fact.
+    func testPlan5sConditionsAlreadyDestroyedAnOldStoreBeforeThisChange() throws {
+        let payload = try JSONEncoder().encode([rule(.acPowerConnected, kind: .oneHour),
+                                                rule(.volumeMounted(name: "Backup"))])
+        XCTAssertTrue(v010Load(payload).isEmpty,
+                      "a .volumeMounted rule with the DEFAULT effect already does this — the "
+                      + "population at risk is not enlarged by the new field")
     }
 }

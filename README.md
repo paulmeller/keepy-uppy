@@ -205,9 +205,11 @@ away. So the flag means disks attached to this Mac, and nothing here pretends
 otherwise.
 
 The same switch sits under the mode picker on the Display tab, for the sessions
-you start from the menu. A trigger's session always keeps this Mac awake with
-the lid closed and never asks for disks, so a rule you saved before either axis
-existed still does exactly what it always did.
+you start from the menu. A trigger ignores both of those and carries its own
+answer, picked in the sheet that adds it — and the answer it starts with is the
+one every trigger used to give unconditionally: keep this Mac awake with the lid
+closed, and don't ask for disks. So a rule you saved before either axis existed
+still does exactly what it always did.
 
 **It can't stop your Mac asking for a password.** macOS only lets a
 configuration profile change when the lock kicks in, and an app isn't allowed to
@@ -227,25 +229,37 @@ keeping itself awake without you remembering to ask. Nine conditions, and they
 fall into two groups that behave differently — which is the thing worth knowing
 before you write a rule.
 
-**Five hold a session open for exactly as long as the condition lasts:** a
-process is running, a volume is mounted, this Mac is on a given network, a VPN
-is connected, a USB device is attached. Eject the drive, drop the tunnel or
-unplug the dongle and the session goes with it, the same way `--while-…` does
-from the command line.
+**Five start out holding a session open for exactly as long as the condition
+lasts:** a process is running, a volume is mounted, this Mac is on a given
+network, a VPN is connected, a USB device is attached. Eject the drive, drop the
+tunnel or unplug the dongle and the session goes with it, the same way
+`--while-…` does from the command line.
 
-**Four are a starting gun:** an app launches, an app comes to the front, an
-external display connects, power is connected. The condition fires the session;
-the session then runs for the duration you picked on the rule, and unplugging
-the display doesn't end it.
+**Four start out as a starting gun:** an app launches, an app comes to the
+front, an external display connects, power is connected. The condition fires the
+session; the session then runs for the duration you picked on the rule, and
+unplugging the display doesn't end it.
 
-The split isn't waiting to be finished. "While this app is frontmost" sounds
-coherent and isn't — frontmost changes the instant you glance at a browser
-window, and a session that ends because you looked away for ten seconds is
-worse than no session; the durable version is `--while-app`, and it's already
-there. The display and power conditions could bind and deliberately don't,
-because rules people have already saved mean "start four hours when I dock",
-and quietly turning those into "…and stop when I undock" would change what
-somebody's Mac does without them asking for it.
+Those are only where each rule *starts*. The Add sheet asks "Keep awake: while
+it lasts, or for a set time?", so a volume rule can run for four hours and — new
+here — a display, power or app-launch rule can hold the Mac awake until you
+unplug, unplug, or quit. The defaults are what they are because of rules people
+have already saved: a display rule somebody wrote last year means "start four
+hours when I dock", and quietly turning it into "…and stop when I undock" would
+change what their Mac does without them asking. Changing your own rule is a
+different thing entirely.
+
+The one condition that is *not* offered the choice is "an app comes to the
+front", and that is deliberate rather than unfinished. Frontmost changes the
+instant you glance at a browser window, so a session bound to it would end
+because you looked away for ten seconds — worse than no session. The durable
+version is "an app launches" with "while it lasts", which is exactly what the
+sheet now offers.
+
+The same sheet asks the other question a trigger could never answer for itself:
+what it holds awake. A rule can pick any of the three wake modes and can hold
+attached disks out of idle, instead of every trigger silently getting
+lid-closed-and-no-disks. Leave both alone and that is still what you get.
 
 There's no Wi-Fi-network trigger and no Bluetooth-device one, and that's also a
 decision. Each needs a privacy grant that a background agent with no window can
