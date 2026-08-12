@@ -59,6 +59,8 @@ import XCTest
     func currentState(reply: @escaping (Bool) -> Void)
     func version(reply: @escaping (String) -> Void)
     func recentSafetyStops(reply: @escaping (Data?, String?) -> Void)
+    func changeSessionPower(_ sessionID: String, powerJSON: Data,
+                            reply: @escaping (Bool, String?) -> Void)
 
     /// The verb the "old" far side has never heard of.
     ///
@@ -84,6 +86,8 @@ final class UnimplementedVerbProbeTests: XCTestCase {
         func currentState(reply: @escaping (Bool) -> Void) { reply(true) }
         func version(reply: @escaping (String) -> Void) { reply("old-daemon") }
         func recentSafetyStops(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
+        func changeSessionPower(_ sessionID: String, powerJSON: Data,
+                                reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
     }
 
     /// Stands in for `HelperListenerDelegate`, including the part that matters

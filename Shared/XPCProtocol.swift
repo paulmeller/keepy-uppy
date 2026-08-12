@@ -122,6 +122,71 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     /// `stopSession`.
     func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void)
 
+    /// Changes what a **live** session asks of this Mac, without restarting it.
+    ///
+    /// `powerJSON` is a JSON-encoded `PowerRequest` — the **whole** request,
+    /// both axes, never one of them. A verb that changed the wake mode alone
+    /// would leave `keepsDisksAwake` as the axis somebody forgets, which is the
+    /// failure `PowerPlan.reduce`, `PowerPlanHolder.apply` and
+    /// `DaemonConnection.startSession(kind:power:)` each have a doc comment
+    /// forbidding, and it is worse on a change than on a start: a start defaults
+    /// an axis nobody has relied on yet, and a change would silently *reset* a
+    /// live session's answer on an axis the caller never mentioned. The decoder
+    /// is strict about it too — see `PowerRequest`, whose keys are required
+    /// precisely so half a request cannot arrive as a whole one.
+    ///
+    /// It exists because the only way to change a session's mode used to be
+    /// stop-and-restart, which loses whatever the session's lifetime was bound
+    /// to: a `.whileVolumeMounted` session restarted is a *new* session that
+    /// will not end when the original volume goes, and a restarted `.lease` is
+    /// an id its client no longer holds.
+    ///
+    /// ## Authorisation: the same rule as `stopSession`, amendment included
+    ///
+    /// `SessionIsolation.authorize(action: .changePower, …)`, which means this
+    /// is the **second** verb the app's trigger-session exception widens. The
+    /// argument is bounded by what that exception already grants: changing a
+    /// session's power request is the same *kind* of authority as ending it —
+    /// both change what the session does to this Mac — and a caller already
+    /// permitted to end a session outright cannot be harmed by being permitted
+    /// to weaken it, which is strictly the smaller act. Strengthening one is not
+    /// new authority over the machine either: any admitted client can already
+    /// start a session of its own in the strongest mode. `renewLease` stays
+    /// outside, unchanged: it holds this Mac awake *for longer* on another
+    /// client's behalf, which is the one direction nothing in the exception
+    /// argues for.
+    ///
+    /// ## Transactionality
+    ///
+    /// `true` means the machine is in the requested state **now**. The apply can
+    /// fail (`PowerPlanHolder.apply` returns `false` when a promotion's
+    /// `setSleepDisabled(true)` write does not land), and on that path the
+    /// daemon restores the previous request, re-applies, and replies `false` —
+    /// the shape `startSession` uses, for its reason: a reply that reported a
+    /// promotion the machine did not make is exactly the defect class this
+    /// project keeps paying for. See `DaemonRuntime.changeSessionPower`.
+    ///
+    /// ## Callers: never polled, and gated before the first send
+    ///
+    /// The second verb added since the daemon-skew hazard was measured
+    /// (`Tests/UnimplementedVerbProbeTests.swift`): sending a verb an older
+    /// daemon does not implement **invalidates the connection server-side**,
+    /// which ends every `clientBound` session the calling identity owns. So this
+    /// is sent only from a person's own click or command — never on a timer, at
+    /// most once per action — and only after `DaemonCapability` has cleared the
+    /// daemon's build (`.changeSessionPower`).
+    ///
+    /// **And it cannot inherit `recentSafetyStops`' strongest protection**,
+    /// which is worth stating outright rather than leaving to be noticed: that
+    /// verb refuses while the caller owns any live session, so a wrong answer
+    /// from the version gate costs nothing. This verb's entire purpose is to act
+    /// on a live session, so that gate is not merely unimplemented here, it is
+    /// unavailable in principle — the version gate is load-bearing on its own,
+    /// and `DaemonCapability`'s note about what a build number does *not* prove
+    /// applies with full weight.
+    func changeSessionPower(_ sessionID: String, powerJSON: Data,
+                            reply: @escaping (Bool, String?) -> Void)
+
     /// Agent-only (spec §4): the daemon derives the caller's role
     /// structurally, from which Mach service (`helperMachServiceName` /
     /// `agentMachServiceName` / `cliMachServiceName`) the connection came in
@@ -304,37 +369,78 @@ func bundleVersionText(of bundle: Bundle) -> String {
 /// the check, and be sent a verb it does not implement. Anything that moves
 /// that call has to move a `Bundle.main` touch to daemon startup with it.
 ///
-/// ## Why a build number, and why 4
+/// ## Why a build number, and why the numbers are what they are
 ///
 /// `MARKETING_VERSION` is `0.1.0` on all four targets of every build this
 /// project has ever produced, so the short version alone compares equal between
 /// *any* two builds and cannot gate anything. `CURRENT_PROJECT_VERSION` is what
 /// `just bump` moves, and Task 1's R1.4 requires the release introducing a new
-/// verb to bump — which is why `project.yml` moves in the same commit as this
-/// constant and as the verb itself. All three have to travel together or the
-/// gate is a guess.
+/// verb to bump — which is why `project.yml` moves in the same commit as a new
+/// entry in `Verb` below and as the verb itself. All three have to travel
+/// together or the gate is a guess.
 ///
-/// It is **4, not 3**, and the reason is a defect found while writing this: the
-/// installed app on this machine reports `CFBundleVersion` **3** while tracked
-/// `project.yml` said **2**, so a release's bump was never committed and `just
-/// bump` (which takes its input from `project.yml`) would have re-minted 3 —
-/// a number that has already shipped, on a daemon with none of this. Gating at
-/// `>= 3` would therefore have cleared the very daemon serving this user right
-/// now. 4 is strictly greater than every build number that has ever existed
-/// here, so "reports at least 4" means "was built from this commit or later",
-/// which is the only statement that actually implies the verb exists.
+/// The rule each number follows: **strictly greater than every build number
+/// that has ever existed without that verb, and no greater than the number this
+/// commit stamps.** So "reports at least N" means "was built from the commit
+/// that added the verb, or later", which is the only statement that actually
+/// implies the verb exists. Being wrong low clears a daemon that cannot answer;
+/// being wrong high refuses the daemon that can.
+///
+/// `.recentSafetyStops` is **4, not 3**, and the reason is a defect found while
+/// writing it: the installed app on this machine reports `CFBundleVersion` **3**
+/// while tracked `project.yml` said **2**, so a release's bump was never
+/// committed and `just bump` (which takes its input from `project.yml`) would
+/// have re-minted 3 — a number that has already shipped, on a daemon with none
+/// of this. Gating at `>= 3` would have cleared the very daemon serving this
+/// user right now.
+///
+/// `.changeSessionPower` is **5** by that same rule read one commit later:
+/// `project.yml` said 4 when it was written, and local builds at 4 exist and
+/// have `recentSafetyStops` but not this, so 4 would clear a daemon that cannot
+/// answer. `project.yml` moves to 5 in the commit that adds it. A release then
+/// runs `just bump` on top (`notarize` depends on it) and ships a *higher*
+/// number, which is harmless in a way the opposite direction is not: these are
+/// lower bounds, so a build that overshoots still clears every verb it has.
 ///
 /// ## And why it is still not sufficient on its own
 ///
 /// A build number orders releases; it does not identify source. Two local
 /// builds made without a bump share a number, so on a developer's machine this
-/// gate can clear a daemon that predates the verb. That is why it is the
-/// *second* of `DaemonConnection.recentSafetyStops()`'s gates and not the only
-/// one — the load-bearing one is structural, and is documented there.
+/// gate can clear a daemon that predates the verb.
+///
+/// For `.recentSafetyStops` that is survivable, because it is the *second* of
+/// `DaemonConnection.recentSafetyStops()`'s gates: the load-bearing one is
+/// structural ("this user owns no live session"), and is documented there.
+/// **For `.changeSessionPower` there is no such second gate and there cannot
+/// be** — the verb exists to act on a live session, so "refuse while a session
+/// is live" would refuse it always. Its version gate carries the whole weight,
+/// which is exactly why the number is chosen against what is *installed* rather
+/// than against what is tracked.
 enum DaemonCapability {
-    /// The build number in which `HelperProtocol.recentSafetyStops(reply:)`
-    /// first existed. Moves only when the verb does.
-    static let recentSafetyStopsBuild = 4
+    /// Every verb on `HelperProtocol` that has not always existed, with the
+    /// build it first shipped in.
+    ///
+    /// A `CaseIterable` enum rather than one constant per verb, for this
+    /// project's usual reason and one specific to it: the guarantee that this
+    /// build can be asked its *own* verbs (`DaemonCapabilityTests`) is written
+    /// over `allCases`, so a third gated verb is covered by adding a case here
+    /// rather than by somebody remembering to extend a hand-written list — and
+    /// the case cannot be added without answering `introducedInBuild`, which is
+    /// the one question whose wrong answer costs a user their sessions.
+    enum Verb: CaseIterable {
+        /// Plan 8 Task 6.
+        case recentSafetyStops
+        /// Plan 8 Task 8.
+        case changeSessionPower
+
+        /// Exhaustive on purpose: see `Verb`'s own comment.
+        var introducedInBuild: Int {
+            switch self {
+            case .recentSafetyStops: return 4
+            case .changeSessionPower: return 5
+            }
+        }
+    }
 
     /// The build number out of a string written by `bundleVersionText`, or
     /// `nil` if there is not one — which is what a daemon predating Plan 7
@@ -351,19 +457,22 @@ enum DaemonCapability {
     }
 
     /// Whether a daemon that replied `versionReply` to `version(reply:)` can be
-    /// sent `recentSafetyStops`.
+    /// sent `verb`.
     ///
     /// **Every uncertain answer is "no".** A `nil` reply (the call failed, so
     /// nothing is known), an unparseable one, and a lower build all mean the
     /// verb is absent — Task 1's R1.4(b), and the only safe direction to be
-    /// wrong in: being wrong towards "absent" costs a sentence the app would
-    /// have liked to say, and being wrong towards "present" costs the user
-    /// their running sessions.
-    static func supportsRecentSafetyStops(versionReply: String?) -> Bool {
+    /// wrong in: being wrong towards "absent" costs a feature one action, and
+    /// being wrong towards "present" costs the user their running sessions.
+    ///
+    /// One function for every gated verb, so that rule is written once. Which
+    /// build clears which verb is the *only* thing that varies, and it lives in
+    /// `Verb.introducedInBuild`.
+    static func supports(_ verb: Verb, versionReply: String?) -> Bool {
         guard let versionReply, let build = buildNumber(inVersionText: versionReply) else {
             return false
         }
-        return build >= recentSafetyStopsBuild
+        return build >= verb.introducedInBuild
     }
 }
 
@@ -386,17 +495,46 @@ enum SessionIsolation {
         case forbidden
     }
 
-    /// Which verb is being authorised — because as of Plan 8 Task 5 the two
-    /// are no longer the same question.
+    /// Which verb is being authorised — because as of Plan 8 Task 5 they are
+    /// no longer the same question.
     ///
-    /// One function still answers both, so the ownership rule cannot be
-    /// implemented twice and half-changed; the asymmetry is confined to the
-    /// amendment below, which names `.stop` explicitly.
-    enum Action: Equatable {
-        /// `HelperProtocol.stopSession` — the only verb the amendment widens.
+    /// One function still answers all of them, so the ownership rule cannot be
+    /// implemented three times and half-changed; the asymmetry is confined to
+    /// `mayReachThisUsersOwnTriggerSessions` below.
+    enum Action: Equatable, CaseIterable {
+        /// `HelperProtocol.stopSession` — the verb the amendment was written
+        /// for.
         case stop
         /// `HelperProtocol.renewLease` — ownership, and nothing else, forever.
         case renew
+        /// `HelperProtocol.changeSessionPower` — Plan 8 Task 8.
+        case changePower
+
+        /// Whether the amendment reaches this verb.
+        ///
+        /// **An exhaustive `switch` and not a `!= .renew`**, because the
+        /// question a fourth verb's author has to answer is "may the app do this
+        /// to a session this user's rules started", and a `default` would answer
+        /// it on their behalf, silently, in the one place this daemon lets a
+        /// client touch a session it does not own.
+        ///
+        /// `.changePower` is in, and the argument is bounded by what `.stop`
+        /// already grants rather than being a fresh one: both verbs change what
+        /// the session does to this Mac, and weakening a session is strictly
+        /// less than ending it — a caller already trusted with the second cannot
+        /// be harmed by the first. Strengthening one is not new authority over
+        /// the machine either, since any admitted client can already start a
+        /// session of its own in the strongest mode.
+        ///
+        /// `.renew` stays out, unchanged and for its original reason: it holds
+        /// this Mac awake *for longer* on another client's behalf, and nothing
+        /// in "the app may end what your rules started" argues for that.
+        var mayReachThisUsersOwnTriggerSessions: Bool {
+            switch self {
+            case .stop, .changePower: return true
+            case .renew: return false
+            }
+        }
     }
 
     /// A caller may act on (stop, renew) a session if they own it — **and, in
@@ -432,7 +570,10 @@ enum SessionIsolation {
         // expression. It is a conjunction of five facts, three of them in
         // `Session.startedByTrigger(forUserID:)`:
         //
-        //   1. the verb is **stop**;
+        //   1. the verb is one the amendment reaches — **stop**, and since Plan
+        //      8 Task 8 **changePower**, never **renew**
+        //      (`Action.mayReachThisUsersOwnTriggerSessions`, where each verb's
+        //      answer is argued);
         //   2. the caller arrived on the **app's** Mach service;
         //   3. the session's `ownerUID` is the caller's own uid;
         //   4. the session's owner is that uid's **agent** (unforgeable: only
@@ -451,13 +592,15 @@ enum SessionIsolation {
         // comparison, so another account's trigger session is untouchable). No
         // other caller (clause 2: the CLI and the agent get nothing new). No
         // other owner (clause 4: this user's `cli-<uid>` sessions stay theirs,
-        // whatever their payload claims about `origin`). No other verb (clause
-        // 1: `.renew` falls through to `.forbidden` below — the amendment ends
-        // a session, it never extends one). And no sweep:
+        // whatever their payload claims about `origin`). No *extension* of a
+        // session (clause 1: `.renew` falls through to `.forbidden` below — the
+        // amendment ends or weakens a session, it never holds this Mac awake for
+        // longer on the agent's behalf). And no sweep:
         // `sessionsToStop(all: false)` is untouched, so this remains a
         // per-session decision a person makes on a named row.
         // ─────────────────────────────────────────────────────────────────────
-        if action == .stop, callerRole == .app, session.startedByTrigger(forUserID: callerUID) {
+        if action.mayReachThisUsersOwnTriggerSessions, callerRole == .app,
+           session.startedByTrigger(forUserID: callerUID) {
             return .authorized
         }
 

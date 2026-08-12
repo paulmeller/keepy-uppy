@@ -191,6 +191,92 @@ final class SessionIsolationTests: XCTestCase {
                        "the owner may still renew its own lease")
     }
 
+    // MARK: - The second verb the amendment reaches (Plan 8 Task 8)
+
+    /// `.changePower` is inside the amendment, and the argument is bounded by
+    /// what `.stop` already grants: both verbs change what the session does to
+    /// this Mac, and weakening one is strictly less than ending it.
+    func testTheAppMayChangeThePowerOfItsOwnUsersTriggerSession() {
+        let automatic = session(owner: agent(me), uid: me, origin: .trigger)
+        XCTAssertEqual(decision(.changePower, on: automatic, as: .app, uid: me), .authorized)
+    }
+
+    /// **Every clause of the conjunction still refuses, for the new verb too.**
+    ///
+    /// Written as the same table `testTheWideningIsExactlyTheTriggerPredicateAndNothingElse`
+    /// uses, over both amendment-reached verbs at once, so the two cannot drift:
+    /// a widening that reached `.changePower` and not `.stop` — or, far worse,
+    /// one that reached a session `.stop` refuses — turns this red.
+    func testTheNewVerbWidensExactlyWhatStoppingDoesAndNothingMore() {
+        let table = [
+            session(owner: agent(me), uid: me, origin: .trigger),
+            session(owner: agent(me), uid: me, origin: .manual),
+            session(owner: cli(me), uid: me, origin: .trigger),
+            session(owner: app(me), uid: me, origin: .trigger),
+            session(owner: agent(someoneElse), uid: someoneElse, origin: .trigger),
+        ]
+        for candidate in table {
+            for role in ClientRole.allCases {
+                XCTAssertEqual(decision(.changePower, on: candidate, as: role, uid: me,
+                                        among: table),
+                               decision(.stop, on: candidate, as: role, uid: me, among: table),
+                               "changing the power of \(candidate.owner.rawValue)/"
+                               + "\(candidate.origin.rawValue) as \(role) does not match "
+                               + "whether it may be stopped")
+            }
+        }
+    }
+
+    /// The account boundary, stated for the new verb on its own rather than only
+    /// through the table above: this is the one that can never be re-earned.
+    func testTheAppMayNotChangeThePowerOfAnotherUsersTriggerSession() {
+        let theirs = session(owner: agent(someoneElse), uid: someoneElse, origin: .trigger)
+        XCTAssertEqual(decision(.changePower, on: theirs, as: .app, uid: me), .forbidden)
+    }
+
+    /// The CLI gets nothing new, exactly as it got nothing new from Task 5: it
+    /// may change the power of the sessions it owns and no others.
+    func testTheCLIMayChangeItsOwnSessionsPowerAndNoOthers() {
+        let terminal = session(owner: cli(me), uid: me, origin: .manual)
+        XCTAssertEqual(decision(.changePower, on: terminal, as: .cli, uid: me), .authorized)
+
+        let automatic = session(owner: agent(me), uid: me, origin: .trigger)
+        XCTAssertEqual(decision(.changePower, on: automatic, as: .cli, uid: me), .forbidden)
+        let fromTheMenu = session(owner: app(me), uid: me, origin: .manual)
+        XCTAssertEqual(decision(.changePower, on: fromTheMenu, as: .cli, uid: me), .forbidden)
+    }
+
+    /// **Which verbs the amendment reaches is exhaustive and deliberate.** The
+    /// property is asked over `Action.allCases` so a fourth verb has to be given
+    /// an answer here rather than inheriting one, and the answers are pinned
+    /// individually because each has its own argument on
+    /// `Action.mayReachThisUsersOwnTriggerSessions`.
+    func testExactlyTheVerbsThatMayReachATriggerSessionDo() {
+        let automatic = session(owner: agent(me), uid: me, origin: .trigger)
+        for action in SessionIsolation.Action.allCases {
+            XCTAssertEqual(decision(action, on: automatic, as: .app, uid: me) == .authorized,
+                           action.mayReachThisUsersOwnTriggerSessions,
+                           "\(action) disagrees with its own answer about the amendment")
+        }
+        XCTAssertTrue(SessionIsolation.Action.stop.mayReachThisUsersOwnTriggerSessions)
+        XCTAssertTrue(SessionIsolation.Action.changePower.mayReachThisUsersOwnTriggerSessions)
+        XCTAssertFalse(SessionIsolation.Action.renew.mayReachThisUsersOwnTriggerSessions,
+                       "renewing holds this Mac awake for longer on another client's behalf, "
+                       + "which is the one direction the exception does not argue for")
+    }
+
+    /// Ownership still answers first, for every verb: the amendment is an
+    /// addition to the rule, never a replacement for it.
+    func testOwnershipStillAuthorisesEveryVerbOnYourOwnSession() {
+        let mine = session(owner: alice)
+        for action in SessionIsolation.Action.allCases {
+            XCTAssertEqual(SessionIsolation.authorize(sessionID: mine.id, action: action,
+                                                      requestedBy: alice, uid: me, role: .cli,
+                                                      among: [mine]), .authorized,
+                           "\(action) on your own session")
+        }
+    }
+
     /// The widening is a comparison against the caller's **own** uid, not a
     /// second way of saying "any trigger session". The app of one account and
     /// the trigger of another are both real on a shared Mac.

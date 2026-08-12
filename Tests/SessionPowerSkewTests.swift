@@ -152,11 +152,13 @@ final class SessionPowerSkewOverXPCTests: XCTestCase {
         func registerAsAgent(reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
         func currentState(reply: @escaping (Bool) -> Void) { reply(false) }
         func version(reply: @escaping (String) -> Void) { reply("0.1.0") }
-        /// A daemon of this vintage has no such verb at all — but conformance
-        /// is complete or nothing compiles, so it replies the way an encoding
-        /// failure would. Nothing in this file sends it; the bare `"0.1.0"`
-        /// above is what a client of this vintage is gated on.
+        /// A daemon of this vintage has neither of these verbs at all — but
+        /// conformance is complete or nothing compiles, so they reply the way a
+        /// failure would. Nothing in this file sends either; the bare `"0.1.0"`
+        /// above is what a client of this vintage is gated on, for both.
         func recentSafetyStops(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
+        func changeSessionPower(_ sessionID: String, powerJSON: Data,
+                                reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
     }
 
     private final class ListenerDelegate: NSObject, NSXPCListenerDelegate {

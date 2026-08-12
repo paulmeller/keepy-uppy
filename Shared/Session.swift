@@ -326,6 +326,42 @@ struct Session: Equatable, Codable, Identifiable {
                 triggerID: triggerID, wakeMode: wakeMode, keepsDisksAwake: keepsDisksAwake)
     }
 
+    /// This session with a different **whole power request**, and **nothing
+    /// else** changed.
+    ///
+    /// It is on the line under `renewed(until:)` for that function's reason,
+    /// which is the only reason: rebuilding a `Session` field by field is this
+    /// type's one recurring trap, it bit five times, and what fixed it was one
+    /// copy of the rebuild *adjacent to the field list it has to mirror* rather
+    /// than a rebuild spelled out wherever one was needed. Two rebuilds, both
+    /// here, both a few lines under the fields — so a twelfth field is carried
+    /// across by editing the two functions directly below where it was just
+    /// added.
+    ///
+    /// **It takes a `PowerRequest`, not a `WakeMode`**, and that is the same
+    /// argument `PowerPlan.reduce`, `PowerPlanHolder.apply` and
+    /// `DaemonConnection.startSession(kind:power:)` each make in their own doc
+    /// comments, restated for a *change*: a rebuild that took one axis would
+    /// leave `keepsDisksAwake` as the axis somebody forgets. It is worse here
+    /// than at those three, too — forgetting it at a start defaults a session
+    /// nobody has yet relied on, while forgetting it here silently *resets* a
+    /// live session's answer on an axis the caller never mentioned.
+    ///
+    /// `startedAt` is carried across like every other field, and is called out
+    /// because it is the one whose loss would be both invisible and expensive:
+    /// a rebuild that restamped it would hand the session a fresh 8-hour
+    /// max-duration budget (`SessionEngine.maxSessionDuration`, and
+    /// `SafetyEngine`'s backstop, which keys off session age) every time its
+    /// mode changed. `SessionTests` compares whole structs rather than a
+    /// hand-written field list, because the compiler can force a field to be
+    /// *named* here but not to be named with the value the caller sent.
+    func with(power: PowerRequest) -> Session {
+        Session(id: id, kind: kind, owner: owner, ownerUID: ownerUID,
+                persistence: persistence, origin: origin, startedAt: startedAt,
+                triggerID: triggerID, wakeMode: power.wakeMode,
+                keepsDisksAwake: power.keepsDisksAwake)
+    }
+
     /// **No parameter here has a default, and none may gain one.**
     ///
     /// Three used to (`ownerUID`, `triggerID`, `wakeMode`) and the omission bit

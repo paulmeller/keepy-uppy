@@ -226,7 +226,31 @@ enum PowerAssertionType: String, CaseIterable, Equatable, Hashable {
 /// **No member has a default**, following `ObserverSet` and now `Session`. A
 /// fourth axis must be answered for at every construction site rather than
 /// substituted.
-struct PowerRequest: Equatable {
+///
+/// ## `Codable`, and why its decoder is stricter than `Session`'s
+///
+/// It crosses the wire on its own as of Plan 8 Task 8
+/// (`HelperProtocol.changeSessionPower`), encoded exactly the way `Session` is
+/// and for the same reason — whitelisting Swift types for `NSSecureCoding` is
+/// far more ceremony than encoding a `Codable` struct.
+///
+/// Synthesized, so **every key is required**: an absent `wakeMode` or
+/// `keepsDisksAwake` throws rather than defaulting. That is the deliberate
+/// opposite of `Session.init(from:)`, whose hand-written decoder defaults both
+/// axes, and the difference is not an inconsistency — it is which problem each
+/// decoder is for:
+///
+/// * `Session` decodes payloads written by **other vintages**: a stored session
+///   from before a field existed, and a start request from a client of a
+///   different build. Defaulting is what keeps those talking at all, and
+///   `SessionPowerSkew` exists to detect what it costs.
+/// * This type only ever decodes a payload from a client that has already
+///   established, before sending, that the daemon is new enough to have this
+///   verb at all (`DaemonCapability`). There is no older vintage on either end
+///   of that wire, so a missing axis is not an old client — it is half a
+///   request, which is the exact thing every doc comment above refuses to
+///   accept.
+struct PowerRequest: Equatable, Codable {
     let wakeMode: WakeMode
     let keepsDisksAwake: Bool
 }

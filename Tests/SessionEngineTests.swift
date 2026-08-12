@@ -1,4 +1,5 @@
 import XCTest
+import IOKit.pwr_mgt
 @testable import KeepyUppy
 
 final class SessionEngineTests: XCTestCase {
@@ -216,6 +217,178 @@ final class SessionEngineTests: XCTestCase {
 
         _ = engine.renewLease(id: session.id, until: t0.addingTimeInterval(120), now: t0)
         XCTAssertEqual(engine.desiredPowerPlan, before, "a renewal must not change the power plan")
+    }
+
+    // MARK: - Plan 8 Task 8: a live session changes its mind
+
+    /// The counterpart of `testRenewingALeaseMovesTheDeadlineAndChangesNothingElse`,
+    /// and written the same way and for the same reason: **no field is named**.
+    /// The session is built with every field set to something distinguishable
+    /// and the expectation comes from the same factory with only the request
+    /// moved, so a field rebuilt wrongly makes the two structs unequal whether
+    /// or not anyone thought to name it.
+    ///
+    /// The same qualifier applies as there: a new field left at the same
+    /// uninteresting value on both sides compares equal whatever the rebuild
+    /// does with it, so a new field is covered only once the factory below gives
+    /// it a non-default value.
+    func testChangingAPowerRequestChangesThatAndLeavesTheSessionOtherwiseAlone() {
+        let id = UUID()
+        let triggerID = UUID()
+        func session(power: PowerRequest) -> Session {
+            Session(id: id, kind: .whileVolumeMounted(name: "Backup"),
+                    owner: ClientID(rawValue: "agent-501"), ownerUID: 501,
+                    persistence: .detached, origin: .trigger, startedAt: t0,
+                    triggerID: triggerID, wakeMode: power.wakeMode,
+                    keepsDisksAwake: power.keepsDisksAwake)
+        }
+        let before = PowerRequest(wakeMode: .system, keepsDisksAwake: true)
+        let after = PowerRequest(wakeMode: .clamshell, keepsDisksAwake: true)
+
+        var engine = SessionEngine()
+        XCTAssertEqual(engine.startSession(session(power: before), now: t0,
+                                           liveAgentConnections: 1),
+                       .admitted)
+
+        let outcome = engine.changePower(id: id, to: after, now: t0.addingTimeInterval(30))
+
+        XCTAssertEqual(engine.sessions, [session(power: after)])
+        XCTAssertEqual(outcome, .changed(session: session(power: after), from: before),
+                       "the outcome must carry the request that was in force, which is what "
+                       + "the daemon rolls back to when the machine refuses the new one")
+    }
+
+    /// The consequence the test above exists to produce, in the terms the daemon
+    /// acts on: `applyLocked` hands `desiredPowerPlan` to `PowerPlanHolder` on
+    /// every event, so this is the property the whole feature is for.
+    ///
+    /// Both directions, because the plan has to converge downward as well as
+    /// upward — a promotion that set the global override and a demotion that
+    /// failed to clear it would look identical to a test that only promoted.
+    func testAChangedRequestMovesThePlanInBothDirections() {
+        var engine = SessionEngine()
+        let session = make(.indefinite, wakeMode: .system)
+        engine.startSession(session, now: t0, liveAgentConnections: 1)
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: false))
+
+        engine.changePower(id: session.id,
+                           to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: true), now: t0)
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventDiskIdle],
+                                 sleepDisabled: true),
+                       "a promotion must reach the plan the daemon applies")
+
+        engine.changePower(id: session.id,
+                           to: PowerRequest(wakeMode: .system, keepsDisksAwake: false), now: t0)
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: false),
+                       "and a weakening must move it back, on both axes")
+    }
+
+    /// A change to a session that is not there is `.notFound` and **mutates
+    /// nothing** — including the other sessions, which is the half a bare
+    /// outcome assertion would not cover.
+    func testChangingAnUnknownSessionIsNotFoundAndTouchesNothing() {
+        var engine = SessionEngine()
+        let live = make(.indefinite, wakeMode: .system)
+        engine.startSession(live, now: t0, liveAgentConnections: 1)
+        let before = engine.sessions
+
+        XCTAssertEqual(engine.changePower(id: UUID(),
+                                          to: PowerRequest(wakeMode: .clamshell,
+                                                           keepsDisksAwake: true),
+                                          now: t0),
+                       .notFound)
+        XCTAssertEqual(engine.sessions, before)
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep], sleepDisabled: false))
+    }
+
+    /// **A no-op is a success, reported honestly.** Asking for the request a
+    /// session already has is not a failure — nothing was refused and nothing
+    /// went wrong — and `from` says it was a no-op without the caller having to
+    /// infer it from a second lookup. Reporting it as an error would put a
+    /// message on somebody's screen about a session that is doing exactly what
+    /// they asked.
+    func testAskingForTheRequestASessionAlreadyHasSucceedsAndSaysSo() {
+        var engine = SessionEngine()
+        let request = PowerRequest(wakeMode: .systemAndDisplay, keepsDisksAwake: true)
+        let session = make(.indefinite, wakeMode: request.wakeMode,
+                           keepsDisksAwake: request.keepsDisksAwake)
+        engine.startSession(session, now: t0, liveAgentConnections: 1)
+        let plan = engine.desiredPowerPlan
+
+        guard case .changed(let changed, let from) =
+                engine.changePower(id: session.id, to: request, now: t0) else {
+            return XCTFail("a no-op change must succeed, not report a failure")
+        }
+        XCTAssertEqual(from, request, "`from` is what makes a no-op recognisable as one")
+        XCTAssertEqual(changed.power, request)
+        XCTAssertEqual(engine.sessions, [session])
+        XCTAssertEqual(engine.desiredPowerPlan, plan)
+    }
+
+    /// Expiry sweeps in the same call, as it does after every other event: an
+    /// unrelated session whose deadline has passed must not survive a mode
+    /// change made to a different one, and must not still be contributing to the
+    /// plan when this returns.
+    func testAModeChangeStillSweepsAnExpiredSession() {
+        var engine = SessionEngine()
+        let expiring = make(.duration(until: t0.addingTimeInterval(60)), wakeMode: .clamshell)
+        let lasting = make(.indefinite, wakeMode: .system)
+        engine.startSession(expiring, now: t0, liveAgentConnections: 1)
+        engine.startSession(lasting, now: t0, liveAgentConnections: 1)
+
+        engine.changePower(id: lasting.id,
+                           to: PowerRequest(wakeMode: .systemAndDisplay, keepsDisksAwake: false),
+                           now: t0.addingTimeInterval(61))
+
+        XCTAssertEqual(engine.sessions.map(\.id), [lasting.id])
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventIdleDisplaySleep],
+                                 sleepDisabled: false),
+                       "the expired clamshell session was still holding the global setting")
+    }
+
+    /// The session being changed is swept too, and the sweep wins: a session
+    /// whose deadline passed before the request arrived is `.notFound` rather
+    /// than something whose mode can be changed for the five seconds until the
+    /// next tick. Same rule, and same reason, as
+    /// `testRenewLeaseCannotResurrectAnExpiredLeaseBeforeTheNextTick`.
+    func testAnExpiredSessionCannotHaveItsModeChangedBeforeTheNextTick() {
+        var engine = SessionEngine()
+        let expiring = make(.duration(until: t0.addingTimeInterval(60)), wakeMode: .system)
+        engine.startSession(expiring, now: t0, liveAgentConnections: 1)
+
+        XCTAssertEqual(engine.changePower(id: expiring.id,
+                                          to: PowerRequest(wakeMode: .clamshell,
+                                                           keepsDisksAwake: false),
+                                          now: t0.addingTimeInterval(61)),
+                       .notFound)
+        XCTAssertTrue(engine.sessions.isEmpty)
+        XCTAssertEqual(engine.desiredPowerPlan, .sleepAllowed)
+    }
+
+    /// The event on its own, applied directly, so the guarantee is pinned at the
+    /// level `DaemonRuntime`'s rollback uses it at — it re-applies this event
+    /// with the previous request rather than re-inserting a saved session.
+    func testTheEventIsItsOwnUndo() {
+        var engine = SessionEngine()
+        let before = PowerRequest(wakeMode: .system, keepsDisksAwake: false)
+        let session = make(.indefinite, wakeMode: before.wakeMode,
+                           keepsDisksAwake: before.keepsDisksAwake)
+        engine.startSession(session, now: t0, liveAgentConnections: 1)
+
+        _ = engine.apply(.changePower(id: session.id,
+                                      to: PowerRequest(wakeMode: .clamshell,
+                                                       keepsDisksAwake: true)), now: t0)
+        XCTAssertTrue(engine.desiredPowerPlan.sleepDisabled)
+
+        _ = engine.apply(.changePower(id: session.id, to: before), now: t0)
+        XCTAssertEqual(engine.sessions, [session],
+                       "applying the event with the previous request must restore the session "
+                       + "exactly, which is what makes the daemon's rollback a rollback")
     }
 
     // MARK: - Fix 2: renewLease must not launder a non-lease kind, or accept an unbounded deadline
@@ -605,5 +778,190 @@ final class SessionEngineTests: XCTestCase {
         XCTAssertEqual(withSweep.endCondition(id: UUID(), reportedByUserID: 0, now: later), .notFound)
         XCTAssertFalse(withSweep.sessions.contains(where: { $0.id == expiredID2 }), "the pre-sweep must have already removed it")
         XCTAssertFalse(withSweep.desiredKeepAwake)
+    }
+}
+
+// MARK: - Plan 8 Task 8: the mode change is transactional, proven against a
+//         machine that refuses the write
+
+/// A `SleepSettingBackend` that refuses the writes a test names.
+///
+/// It exists to produce the **one** failure `PowerPlanHolder.apply` reports as a
+/// failure — a refused `sleepDisabled: true` — without going anywhere near this
+/// Mac's real setting, which is root-only and survives a reboot.
+private final class RefusingSleepSetting: SleepSettingBackend {
+    /// Values whose write should fail. `[true]` is the machine
+    /// `PowerPlanHolder.apply`'s comment contemplates: undeclared SPI that will
+    /// not turn the setting on. `[true, false]` is that machine's other half —
+    /// SPI that refuses writes outright — where a refused *clear* must still not
+    /// be reported as a failed apply.
+    var refuses: Set<Bool> = []
+    private(set) var writes: [Bool] = []
+    var lastWrite: Bool? { writes.last }
+
+    func setSleepDisabled(_ disabled: Bool) -> Bool {
+        writes.append(disabled)
+        return !refuses.contains(disabled)
+    }
+}
+
+/// Hands out assertion ids without calling IOKit. A test that reached the real
+/// backend and failed between create and release would leave this Mac awake
+/// after the run.
+private final class StubAssertions: PowerAssertionBackend {
+    private var nextID: IOPMAssertionID = 100
+
+    func create(type: PowerAssertionType, name: String) -> IOPMAssertionID? {
+        defer { nextID += 1 }
+        return nextID
+    }
+
+    func release(_ id: IOPMAssertionID) -> Bool { true }
+}
+
+/// **Does a refused promotion leave the session exactly as it was?**
+///
+/// `DaemonRuntime.changeSessionPower` is in `Helper/`, which is not in this
+/// target's module graph, so the composition it performs is reproduced here —
+/// the same shape `SessionIsolationTests`' "authorization actually gates the
+/// mutation" section uses for `stopSession`, and for the same reason. Both
+/// halves of the composition are real: a real `SessionEngine` and a real
+/// `PowerPlanHolder`, with only the two machine-touching backends stubbed.
+///
+/// What is verified by reading alone is that `DaemonRuntime` performs *this*
+/// sequence. What is verified here is that this sequence has the property the
+/// reply claims.
+final class PowerChangeTransactionTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    private func session(_ power: PowerRequest) -> Session {
+        Session(id: UUID(), kind: .indefinite, owner: ClientID(rawValue: "cli-501"),
+                ownerUID: 501, persistence: .detached, origin: .manual, startedAt: t0,
+                triggerID: nil, wakeMode: power.wakeMode,
+                keepsDisksAwake: power.keepsDisksAwake)
+    }
+
+    /// `DaemonRuntime.changeSessionPower`'s body, minus the queue and the
+    /// authorisation (which `SessionIsolationTests` covers): change, apply, and
+    /// on a failed apply put the previous request back and re-apply before
+    /// reporting failure.
+    ///
+    /// Returns what the daemon would reply — `true` for `.changed`.
+    @discardableResult
+    private func changePower(id: UUID, to power: PowerRequest, now: Date,
+                             in engine: inout SessionEngine,
+                             holder: PowerPlanHolder) -> Bool {
+        guard case .changed(_, let previous) = engine.changePower(id: id, to: power, now: now)
+        else { return false }
+        guard holder.apply(engine.desiredPowerPlan) else {
+            _ = engine.changePower(id: id, to: previous, now: now)
+            _ = holder.apply(engine.desiredPowerPlan)
+            return false
+        }
+        return true
+    }
+
+    /// **The transaction.** A promotion to `.clamshell` on a Mac whose
+    /// `SleepDisabled` write does not land must leave the session running with
+    /// the request it already had — not with the one that was asked for, and not
+    /// destroyed.
+    ///
+    /// Three things are asserted, and the third is the one a naive rollback
+    /// fails: the reply is a failure, the *table* holds the old request, and the
+    /// *machine* was converged back onto the old plan rather than left holding
+    /// whatever the attempted plan had established before the write failed.
+    func testARefusedPromotionLeavesTheSessionAndTheMachineExactlyAsTheyWere() {
+        let sleepSetting = RefusingSleepSetting()
+        sleepSetting.refuses = [true]
+        let holder = PowerPlanHolder(assertions: StubAssertions(), sleepSetting: sleepSetting)
+
+        let before = PowerRequest(wakeMode: .system, keepsDisksAwake: true)
+        var engine = SessionEngine()
+        let running = session(before)
+        engine.startSession(running, now: t0, liveAgentConnections: 1)
+        XCTAssertTrue(holder.apply(engine.desiredPowerPlan), "the starting state must be honoured")
+
+        let changed = changePower(id: running.id,
+                                  to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: true),
+                                  now: t0, in: &engine, holder: holder)
+
+        XCTAssertFalse(changed, "a promotion the machine refused must be reported as a failure")
+        XCTAssertEqual(engine.sessions, [running],
+                       "the session must be left exactly as it was, request included")
+        XCTAssertEqual(engine.desiredPowerPlan,
+                       PowerPlan(assertions: [.preventIdleSystemSleep, .preventDiskIdle],
+                                 sleepDisabled: false))
+        XCTAssertEqual(sleepSetting.lastWrite, false,
+                       "the last thing written to the machine must be the old plan's answer, "
+                       + "not the refused promotion's")
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventDiskIdle],
+                       "the rollback must re-converge the assertion axis too, not only the "
+                       + "axis that failed")
+    }
+
+    /// The positive control, without which the test above would pass against an
+    /// implementation that never changes anything at all.
+    func testThePromotionTheMachineAcceptsIsKept() {
+        let sleepSetting = RefusingSleepSetting()
+        let holder = PowerPlanHolder(assertions: StubAssertions(), sleepSetting: sleepSetting)
+
+        var engine = SessionEngine()
+        let running = session(PowerRequest(wakeMode: .system, keepsDisksAwake: true))
+        engine.startSession(running, now: t0, liveAgentConnections: 1)
+        _ = holder.apply(engine.desiredPowerPlan)
+
+        let wanted = PowerRequest(wakeMode: .clamshell, keepsDisksAwake: true)
+        XCTAssertTrue(changePower(id: running.id, to: wanted, now: t0,
+                                  in: &engine, holder: holder))
+        XCTAssertEqual(engine.sessions.first?.power, wanted)
+        XCTAssertEqual(sleepSetting.lastWrite, true)
+    }
+
+    /// **Weakening is not special-cased, and does not need to be.** On the
+    /// machine whose SPI refuses writes outright — the case
+    /// `PowerPlanHolder.apply` names — a demotion still succeeds, because a
+    /// refused *clear* leaves the Mac awake for longer than asked, which is the
+    /// direction that cannot lose a user's work. One path, and the invariant is
+    /// what makes it safe rather than a second branch.
+    func testAWeakeningSucceedsEvenWhereTheSettingCannotBeWrittenAtAll() {
+        let sleepSetting = RefusingSleepSetting()
+        sleepSetting.refuses = [true, false]
+        let holder = PowerPlanHolder(assertions: StubAssertions(), sleepSetting: sleepSetting)
+
+        var engine = SessionEngine()
+        let running = session(PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+        engine.startSession(running, now: t0, liveAgentConnections: 1)
+        _ = holder.apply(engine.desiredPowerPlan)
+
+        let wanted = PowerRequest(wakeMode: .system, keepsDisksAwake: false)
+        XCTAssertTrue(changePower(id: running.id, to: wanted, now: t0,
+                                  in: &engine, holder: holder),
+                      "a refused clear is not a broken promise, so the weakening stands")
+        XCTAssertEqual(engine.sessions.first?.power, wanted)
+    }
+
+    /// The change converges **inside this call**, which is Plan 8's finding 6 and
+    /// the reason the surfaces can report a result at all rather than saying
+    /// "within five seconds".
+    ///
+    /// Nothing here ticks: one `changePower`, one `apply`, and the machine is in
+    /// the new state — in both directions, because `PowerPlanHolder.apply`
+    /// releasing what the new plan no longer wants is the half that would leave
+    /// a stale assertion held until the next tick if it did not.
+    func testTheMachineIsInTheNewStateWhenTheCallReturnsWithNoTickInBetween() {
+        let holder = PowerPlanHolder(assertions: StubAssertions(),
+                                     sleepSetting: RefusingSleepSetting())
+        var engine = SessionEngine()
+        let running = session(PowerRequest(wakeMode: .systemAndDisplay, keepsDisksAwake: false))
+        engine.startSession(running, now: t0, liveAgentConnections: 1)
+        _ = holder.apply(engine.desiredPowerPlan)
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventIdleDisplaySleep])
+
+        changePower(id: running.id,
+                    to: PowerRequest(wakeMode: .system, keepsDisksAwake: true),
+                    now: t0, in: &engine, holder: holder)
+
+        XCTAssertEqual(holder.heldTypes, [.preventIdleSystemSleep, .preventDiskIdle],
+                       "the display assertion was still held after the call that dropped it")
     }
 }

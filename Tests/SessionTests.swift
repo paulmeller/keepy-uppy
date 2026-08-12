@@ -136,6 +136,127 @@ final class SessionDiskAxisTests: XCTestCase {
     }
 }
 
+/// `Session.with(power:)` — the type's **second** rebuild, and the one a live
+/// session's mode change goes through (Plan 8 Task 8).
+///
+/// The whole file it lives in exists because rebuilding a `Session` field by
+/// field is this type's one recurring trap, so the tests are whole-struct
+/// comparisons rather than field lists: the compiler can force a field to be
+/// *named* in the rebuild, and only a `Session == Session` can check that it was
+/// named with the value it had a moment ago.
+final class SessionPowerChangeTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    /// A session with every field set to something a default could not produce,
+    /// so a field dropped from the rebuild shows up as a wrong value rather than
+    /// as a coincidence.
+    private func session(power: PowerRequest) -> Session {
+        Session(id: id, kind: .whileVolumeMounted(name: "Backup"),
+                owner: ClientID(rawValue: "agent-501"), ownerUID: 501,
+                persistence: .detached, origin: .trigger, startedAt: t0,
+                triggerID: triggerID, wakeMode: power.wakeMode,
+                keepsDisksAwake: power.keepsDisksAwake)
+    }
+
+    private let id = UUID()
+    private let triggerID = UUID()
+
+    /// **Every request to every other request**, as one whole-struct comparison
+    /// each. Six modes crossed with six is thirty-six changes, including the six
+    /// no-ops — testing one transition would pass against a rebuild that
+    /// hard-coded a mode, and testing only "different" transitions would miss a
+    /// rebuild that treated "no change" as a special case.
+    func testChangingThePowerRequestChangesThatAndNothingElse() {
+        let requests = WakeMode.allCases.flatMap { mode in
+            [false, true].map { PowerRequest(wakeMode: mode, keepsDisksAwake: $0) }
+        }
+        for before in requests {
+            for after in requests {
+                XCTAssertEqual(session(power: before).with(power: after),
+                               session(power: after),
+                               "\(before) → \(after) did not leave the session otherwise identical")
+            }
+        }
+    }
+
+    /// The fields the rebuild must carry across, named individually **as well
+    /// as** by the whole-struct comparison above, because each has its own
+    /// reason and a failure message naming the field is what says which one.
+    ///
+    /// `startedAt` leads: it is the one whose loss would be invisible and
+    /// expensive. `SessionEngine.maxSessionDuration` and `SafetyEngine`'s
+    /// backstop both key off session age, so a rebuild that restamped it would
+    /// hand the session a fresh 8-hour budget every time its mode changed —
+    /// which, with a menu row a click away, is an unbounded session dressed up
+    /// as a preference.
+    func testTheChangeCarriesEveryOtherFieldIncludingTheClockItIsJudgedBy() {
+        let before = session(power: PowerRequest(wakeMode: .system, keepsDisksAwake: true))
+        let after = before.with(power: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+
+        XCTAssertEqual(after.startedAt, before.startedAt,
+                       "a restamped startedAt is a fresh max-duration budget per mode change")
+        XCTAssertEqual(after.id, before.id)
+        XCTAssertEqual(after.owner, before.owner)
+        XCTAssertEqual(after.ownerUID, before.ownerUID)
+        XCTAssertEqual(after.kind, before.kind)
+        XCTAssertEqual(after.persistence, before.persistence)
+        XCTAssertEqual(after.origin, before.origin)
+        XCTAssertEqual(after.triggerID, before.triggerID)
+
+        XCTAssertEqual(after.power, PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false),
+                       "and the one thing that was supposed to change did")
+    }
+
+    /// **The unit is the whole request**, which is what stops the disk axis
+    /// being reset by a change nobody made to it. A caller promoting a session
+    /// to `.clamshell` sends both axes, so this is the test that a
+    /// `with(wakeMode:)` — the shape this function deliberately is not — would
+    /// fail.
+    func testChangingTheModeCannotSilentlyDropTheDiskAxis() {
+        for held in [false, true] {
+            let running = session(power: PowerRequest(wakeMode: .system, keepsDisksAwake: held))
+            let promoted = running.with(
+                power: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: running.keepsDisksAwake))
+            XCTAssertEqual(promoted.keepsDisksAwake, held,
+                           "a promotion must carry the disk answer the session already had")
+        }
+    }
+}
+
+/// `PowerRequest` crosses the wire on its own as of Plan 8 Task 8, so its codec
+/// is now load-bearing in a way it was not when it existed only in memory.
+final class PowerRequestCodingTests: XCTestCase {
+    /// Every request, round-tripped whole. Not one: a decoder that hard-coded
+    /// either axis would pass a single-value test.
+    func testEveryRequestSurvivesEncodingAndDecoding() throws {
+        for mode in WakeMode.allCases {
+            for held in [false, true] {
+                let request = PowerRequest(wakeMode: mode, keepsDisksAwake: held)
+                let decoded = try JSONDecoder().decode(
+                    PowerRequest.self, from: try JSONEncoder().encode(request))
+                XCTAssertEqual(decoded, request)
+            }
+        }
+    }
+
+    /// **Both keys are required, and that is the decision.** `Session`'s decoder
+    /// defaults an absent axis, because it decodes payloads written by other
+    /// vintages and that is what keeps them talking. This type only ever decodes
+    /// a payload sent to a daemon already cleared by `DaemonCapability`, so a
+    /// missing axis is not an old client — it is half a request, and completing
+    /// it with a default is exactly the silent half-request every doc comment in
+    /// this area exists to refuse.
+    func testHalfARequestIsRefusedRatherThanCompleted() throws {
+        for partial in [#"{"wakeMode":"system"}"#,
+                        #"{"keepsDisksAwake":true}"#,
+                        #"{}"#] {
+            XCTAssertThrowsError(
+                try JSONDecoder().decode(PowerRequest.self, from: Data(partial.utf8)),
+                "\(partial) decoded into a whole request")
+        }
+    }
+}
+
 /// `HelperService.startSession`'s trusted/untrusted split — which fields of a
 /// client's request the daemon honours and which it overwrites with facts only
 /// it can establish. It is the most security-relevant step in starting a
@@ -330,6 +451,23 @@ final class SessionOverXPCTransportTests: XCTestCase {
             reply(data, nil)
         }
 
+        /// Not a stub either, since Plan 8 Task 8. It echoes back the **whole
+        /// `PowerRequest`** it decoded, in the same `echo(_:)` form
+        /// `startSession` above uses, so one string comparison covers both axes:
+        /// a reply naming one of them would pass while the other was dropped on
+        /// the wire, which is exactly the failure a payload can have.
+        ///
+        /// The echo rides on the error string because this verb's reply is
+        /// `(Bool, String?)` — the same trick `stopSession` above uses to report
+        /// a three-case decision through a two-value reply.
+        func changeSessionPower(_ sessionID: String, powerJSON: Data,
+                                reply: @escaping (Bool, String?) -> Void) {
+            guard let power = try? JSONDecoder().decode(PowerRequest.self, from: powerJSON) else {
+                return reply(false, "invalid power payload")
+            }
+            reply(true, "\(sessionID)|\(Self.echo(power))")
+        }
+
         func stopAllSessions(all: Bool, reply: @escaping (Int, String?) -> Void) { reply(0, "unused") }
         func listSessions(reply: @escaping (Data?, String?) -> Void) { reply(nil, "unused") }
         func renewLease(_ sessionID: String, until: Date, reply: @escaping (Bool, String?) -> Void) { reply(false, "unused") }
@@ -397,6 +535,66 @@ final class SessionOverXPCTransportTests: XCTestCase {
             let payload = try JSONEncoder().encode(session)
             proxy?.startSession(payload) { decoded, _ in
                 echoed = decoded
+                replied.fulfill()
+            }
+            wait(for: [replied], timeout: 10)
+            XCTAssertEqual(echoed, described,
+                           "\(described) did not survive the XPC round trip")
+        }
+    }
+
+    /// **Plan 8 Task 8's wire proof: a whole `PowerRequest` reaches a live
+    /// session's mode change intact, for every request there is.**
+    ///
+    /// The same cross-product as `testEveryPowerRequestSurvivesARealXPCRoundTrip`
+    /// above, and for the same stated reason: testing one mode would pass even
+    /// if every payload arrived as the same mode, and testing one disk answer
+    /// would pass against a decoder that hard-coded it.
+    ///
+    /// What is different, and why this is not that test again with a second
+    /// selector: `startSession` carries a whole `Session` and this carries a
+    /// `PowerRequest` **on its own**, through a decoder that is deliberately
+    /// stricter (no defaults for an absent key). That is a second, independent
+    /// codec on a second selector with a second argument shape, adjudicated by
+    /// `NSXPCInterface` when the message is sent rather than when the file
+    /// compiles — so a wrong block signature or a type NSXPC declines to carry
+    /// shows up here, and nowhere earlier.
+    ///
+    /// The session id is echoed back beside the request because it is the other
+    /// half of the message: a verb that carried the request faithfully and
+    /// applied it to the wrong session would be worse than one that dropped it.
+    ///
+    /// An anonymous listener, as ever: nothing here touches the live daemon.
+    func testEveryPowerRequestSurvivesARealXPCRoundTripAsAModeChange() throws {
+        let listener = NSXPCListener.anonymous()
+        // `NSXPCListener.delegate` is weak — the same trap the tests around this
+        // one document, and the same fix.
+        let delegate = ListenerDelegate()
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+        connection.resume()
+        defer { connection.invalidate() }
+
+        let requests = WakeMode.allCases.flatMap { mode in
+            [false, true].map { PowerRequest(wakeMode: mode, keepsDisksAwake: $0) }
+        }
+        for request in requests {
+            let sessionID = UUID().uuidString
+            let described = "\(sessionID)|\(EchoingHelper.echo(request))"
+            let replied = expectation(description: "reply for \(described)")
+            replied.assertForOverFulfill = false
+            var echoed: String?
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                XCTFail("XPC error for \(described): \(error.localizedDescription)")
+                replied.fulfill()
+            } as? HelperProtocol
+            let payload = try JSONEncoder().encode(request)
+            proxy?.changeSessionPower(sessionID, powerJSON: payload) { _, detail in
+                echoed = detail
                 replied.fulfill()
             }
             wait(for: [replied], timeout: 10)

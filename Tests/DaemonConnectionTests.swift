@@ -250,48 +250,81 @@ final class DaemonCapabilityTests: XCTestCase {
 
     /// **The live state of this Mac.** The daemon serving this user replies a
     /// bare `"0.1.0"` (Plan 8 Task 1, Step 3c, established read-only), and it
-    /// has none of this. It must never be sent the verb.
+    /// has none of this. It must never be sent **any** gated verb, which is
+    /// written over `allCases` so a third one inherits the claim.
     func testTheDaemonRunningOnThisMacIsRefused() {
-        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: "0.1.0"))
+        for verb in DaemonCapability.Verb.allCases {
+            XCTAssertFalse(DaemonCapability.supports(verb, versionReply: "0.1.0"),
+                           "the daemon on this Mac was cleared for \(verb)")
+        }
     }
 
     /// Every uncertain answer is "no". Being wrong towards absent costs a
-    /// sentence; being wrong towards present costs the user their sessions.
+    /// feature one action; being wrong towards present costs the user their
+    /// sessions.
     func testEveryUncertainAnswerMeansTheVerbIsAbsent() {
-        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: nil),
-                       "a failed version call knows nothing, so it may not clear anything")
-        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: ""))
-        XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(versionReply: "banana"))
+        for verb in DaemonCapability.Verb.allCases {
+            XCTAssertFalse(DaemonCapability.supports(verb, versionReply: nil),
+                           "a failed version call knows nothing, so it may not clear anything")
+            XCTAssertFalse(DaemonCapability.supports(verb, versionReply: ""))
+            XCTAssertFalse(DaemonCapability.supports(verb, versionReply: "banana"))
+        }
     }
 
-    /// The boundary, in both directions, plus the number itself — 4 rather
-    /// than 3, because 3 has already shipped on a daemon with none of this
-    /// (the installed app on this machine reports `CFBundleVersion` 3).
+    /// The boundary, in both directions, for every gated verb — plus the floor
+    /// under all of them: **3 has already shipped** on a daemon with none of
+    /// this (the installed app on this machine reports `CFBundleVersion` 3), so
+    /// no verb may be introduced at or below it.
     func testOnlyABuildAtOrAboveTheIntroducingOneIsCleared() {
-        XCTAssertGreaterThan(DaemonCapability.recentSafetyStopsBuild, 3,
-                             "build 3 has shipped without this verb; gating at or below it "
-                             + "would clear the daemon this feature must not be sent to")
-        let introduced = DaemonCapability.recentSafetyStopsBuild
-        for build in [0, 1, 2, 3, introduced - 1] {
-            XCTAssertFalse(DaemonCapability.supportsRecentSafetyStops(
-                versionReply: bundleVersionText(shortVersion: "0.1.0", build: String(build))),
-                           "build \(build) was cleared")
-        }
-        for build in [introduced, introduced + 1, introduced + 100] {
-            XCTAssertTrue(DaemonCapability.supportsRecentSafetyStops(
-                versionReply: bundleVersionText(shortVersion: "0.1.0", build: String(build))),
-                          "build \(build) was refused")
+        for verb in DaemonCapability.Verb.allCases {
+            let introduced = verb.introducedInBuild
+            XCTAssertGreaterThan(introduced, 3,
+                                 "\(verb) is gated at \(introduced); build 3 has shipped without "
+                                 + "it, so that clears the daemon this must not be sent to")
+            for build in [0, 1, 2, 3, introduced - 1] {
+                XCTAssertFalse(DaemonCapability.supports(
+                    verb, versionReply: bundleVersionText(shortVersion: "0.1.0", build: String(build))),
+                               "build \(build) was cleared for \(verb)")
+            }
+            for build in [introduced, introduced + 1, introduced + 100] {
+                XCTAssertTrue(DaemonCapability.supports(
+                    verb, versionReply: bundleVersionText(shortVersion: "0.1.0", build: String(build))),
+                              "build \(build) was refused for \(verb)")
+            }
         }
     }
 
-    /// The gate is only implementable because the release introducing the verb
-    /// bumps, so this pins the third leg of that: the constant, the verb and
-    /// `project.yml` travel together or the gate is a guess.
-    func testThisBuildIsNewEnoughToBeAskedItsOwnVerb() {
-        XCTAssertTrue(DaemonCapability.supportsRecentSafetyStops(
-            versionReply: bundleVersionText(of: .main)),
-                      "this build ships the verb but would refuse to ask a daemon of its own "
-                      + "vintage — CURRENT_PROJECT_VERSION was not bumped with it")
+    /// **A verb added later may not be gated at or below one added earlier.**
+    ///
+    /// `.recentSafetyStops` shipped at 4 and `.changeSessionPower` at 5, and the
+    /// second number is not a formality: local builds at 4 exist and have the
+    /// first verb without the second, so gating the second at 4 would clear a
+    /// daemon that cannot answer it — which for *this* verb is unrecoverable,
+    /// because it has no zero-live-sessions gate behind it to make a wrong
+    /// answer free.
+    func testTheLaterVerbIsGatedAboveTheEarlierOne() {
+        XCTAssertGreaterThan(DaemonCapability.Verb.changeSessionPower.introducedInBuild,
+                             DaemonCapability.Verb.recentSafetyStops.introducedInBuild,
+                             "a build carrying the older verb would be cleared for the newer one")
+        XCTAssertFalse(DaemonCapability.supports(
+            .changeSessionPower,
+            versionReply: bundleVersionText(
+                shortVersion: "0.1.0",
+                build: String(DaemonCapability.Verb.recentSafetyStops.introducedInBuild))))
+    }
+
+    /// The gate is only implementable because the release introducing a verb
+    /// bumps, so this pins the third leg of that: the case in `Verb`, the verb
+    /// itself and `project.yml` travel together or the gate is a guess.
+    ///
+    /// Over `allCases`, so the day a third verb is added with no bump, this is
+    /// what says so.
+    func testThisBuildIsNewEnoughToBeAskedItsOwnVerbs() {
+        for verb in DaemonCapability.Verb.allCases {
+            XCTAssertTrue(DaemonCapability.supports(verb, versionReply: bundleVersionText(of: .main)),
+                          "this build ships \(verb) but would refuse to ask a daemon of its own "
+                          + "vintage — CURRENT_PROJECT_VERSION was not bumped with it")
+        }
     }
 }
 

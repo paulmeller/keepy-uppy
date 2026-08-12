@@ -27,6 +27,20 @@ enum LeaseRenewalResult: Equatable {
     case invalidDeadline
 }
 
+/// `DaemonRuntime.changeSessionPower`'s outcome.
+///
+/// `.failed` is the same case, from the same cause, as `SessionStartResult`'s:
+/// the machine would not enter the state that was asked for. It is reported
+/// rather than swallowed for that method's reason — a reply claiming a
+/// promotion the Mac did not make is the defect class this project keeps paying
+/// for — and the session is left with the request it had before, not destroyed.
+enum PowerChangeResult: Equatable {
+    case changed
+    case notFound
+    case forbidden
+    case failed
+}
+
 /// Serialises both engines behind one queue: XPC replies arrive on arbitrary
 /// threads, and the engines are value types with no locking of their own.
 final class DaemonRuntime {
@@ -368,6 +382,88 @@ final class DaemonRuntime {
                 return .notLease
             case .invalidDeadline:
                 return .invalidDeadline
+            }
+        }
+    }
+
+    /// Changes what a live session asks of this Mac, and converges the machine
+    /// onto it **inside this call**.
+    ///
+    /// ## There is no five-second window, and that was measured rather than
+    /// assumed
+    ///
+    /// `applyLocked()` reads `sessions.desiredPowerPlan` fresh every time — it
+    /// is a computed property over the live table
+    /// (`SessionEngine.desiredPowerPlan` → `SessionTable.desiredPowerPlan`,
+    /// which reduces `storage.values` on each access and is cached nowhere) —
+    /// and `PowerPlanHolder.apply` converges in **both** directions: it creates
+    /// what the plan wants and then calls `releaseAssertions(notIn:)` for
+    /// everything it does not, and it writes the clamshell setting on every
+    /// apply including to `false`. So a mode change lands the same way a
+    /// `stopSession` does: by the time this returns, the Mac is in the new
+    /// state, and the 5 s tick is a repair mechanism rather than the thing that
+    /// applies it.
+    ///
+    /// ## Transactional, in one path, in both directions
+    ///
+    /// `applyLocked()` can return `false` — the honest meaning of which is "the
+    /// holder could not establish everything the plan asked for", and which by
+    /// that method's stated one-directionality invariant can only ever mean
+    /// under-application. In practice that is a promotion to `.clamshell` whose
+    /// `setSleepDisabled(true)` write did not land. On that path the previous
+    /// request goes back, the machine is re-converged onto it, and the caller is
+    /// told `false`: the reply and the table then agree about what this session
+    /// is asking for, which is the property `startSession` establishes by
+    /// destroying a session it could not honour.
+    ///
+    /// **Weakening is not special-cased**, though it is the direction that
+    /// cannot fail in the way that matters (a refused *clear* of the setting and
+    /// a failed *release* both return `true` — see `PowerPlanHolder.apply`). One
+    /// path, rolled back the same way whichever way the change pointed, because
+    /// a second path that "cannot fail" is a second path nobody exercises.
+    ///
+    /// The rollback's own re-apply can itself fail — it converges the same table
+    /// this method just restored, which may want the very thing that failed —
+    /// and there is nothing better available here than what `startSession` does:
+    /// it logs (via `applyLocked`) and the 5 s tick keeps retrying.
+    ///
+    /// Ownership is `SessionIsolation.authorize` with `action: .changePower`,
+    /// which the app's trigger-session exception reaches; the argument for that
+    /// is on `HelperProtocol.changeSessionPower` and on `Action`.
+    @discardableResult
+    func changeSessionPower(id: UUID, to power: PowerRequest, requestedBy: ClientID,
+                            uid: UInt32, role: ClientRole) -> PowerChangeResult {
+        queue.sync {
+            let now = Date()
+            // The same pre-sweep as `startSession` and `conditionEnded`, for the
+            // same reason (Fix 3a): the authorisation below is computed against
+            // whatever is in the table, and an already-expired session must not
+            // be something a caller can be authorised to change the mode of.
+            _ = sessions.apply(.tick, now: now)
+            switch SessionIsolation.authorize(sessionID: id, action: .changePower,
+                                              requestedBy: requestedBy, uid: uid,
+                                              role: role, among: sessions.sessions) {
+            case .notFound: return .notFound
+            case .forbidden: return .forbidden
+            case .authorized: break
+            }
+
+            switch sessions.changePower(id: id, to: power, now: now) {
+            case .notFound:
+                return .notFound
+            case .changed(_, let previous):
+                guard applyLocked() else {
+                    // Put the session back exactly as it was and re-converge
+                    // before replying. Restoring through the same event rather
+                    // than by re-inserting a saved copy of the session means the
+                    // undo cannot carry a stale version of any *other* field —
+                    // `Session.with(power:)` is the only thing that touches this
+                    // session either way.
+                    _ = sessions.changePower(id: id, to: previous, now: now)
+                    _ = applyLocked()
+                    return .failed
+                }
+                return .changed
             }
         }
     }

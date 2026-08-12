@@ -301,7 +301,8 @@ final class DaemonConnection: ObservableObject {
             // latched below whichever way it goes.
             let reply = await version()
             SafetyStopVerbGate.record(
-                DaemonCapability.supportsRecentSafetyStops(versionReply: reply) ? .present : .absent)
+                DaemonCapability.supports(.recentSafetyStops, versionReply: reply)
+                    ? .present : .absent)
             // Decided again rather than recursed, and not merely for style: the
             // probe above suspended, so the session count that cleared the gate
             // a moment ago is no longer known to be zero. One re-decision, and

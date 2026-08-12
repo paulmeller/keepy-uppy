@@ -172,6 +172,48 @@ final class HelperService: NSObject, HelperProtocol {
         }
     }
 
+    /// Decode, authorize, switch — the shape `stopSession` and `startSession`
+    /// have, and for the same division of labour: the decision
+    /// (`SessionIsolation.authorize`) and the rebuild (`Session.with(power:)`)
+    /// both live in `Shared/`, where a test can read them, because this file is
+    /// not reachable from the test target.
+    ///
+    /// The payload is bounded by `startSession`'s limit rather than by one of
+    /// its own. A `PowerRequest` encodes to a few dozen bytes, so 16 KiB is
+    /// absurdly generous here — which is the point: the bound exists to stop
+    /// `JSONDecoder` chewing on a flood payload before any other check runs, and
+    /// a second constant for a second payload is a second number to keep in step
+    /// for no benefit.
+    func changeSessionPower(_ sessionID: String, powerJSON: Data,
+                            reply: @escaping (Bool, String?) -> Void) {
+        connectionProven()
+        guard powerJSON.count <= Self.maxSessionPayloadBytes else {
+            return reply(false, "power payload too large")
+        }
+        guard let uuid = UUID(uuidString: sessionID) else { return reply(false, "bad id") }
+        // Strict by construction: `PowerRequest`'s synthesized decoder requires
+        // both keys, so half a request is refused here rather than completed
+        // with somebody's idea of a harmless default.
+        guard let power = try? JSONDecoder().decode(PowerRequest.self, from: powerJSON) else {
+            return reply(false, "invalid power payload")
+        }
+        switch runtime.changeSessionPower(id: uuid, to: power, requestedBy: clientID,
+                                          uid: userID, role: role) {
+        case .changed:
+            reply(true, nil)
+        case .notFound:
+            reply(false, "no such session")
+        case .forbidden:
+            helperLogger.error("Rejected changeSessionPower(\(sessionID)) from \(self.clientID.rawValue): caller may not change this session")
+            reply(false, "not authorised")
+        case .failed:
+            // The daemon has already put the previous request back and
+            // re-applied it, so this is a report about a session that is still
+            // running exactly as it was — not one left in an unknown state.
+            reply(false, "this Mac would not enter that state; the session is unchanged")
+        }
+    }
+
     func reportConditionEnded(_ sessionID: String, reply: @escaping (Bool, String?) -> Void) {
         connectionProven()
         guard isAgent else {

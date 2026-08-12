@@ -12,6 +12,11 @@ enum SessionEvent {
     case acPowerDisconnected
     case conditionEnded(id: UUID)
     case renewLease(id: UUID, until: Date)
+    /// A live session's power request changed — **the whole request**, never
+    /// one axis of it. See `Session.with(power:)` for why the unit is
+    /// `PowerRequest`, and `changePower(id:to:now:)` below for what this event
+    /// can and cannot break.
+    case changePower(id: UUID, to: PowerRequest)
     case tick
 }
 
@@ -99,6 +104,36 @@ enum LeaseRenewalOutcome: Equatable {
     case invalidDeadline
 }
 
+/// The result of `SessionEngine.changePower`.
+///
+/// `.changed` carries the session as it now is **and the request it had a moment
+/// ago**, because the caller who needs this most is the daemon: `applyLocked()`
+/// can refuse a promotion, and the previous request is what it has to put back
+/// (`DaemonRuntime.changeSessionPower`). Handing it over here rather than making
+/// that caller re-read the table is what keeps the rollback from being a second
+/// lookup that could return something else.
+///
+/// It also makes a no-op answerable honestly: `from == session.power` means the
+/// session already asked for exactly this, which is a *success* — nothing was
+/// refused and nothing failed — and not a case for an error string.
+///
+/// **There is deliberately no rejection case beyond `.notFound`**, and the
+/// contrast with `LeaseRenewalOutcome` directly above is the point. Renewing can
+/// be rejected because a deadline can be nonsense (`.invalidDeadline`) and
+/// because renewing *changes the kind*, which would launder an agent-evaluated
+/// session into a daemon-evaluated `.lease` that outlives its evidence
+/// (`.notLease`; spec §5, Fix 2). Neither has an analogue here: every
+/// `PowerRequest` is a legal request for every session, and this change touches
+/// neither `kind` nor any other field (`Session.with(power:)`), so there is
+/// nothing to launder and nothing to validate. The rejection that *can* happen —
+/// the machine refusing to enter the requested state — is not visible from this
+/// layer at all; it belongs to the daemon, which rolls back by applying this
+/// same event again with `from`.
+enum PowerChangeOutcome: Equatable {
+    case changed(session: Session, from: PowerRequest)
+    case notFound
+}
+
 /// Pure reducer over the session table. Holds no clock, performs no I/O:
 /// `now` is supplied by the caller on every event.
 struct SessionEngine {
@@ -177,6 +212,30 @@ struct SessionEngine {
         return .renewed(renewed)
     }
 
+    /// Changes what a live session asks of the machine, leaving everything else
+    /// about it — including how and when it ends — exactly as it was.
+    ///
+    /// The sweep comes first, on `renewLease`'s reasoning one axis over: a
+    /// session whose deadline has passed but whose removal is still up to five
+    /// seconds away must not be observable as something you can change the mode
+    /// of, because the reply would describe a session that is already over. It
+    /// is also what makes the `.notFound` below cover both "no such id" and
+    /// "that one has just expired" with one answer, which is what the caller can
+    /// act on either way.
+    ///
+    /// `table.session(id:)` is asked before the event and again after it, and
+    /// the second read is not ceremony: `apply` sweeps expiry at the end of
+    /// *every* event, so the honest thing to report is what is in the table when
+    /// the call returns, not what was put there mid-call.
+    @discardableResult
+    mutating func changePower(id: UUID, to power: PowerRequest, now: Date) -> PowerChangeOutcome {
+        _ = apply(.tick, now: now)
+        guard let existing = table.session(id: id) else { return .notFound }
+        _ = apply(.changePower(id: id, to: power), now: now)
+        guard let changed = table.session(id: id) else { return .notFound }
+        return .changed(session: changed, from: existing.power)
+    }
+
     @discardableResult
     mutating func apply(_ event: SessionEvent, now: Date) -> [Session] {
         var ended: [Session] = []
@@ -234,6 +293,28 @@ struct SessionEngine {
             // not fail to compile; it silently takes the initialiser's
             // default), and left `ownerUID` free to be dropped next.
             table.insert(existing.renewed(until: until))
+
+        case .changePower(let id, let power):
+            guard let existing = table.remove(id: id) else { break }
+            // Remove-then-insert, in `.renewLease`'s shape directly above, so
+            // that "no such session" is one `break` in both and neither can
+            // half-mutate. **What is deliberately missing is the validation
+            // step between them**, and its absence is a decision rather than an
+            // omission: renewing has two things to reject — a nonsense deadline,
+            // and a kind laundered into `.lease` so it outlives the agent that
+            // was its evidence — and a power request has neither. Every
+            // `PowerRequest` is legal for every session, and
+            // `Session.with(power:)` changes no other field, so there is no
+            // rejected branch for an original to be restored to.
+            //
+            // `SessionTable.earliestDeadline` survives this untouched, which is
+            // worth stating because a rebuild-and-reinsert is exactly the shape
+            // that could break it: the bound only ever moves *earlier* on
+            // insert and is left alone by remove (Shared/SessionTable.swift),
+            // and `kind` is carried across verbatim here — so the reinserted
+            // session has the same deadline it had, and a bound that was valid
+            // before this event is still valid after it.
+            table.insert(existing.with(power: power))
 
         case .tick:
             break
