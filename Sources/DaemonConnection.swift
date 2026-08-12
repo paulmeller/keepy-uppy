@@ -15,6 +15,15 @@ final class DaemonConnection: ObservableObject {
     @Published private(set) var keepingAwake = false
     @Published private(set) var isConnected = false
 
+    /// Set when the daemon admitted a session that does not carry the power
+    /// request this app sent — see `SessionPowerSkew`. `nil` whenever the last
+    /// start was honoured, which is every start against a matching daemon.
+    ///
+    /// Recomputed on every `startSession`, and cleared when the last session
+    /// this app knows about goes away, because the sentence is about a *live*
+    /// session and would otherwise outlive the thing it describes.
+    @Published private(set) var powerRequestNote: String?
+
     private var connection: NSXPCConnection?
     private var pollTimer: Timer?
     private var reconnectTask: Task<Void, Never>?
@@ -147,6 +156,10 @@ final class DaemonConnection: ObservableObject {
             }
         }) else { return }
         sessions = list
+        // The note describes a session that is running now. Once nothing is
+        // running it is stale, and a stale explanation on an idle menu is worse
+        // than none.
+        if list.isEmpty { powerRequestNote = nil }
     }
 
     /// The `Session` this app asks the daemon to start — the *request*, whose
@@ -194,14 +207,38 @@ final class DaemonConnection: ObservableObject {
         let session = Self.requestedSession(kind: kind, power: power,
                                             persistence: persistence, origin: origin)
         guard let data = try? JSONEncoder().encode(session) else { return false }
-        let ok: Bool? = await call { proxy, reply in
+        // The id, not just "did it work". It is what lets the refresh below
+        // find *this* session among everyone's and check what the daemon
+        // actually admitted, which is the only way this app can see a request
+        // an older daemon dropped on the wire (`SessionPowerSkew`).
+        let startedID: String?? = await call { proxy, reply in
             proxy.startSession(data) { sessionID, error in
                 if let error { appLogger.error("startSession failed: \(error)") }
-                reply(sessionID != nil)
+                reply(sessionID)
             }
         }
+        // The refresh that was already here — the read-back costs no extra
+        // round trip, it just stops throwing away the one already being made.
         await refresh()
-        return ok ?? false
+        guard let admittedID = startedID.flatMap({ $0 }) else { return false }
+        noteSkew(requested: power, admittedID: admittedID)
+        return true
+    }
+
+    /// Compares what was asked for against the session the daemon admitted,
+    /// and records the sentence if they differ.
+    ///
+    /// A missing session is deliberately *not* a note. Between the reply and
+    /// the refresh a very short session can legitimately have ended, and a
+    /// message blaming the daemon's vintage for that would be wrong in the one
+    /// direction that erodes trust in every other message this app shows.
+    private func noteSkew(requested: PowerRequest, admittedID: String) {
+        guard let id = UUID(uuidString: admittedID),
+              let admitted = sessions.first(where: { $0.id == id }) else { return }
+        powerRequestNote = SessionPowerSkew.note(requested: requested, admitted: admitted.power)
+        if let powerRequestNote {
+            appLogger.error("Daemon dropped part of the power request: \(powerRequestNote)")
+        }
     }
 
     func stopSession(_ id: UUID) async {

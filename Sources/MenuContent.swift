@@ -102,6 +102,16 @@ struct MenuContent: View {
             if let caveat = menuLidCaveat(for: daemon.sessions) {
                 Text(caveat)
             }
+
+            // The status region's third line, and the only one that is about
+            // the *install* rather than about this Mac. Present only when the
+            // daemon admitted a session that does not carry what this app
+            // asked for — which, unlike the version row in Settings, is
+            // evidence of an actual dropped request rather than a difference
+            // in build numbers.
+            if let note = daemon.powerRequestNote {
+                Text(note)
+            }
         }
 
         if daemon.isConnected && !daemon.sessions.isEmpty {

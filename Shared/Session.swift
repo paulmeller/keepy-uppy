@@ -375,6 +375,45 @@ struct Session: Equatable, Codable, Identifiable {
     // absent `keepsDisksAwake` becomes the WEAKEST state because nobody asked
     // for it and holding disks awake unasked costs battery for no visible
     // reason. `SessionDiskAxisTests` pins both directions off one payload.
+    //
+    // ## What those defaults cost under client/daemon skew
+    //
+    // They are written for a *stored* payload — a session read back that was
+    // encoded before the field existed. But the same decoder runs on the wire,
+    // where the payload is a **request from a client of a different vintage**,
+    // and there the same defaults mean an older daemon silently drops what a
+    // newer client asked for. It decodes the request, never sees the key
+    // (its `Session` has no such property), admits a session without it, and
+    // replies with a session id. Nothing fails; the client shows a running
+    // session that is not doing what was asked. The window is not theoretical:
+    // the daemon is launched on demand and respawned only after an
+    // *unsuccessful* exit, so replacing the app bundle in place restarts
+    // nothing, and the old daemon serves until the Mac reboots.
+    //
+    // The two directions cost differently, and neither is free:
+    //
+    //  - `wakeMode` is lost UPWARDS. A client asking for `.system` or
+    //    `.systemAndDisplay` against an old daemon gets clamshell behaviour — a lid
+    //    that will not let the Mac sleep, which is the axis that persists
+    //    across reboots. Over-application, not under-.
+    //  - `keepsDisksAwake` is lost DOWNWARDS. A client asking to hold disks
+    //    awake gets a session that does not, and nothing says so.
+    //
+    // **This cannot be prevented from the encoding side.** `startSession`
+    // carries an opaque JSON blob, and an older daemon's decoder ignores keys
+    // it does not know *by construction* — so the only lever is to break a key
+    // it does decode. That is what `TriggerRule` does for its own field, and it
+    // does not transfer: `kind` could be poisoned into an unknown form so an old
+    // daemon throws, but conditioning one key's wire form on another field's
+    // value is a wart every future daemon must carry forever, and the user gets
+    // "invalid session payload" rather than a reason.
+    //
+    // So it is detected instead, on the client, after the fact:
+    // `SessionPowerSkew` (Shared/SessionPowerSkew.swift) compares the request
+    // against the session `listSessions` reports back, which needs no new
+    // protocol surface — the property that matters, because adding a verb an
+    // old daemon lacks does not merely fail, it tears the connection down and
+    // ends the caller's `clientBound` sessions.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
