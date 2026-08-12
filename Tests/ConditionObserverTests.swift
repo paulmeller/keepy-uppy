@@ -188,7 +188,154 @@ final class CPUBusyObserverContractTests: XCTestCase {
 /// Deliberately loose bounds. This asserts "does the number move at all",
 /// which is exactly what was broken; a tight bound would be flaky on any
 /// machine doing something else at the same time.
+///
+/// Loose bounds are not enough on their own, though, because **both** tests
+/// here begin by measuring a second they assume is quiet, and neither can tell
+/// "the observer is broken" from "this Mac was compiling something". Measured
+/// under an all-core burn in another process, they fail like this:
+///
+/// * `testAQuietIntervalReportsALowFraction` — `("1.0") is not less than ("0.5")`
+/// * `testTwoSamplesAroundRealWorkReportDifferentBusyFractions` —
+///   `("-0.348...") is not greater than ("0.2") - quiet 0.9498 vs busy 0.6018`
+///
+/// A failure that goes away on a re-run is how a real one gets waved through,
+/// and that is not hypothetical here: it is precisely how the CPU observer's
+/// bug survived four plans. So both tests ask first whether this machine can
+/// answer their question, and **skip** — saying how busy it was and what to
+/// check — rather than failing or, worse, being re-run until green.
+///
+/// The load they meet in practice is not exotic: it is `xcodebuild`'s own build
+/// phase, which is why the gate waits for it to finish rather than skipping the
+/// instant it sees a busy second. See `requireAMachineQuietEnoughToMeasure`.
 final class SystemCPUBusyObserverLiveTests: XCTestCase {
+    /// The busiest a machine may be and still be asked "does an idle interval
+    /// read low?".
+    ///
+    /// Chosen from measurement, not from halving the `0.5` the assertions use.
+    /// Ten consecutive one-second samples on this Mac, otherwise idle but with
+    /// the usual background of a working machine, ranged 17.2% – 23.3% busy: a
+    /// spread of about ±3 points around its mean. `0.35` sits five such spreads
+    /// below the `0.5` the assertions need, and far enough above a normal
+    /// machine's floor that the gate is not simply always shut — a gate that
+    /// always skips has deleted two tests, which is worse than the flake it was
+    /// meant to fix.
+    ///
+    /// It cannot defend against a spike that begins *after* it measures, and
+    /// does not pretend to. What it converts into a skip is load that outlasts
+    /// the wait below — another window's build, a video call, the all-core burn
+    /// used to reproduce the original failures — all of which sit at 0.6 or
+    /// above, and none of which a re-run makes honest.
+    private static let quietEnoughBusyFraction = 0.35
+
+    /// The fraction of CPU time this machine spent non-idle over `interval`, or
+    /// `nil` when the kernel would not hand back its counters at all.
+    ///
+    /// One helper, shared by both tests, for the same reason
+    /// `everyObserverUndetermined` is one fixture: two copies of a quietness
+    /// rule are two rules, and the day one of them is loosened the other
+    /// silently is not.
+    ///
+    /// It returns the fraction rather than a `Bool` so the skip message can
+    /// name it. A skip that says "the machine was busy" and not *how* busy is a
+    /// skip nobody can act on; `PowerControlTests`'
+    /// `testHoldingTheDiskAssertionMovesTheSystemWideLevel` is the standard
+    /// here, and it names both the measured level and the command to check it
+    /// with.
+    ///
+    /// ## Why this is not the observer marking its own homework
+    ///
+    /// The gate reads `HostStatisticsCPUTickSampler` — the raw kernel counters
+    /// — and differences two samples itself, rather than asking
+    /// `SystemCPUBusyObserver.currentBusy()`. The bug these two tests pin lived
+    /// in the *differencing*: ratios of counters cumulative since boot,
+    /// reported as though they described the last interval. A regression there
+    /// therefore cannot move this gate in either direction — it can neither
+    /// open it on a busy Mac nor hold it shut on an idle one.
+    ///
+    /// What the gate does share with the code under test is the sampler, and
+    /// that is the failure mode this choice accepts: a
+    /// `HostStatisticsCPUTickSampler` that began reporting a constant *idle*
+    /// machine would gate open **and** carry
+    /// `testAQuietIntervalReportsALowFraction` to a false pass on a busy Mac.
+    /// It would not survive the pair, which is why they are gated together:
+    /// `testTwoSamplesAroundRealWorkReportDifferentBusyFractions` needs the
+    /// number to *move*, and a constant cannot. The opposite fault — a sampler
+    /// stuck reporting a busy machine — costs skips rather than false passes,
+    /// and says so every run.
+    ///
+    /// A sampler that fails outright is not skipped past at all: `nil` is an
+    /// `XCTUnwrap` failure at the call site, because a skip that hides a dead
+    /// detector is worse than a flake.
+    ///
+    /// The interval is the same one second the tests themselves measure, so the
+    /// gate and the assertion see the same shape of number rather than two
+    /// differently-smoothed ones.
+    private func measuredBusyFraction(over interval: TimeInterval = 1) -> Double? {
+        let sampler = HostStatisticsCPUTickSampler()
+        guard let first = sampler.sample() else { return nil }
+        Thread.sleep(forTimeInterval: interval)
+        guard let second = sampler.sample() else { return nil }
+        let totalDelta = second.total - first.total
+        guard totalDelta > 0 else { return nil }
+        return min(1, max(0, 1 - (second.idle - first.idle) / totalDelta))
+    }
+
+    /// Fails when this Mac cannot be measured at all, skips when it stays too
+    /// busy to be asked, and otherwise returns so the test can run.
+    ///
+    /// The order is copied from `PowerControlTests`'
+    /// `testHoldingTheDiskAssertionMovesTheSystemWideLevel`: a dead measurement
+    /// apparatus is a *failure*, and only a live one reporting an unanswerable
+    /// machine is a skip.
+    ///
+    /// ## Why it waits instead of skipping on the first busy second
+    ///
+    /// The load these tests actually meet is `xcodebuild`'s own build phase.
+    /// Measured here: on the first run after touching a source file, every core
+    /// is still pinned when the test host launches — the kernel's idle counter
+    /// advanced by *exactly zero* ticks across both of this class's tests, three
+    /// runs in a row, while an unsandboxed probe outside agreed the machine was
+    /// saturated — and on the next run, with nothing to rebuild, the same probe
+    /// read 0.18 inside the test host and 0.19 outside, and both tests passed.
+    ///
+    /// So a gate that skipped on the first busy reading would skip on every run
+    /// that followed an edit, which is nearly every run that matters, and the
+    /// two tests would be gone in practice while still appearing in the list.
+    /// Waiting a few seconds for the compiler's cores to be handed back keeps
+    /// them.
+    ///
+    /// This is emphatically **not** the "re-run until green" this class exists
+    /// to refuse. What repeats here is the *precondition*, never the assertion:
+    /// each test still measures its interval exactly once, and a machine that is
+    /// busy for a reason that outlasts the wait — a build in another window, a
+    /// video call, the all-core burn used to reproduce the original failures —
+    /// still skips, and says how busy it was.
+    private func requireAMachineQuietEnoughToMeasure(waitingUpTo attempts: Int = 6) throws {
+        var lastMeasured = 0.0
+        for _ in 0..<attempts {
+            lastMeasured = try XCTUnwrap(measuredBusyFraction(), """
+                This Mac would not report its CPU tick counters at all, so \
+                neither test in this class can be asked its question. That is a \
+                dead measurement apparatus, not a busy machine, and it is a \
+                failure rather than a skip.
+                """)
+            if lastMeasured <= Self.quietEnoughBusyFraction { return }
+        }
+        throw XCTSkip("""
+            This Mac was still \(String(format: "%.0f%%", lastMeasured * 100)) \
+            busy after \(attempts) seconds of waiting, above the \
+            \(String(format: "%.0f%%", Self.quietEnoughBusyFraction * 100)) this \
+            class allows, so "an idle interval reads low" cannot be answered \
+            honestly here — what it would measure is whatever else is running, \
+            not the observer's arithmetic. Both tests in this class are \
+            meaningful only on an otherwise-idle Mac. Find the load with \
+            `top -o cpu` or Activity Monitor and re-run once it is gone. Do not \
+            simply re-run until green: a test re-run until it passes is how a \
+            real failure gets waved through, and is exactly how the bug these \
+            two tests pin survived four plans.
+            """)
+    }
+
     /// Pins every core until a deadline, and joins every worker before
     /// returning so nothing outlives the test.
     private func burnEveryCore(for seconds: TimeInterval) {
@@ -229,7 +376,9 @@ final class SystemCPUBusyObserverLiveTests: XCTestCase {
     /// the machine's lifetime average — measured on this Mac, 0.1660 idle and
     /// 0.1662 after two seconds of all-core burn, a swing of 0.0002. The same
     /// two intervals measured as deltas gave 0.0506 and 0.9969.
-    func testTwoSamplesAroundRealWorkReportDifferentBusyFractions() {
+    func testTwoSamplesAroundRealWorkReportDifferentBusyFractions() throws {
+        try requireAMachineQuietEnoughToMeasure()
+
         let observer = SystemCPUBusyObserver()
         XCTAssertEqual(observer.currentBusy(), .undetermined, "the first call has no predecessor")
 
@@ -248,7 +397,9 @@ final class SystemCPUBusyObserverLiveTests: XCTestCase {
     /// report *low*, not "17% because that is the machine's lifetime average".
     /// A user asking to stay awake while the CPU is above 25% got a session
     /// that never ended, because 0.17 was reported forever whatever the CPU did.
-    func testAQuietIntervalReportsALowFraction() {
+    func testAQuietIntervalReportsALowFraction() throws {
+        try requireAMachineQuietEnoughToMeasure()
+
         let observer = SystemCPUBusyObserver()
         XCTAssertEqual(observer.currentBusy(), .undetermined, "the first call has no predecessor")
 
