@@ -18,8 +18,8 @@ struct MenuContent: View {
     /// that the XPC client stays a transport and
     /// `SessionNotificationTracker` stays the only thing that decides anything.
     let notifier: SessionNotifier
-    @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
-    private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
+    @AppStorage(DefaultSessionKindPreference.key, store: PreferencesSuite.defaults)
+    private var defaultKindRaw: String = DefaultSessionKindPreference.defaultRawValue
     @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
     private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
     /// A `Bool` needs no raw-value dance and no fallback function: an absent key

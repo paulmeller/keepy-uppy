@@ -189,7 +189,7 @@ final class HotKeyActionTests: XCTestCase {
             variables.insert(action.debugEnvironmentVariable)
             // A preference key that collides with another preference is a
             // shortcut that silently reads somebody else's value.
-            for other in ["defaultSessionKind", DefaultWakeModePreference.key,
+            for other in [DefaultSessionKindPreference.key, DefaultWakeModePreference.key,
                           DefaultKeepDisksAwakePreference.key,
                           SessionNotificationPreference.stopKey,
                           SessionNotificationPreference.triggerStartKey] {
@@ -575,7 +575,7 @@ final class MenuDefaultStartTests: XCTestCase {
     /// here.
     func testAnUnwrittenSuiteReadsBackEveryDocumentedFallback() {
         let start = MenuDefaultStart(readingFrom: defaults)
-        XCTAssertEqual(start.kind, .indefinite)
+        XCTAssertEqual(start.kind, DefaultSessionKindPreference.fallback)
         XCTAssertEqual(start.power.wakeMode, DefaultWakeModePreference.fallback)
         XCTAssertEqual(start.power.keepsDisksAwake, DefaultKeepDisksAwakePreference.fallback)
     }
@@ -584,7 +584,7 @@ final class MenuDefaultStartTests: XCTestCase {
     /// key builds it by reading the suite; the two initialisers must agree, and
     /// they are checked against each other rather than each against a literal.
     func testReadingTheSuiteAgreesWithBuildingItFromTheSameThreeValues() {
-        defaults.set(DefaultSessionKind.fourHours.rawValue, forKey: "defaultSessionKind")
+        defaults.set(DefaultSessionKind.fourHours.rawValue, forKey: DefaultSessionKindPreference.key)
         defaults.set(WakeMode.systemAndDisplay.rawValue, forKey: DefaultWakeModePreference.key)
         defaults.set(true, forKey: DefaultKeepDisksAwakePreference.key)
 
@@ -598,7 +598,7 @@ final class MenuDefaultStartTests: XCTestCase {
     /// Every axis is actually read. A test that only set one of them would pass
     /// against an implementation that ignored the other two.
     func testEveryStoredAxisReachesTheRequest() {
-        defaults.set(DefaultSessionKind.oneHour.rawValue, forKey: "defaultSessionKind")
+        defaults.set(DefaultSessionKind.oneHour.rawValue, forKey: DefaultSessionKindPreference.key)
         defaults.set(WakeMode.system.rawValue, forKey: DefaultWakeModePreference.key)
         defaults.set(true, forKey: DefaultKeepDisksAwakePreference.key)
 
@@ -615,10 +615,10 @@ final class MenuDefaultStartTests: XCTestCase {
     /// menu's own readers do — the shortcut must not become inert because a
     /// later version wrote an enum case this build has never heard of.
     func testUnrecognisedRawValuesFallBackRatherThanDisablingTheShortcut() {
-        defaults.set("fortnight", forKey: "defaultSessionKind")
+        defaults.set("fortnight", forKey: DefaultSessionKindPreference.key)
         defaults.set("teleport", forKey: DefaultWakeModePreference.key)
         let start = MenuDefaultStart(readingFrom: defaults)
-        XCTAssertEqual(start.kind, .indefinite)
+        XCTAssertEqual(start.kind, DefaultSessionKindPreference.fallback)
         XCTAssertEqual(start.power.wakeMode, DefaultWakeModePreference.fallback)
     }
 

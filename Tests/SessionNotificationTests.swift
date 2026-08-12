@@ -393,7 +393,7 @@ final class SessionNotificationPreferenceTests: XCTestCase {
         XCTAssertNotEqual(SessionNotificationPreference.stopKey,
                           SessionNotificationPreference.triggerStartKey,
                           "two toggles sharing a key is two controls fighting over one value")
-        for other in ["defaultSessionKind", DefaultWakeModePreference.key,
+        for other in [DefaultSessionKindPreference.key, DefaultWakeModePreference.key,
                       DefaultKeepDisksAwakePreference.key, TriggerStore.key] {
             XCTAssertNotEqual(SessionNotificationPreference.stopKey, other)
             XCTAssertNotEqual(SessionNotificationPreference.triggerStartKey, other)

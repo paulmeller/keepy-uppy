@@ -76,8 +76,8 @@ struct SettingsView: View {
 struct GeneralSettingsTab: View {
     @StateObject private var onboarding = OnboardingService()
     @State private var launchAtLoginEnabled = LoginItemService.status() == .enabled
-    @AppStorage("defaultSessionKind", store: PreferencesSuite.defaults)
-    private var defaultKindRaw: String = DefaultSessionKind.indefinite.rawValue
+    @AppStorage(DefaultSessionKindPreference.key, store: PreferencesSuite.defaults)
+    private var defaultKindRaw: String = DefaultSessionKindPreference.defaultRawValue
     /// Both keys and both starting values come from
     /// `SessionNotificationPreference`, never from literals here: the notifier
     /// reads them back in a different file that never calls this one, and a

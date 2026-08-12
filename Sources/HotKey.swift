@@ -398,7 +398,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
 /// **This exists because the hot key and the menu row must not drift, and the
 /// way they drift is an axis being added to one of them.** There were two such
 /// values when this feature was first sketched and there are three now
-/// (`defaultSessionKind`, `DefaultWakeModePreference`,
+/// (`DefaultSessionKindPreference`, `DefaultWakeModePreference`,
 /// `DefaultKeepDisksAwakePreference`) — the third arrived with the disk axis
 /// and would have been missed by a shortcut that hard-coded "the same two
 /// values the menu reads". A fourth has to be added here, once, and both call
@@ -418,7 +418,7 @@ struct MenuDefaultStart: Equatable {
     /// From three raw values, each falling back exactly as the menu's own
     /// readers do.
     init(kindRawValue: String, wakeModeRawValue: String, keepsDisksAwake: Bool) {
-        self.kind = DefaultSessionKind(rawValue: kindRawValue) ?? .indefinite
+        self.kind = DefaultSessionKindPreference.kind(rawValue: kindRawValue)
         self.power = PowerRequest(
             wakeMode: DefaultWakeModePreference.mode(rawValue: wakeModeRawValue),
             keepsDisksAwake: keepsDisksAwake)
@@ -427,7 +427,7 @@ struct MenuDefaultStart: Equatable {
     /// From the stored preferences, read now.
     init(readingFrom defaults: UserDefaults) {
         self.init(
-            kindRawValue: defaults.string(forKey: "defaultSessionKind") ?? "",
+            kindRawValue: defaults.string(forKey: DefaultSessionKindPreference.key) ?? "",
             wakeModeRawValue: defaults.string(forKey: DefaultWakeModePreference.key) ?? "",
             keepsDisksAwake: defaults.object(forKey: DefaultKeepDisksAwakePreference.key) as? Bool
                 ?? DefaultKeepDisksAwakePreference.fallback)

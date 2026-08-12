@@ -856,18 +856,59 @@ func menuLidCaveat(for sessions: [Session]) -> String? {
     return "Closing the lid will still let this Mac sleep."
 }
 
+// MARK: - The stored default session kind
+
+/// The preference the General pane writes, the menu reads and the hot key reads
+/// again: a raw `DefaultSessionKind` in `PreferencesSuite`, read back with a
+/// fallback rather than a failure.
+///
+/// **It arrived third, and that is the whole of why it is here.** The two types
+/// below were each written to name a key once, and each says why: two files
+/// that never call each other agree on a string, and a typo in either is not a
+/// compile error and not a crash — it is a Settings pane that appears to work
+/// while the reader goes on reading the old value. This key was the standing
+/// exception both of them pointed at, a bare `"defaultSessionKind"` in
+/// `MenuContent`, `SettingsView` and `MenuDefaultStart.init(readingFrom:)` —
+/// the last of which sits inside a type whose entire doc comment is about the
+/// menu and the hot key not drifting. So the comment that used to record the
+/// gap now records the fix, in the same way Plan 7 rewrote General's adjacency
+/// comment into a record of the move rather than deleting it.
+///
+/// The *value* `"defaultSessionKind"` is not free to change: it has shipped, so
+/// renaming it forgets every existing user's choice rather than migrating it.
+/// `DefaultSessionKindPreferenceTests.testTheKeyIsTheOneAlreadyOnDisk` is the
+/// only literal copy left, and exists to say so.
+///
+/// The fallback is `.indefinite` on the reasoning `DefaultWakeModePreference`
+/// gives for `.clamshell`: absence must not silently take something away, and a
+/// session that ends at a time nobody chose is exactly that. It is named once
+/// here because it had three spellings before — two `@AppStorage` starting
+/// values and `MenuDefaultStart`'s inline `?? .indefinite`.
+enum DefaultSessionKindPreference {
+    static let key = "defaultSessionKind"
+
+    /// Used both as the `@AppStorage` starting value and as the landing place
+    /// for a value this build does not recognise.
+    static let fallback = DefaultSessionKind.indefinite
+    static var defaultRawValue: String { fallback.rawValue }
+
+    static func kind(rawValue: String) -> DefaultSessionKind {
+        DefaultSessionKind(rawValue: rawValue) ?? fallback
+    }
+}
+
 // MARK: - The stored default wake mode
 
 /// The preference Settings writes and the menu reads, arranged exactly like
-/// `DefaultSessionKind`'s: a raw value in `PreferencesSuite`, read back with a
-/// fallback rather than a failure.
+/// `DefaultSessionKindPreference`'s: a raw value in `PreferencesSuite`, read
+/// back with a fallback rather than a failure.
 ///
 /// It is named here, once, for the reason `PreferencesSuite` itself is: two
 /// files that never call each other agree on a string, and a typo in either is
 /// not a compile error and not a crash — it is a Settings pane that appears to
-/// work while the menu goes on reading the old value. `DefaultSessionKind`'s
-/// key is still a literal in both files; that is the shape this deliberately
-/// does not copy.
+/// work while the menu goes on reading the old value. This was the first of the
+/// three to be named that way; the session-kind key above was the last, and its
+/// doc comment records why it took a third preference to close.
 ///
 /// The fallback is `.clamshell` on exactly the CLI's reasoning: absence must
 /// mean the strongest mode, because every other choice silently weakens the

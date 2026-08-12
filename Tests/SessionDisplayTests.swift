@@ -1072,6 +1072,74 @@ final class WakeModeMenuCopyTests: XCTestCase {
     }
 }
 
+/// The stored default session kind — the oldest of the three preferences and
+/// the last to be named, having been a bare literal in three production files
+/// and eleven test lines while the two types below were written specifically to
+/// avoid that shape.
+///
+/// The literal `"defaultSessionKind"` survives in exactly one place now, the
+/// first test here, and that is the point of it: every other reader and writer
+/// goes through `DefaultSessionKindPreference.key`, so this one assertion is
+/// what stands between a rename and every existing user's chosen default being
+/// silently forgotten. It is the discipline `TriggerStore.key` states — tests
+/// plant under the constant the store reads, because "a second copy of the
+/// literal in the tests could drift from this one, and a test that writes
+/// somewhere the store never looks proves nothing".
+final class DefaultSessionKindPreferenceTests: XCTestCase {
+    /// **The stored value must not change.** This key has shipped; a build that
+    /// renamed it would not migrate anybody's choice, it would forget it — and
+    /// not loudly. The symptom is a General pane that looks like it works while
+    /// every menu row goes back to offering "Indefinitely".
+    func testTheKeyIsTheOneAlreadyOnDisk() {
+        XCTAssertEqual(DefaultSessionKindPreference.key, "defaultSessionKind")
+    }
+
+    func testAStoredKindRoundTrips() {
+        for kind in DefaultSessionKind.allCases {
+            XCTAssertEqual(DefaultSessionKindPreference.kind(rawValue: kind.rawValue), kind)
+        }
+    }
+
+    /// A case removed in a later version, a hand-edited plist, a value written
+    /// by a future build: none of them may leave the menu, the Settings picker
+    /// or the hot key unable to start anything.
+    func testAnUnrecognisedStoredValueFallsBackRatherThanFailing() {
+        for stored in ["", "fortnight", "INDEFINITE", "4", "fourHoursish"] {
+            XCTAssertEqual(DefaultSessionKindPreference.kind(rawValue: stored),
+                           DefaultSessionKindPreference.fallback,
+                           "unrecognised value \"\(stored)\" must fall back")
+        }
+    }
+
+    /// The fallback is one value used at both ends — the value `@AppStorage`
+    /// starts from before anybody has chosen, and the value an unreadable one
+    /// lands on. Two spellings of it is how the picker and the reader come to
+    /// disagree about what "nobody has chosen yet" means, and there were three
+    /// spellings of it before this type existed: two `@AppStorage` starting
+    /// values and `MenuDefaultStart`'s inline `?? .indefinite`.
+    ///
+    /// `.indefinite` in particular, on the same reasoning as
+    /// `DefaultWakeModePreference.fallback`: absence must not silently take
+    /// something away. A session that ends at a time nobody chose is exactly
+    /// that, and it is the failure a user cannot see coming.
+    func testTheFallbackIsNamedOnceAndUsedAtBothEnds() {
+        XCTAssertEqual(DefaultSessionKindPreference.fallback, .indefinite)
+        XCTAssertEqual(DefaultSessionKindPreference.defaultRawValue,
+                       DefaultSessionKindPreference.fallback.rawValue)
+        XCTAssertEqual(DefaultSessionKindPreference.kind(rawValue: "nothing this build knows"),
+                       DefaultSessionKindPreference.fallback)
+    }
+
+    func testItsKeyIsItsOwn() {
+        for other in [DefaultWakeModePreference.key, DefaultKeepDisksAwakePreference.key,
+                      SessionNotificationPreference.stopKey,
+                      SessionNotificationPreference.triggerStartKey, TriggerStore.key] {
+            XCTAssertNotEqual(DefaultSessionKindPreference.key, other,
+                              "two preferences sharing a key is two controls fighting over one value")
+        }
+    }
+}
+
 /// The stored default and the Settings pane that writes it. Mirrors
 /// `DefaultSessionKind`'s arrangement exactly — Settings writes a raw value,
 /// the menu reads it back through `PreferencesSuite.defaults`, and an
@@ -1110,7 +1178,7 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
     /// pane that appears to work while the menu keeps reading the old value.
     func testTheKeyIsNamedOnceAndIsNotTheSessionKindKey() {
         XCTAssertEqual(DefaultWakeModePreference.key, "defaultWakeMode")
-        XCTAssertNotEqual(DefaultWakeModePreference.key, "defaultSessionKind")
+        XCTAssertNotEqual(DefaultWakeModePreference.key, DefaultSessionKindPreference.key)
     }
 
     func testTheDiskPreferenceIsNotTheWakeModeKey() {
@@ -1280,7 +1348,7 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
 final class DefaultKeepDisksAwakePreferenceTests: XCTestCase {
     func testTheKeyIsNamedOnceAndIsItsOwn() {
         XCTAssertEqual(DefaultKeepDisksAwakePreference.key, "defaultKeepDisksAwake")
-        for other in ["defaultSessionKind", DefaultWakeModePreference.key] {
+        for other in [DefaultSessionKindPreference.key, DefaultWakeModePreference.key] {
             XCTAssertNotEqual(DefaultKeepDisksAwakePreference.key, other,
                               "two preferences sharing a key is two controls fighting over one value")
         }
@@ -1890,15 +1958,15 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
     /// as this list.
     private var allPreferences: [PreferenceUnderTest] {
         [
-            // General — the default session kind. Its key is still a literal
-            // in both the pane and the menu (unlike the two below), which is
-            // the shape `DefaultWakeModePreference` exists not to copy.
+            // General — the default session kind. Not the fallback, so an
+            // unwritten preference cannot pass this by accident.
             PreferenceUnderTest(
-                name: "defaultSessionKind",
+                name: DefaultSessionKindPreference.key,
                 write: { self.defaults.set(DefaultSessionKind.fourHours.rawValue,
-                                           forKey: "defaultSessionKind") },
+                                           forKey: DefaultSessionKindPreference.key) },
                 readsBackWhatWasWritten: {
-                    DefaultSessionKind(rawValue: self.defaults.string(forKey: "defaultSessionKind") ?? "")
+                    DefaultSessionKindPreference.kind(
+                        rawValue: self.defaults.string(forKey: DefaultSessionKindPreference.key) ?? "")
                         == .fourHours
                 }
             ),
@@ -2045,7 +2113,11 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
     /// and it is the state a mis-keyed control also produces — so the two
     /// tests above are read together with this one.
     func testAnUnwrittenSuiteReadsBackTheDocumentedDefaults() {
-        XCTAssertNil(defaults.string(forKey: "defaultSessionKind"))
+        XCTAssertNil(defaults.string(forKey: DefaultSessionKindPreference.key))
+        XCTAssertEqual(
+            DefaultSessionKindPreference.kind(
+                rawValue: defaults.string(forKey: DefaultSessionKindPreference.key) ?? ""),
+            DefaultSessionKindPreference.fallback)
         XCTAssertEqual(SessionNotificationPreference.load(),
                        SessionNotificationPreferences(onStop: false, onTriggerStart: false))
         XCTAssertEqual(
