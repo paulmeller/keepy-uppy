@@ -13,7 +13,7 @@ struct KeepyUppyApp: App {
         .menuBarExtraStyle(.menu)
 
         Settings {
-            SettingsView()
+            SettingsView(hotKeys: appDelegate.hotKeys)
         }
     }
 }

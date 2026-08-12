@@ -169,6 +169,23 @@ struct MenuContent: View {
         // does not become a 4×3 grid — let alone a 4×3×2 one now that there is a
         // third axis. What a session asks of the machine is a Settings decision
         // made once, not a per-start choice.
+        //
+        // **And no `.keyboardShortcut`, though this row is exactly the one the
+        // `.startDefaultSession` global hot key fires. Decided, not
+        // overlooked.** A `.keyboardShortcut` on a `MenuBarExtra` row is a
+        // *menu* shortcut: macOS draws it on the right of the row and it works
+        // only while the menu is open. The binding beside it would be a global
+        // one that works everywhere and needs no menu at all. Putting it here
+        // gives two bad outcomes and no good one — either the app registers the
+        // combination twice, once globally and once as a menu equivalent, so
+        // one press does the thing twice with the menu open; or it is drawn as
+        // decoration, in the place macOS has trained everyone to read as "this
+        // key works here", about a key that works everywhere *else* too. The
+        // binding is shown where it is set (Settings ▸ CLI & Advanced), and
+        // `hotKeyShortcutsSectionFootnote` is where the user is told it works
+        // without this menu being open. Recorded here so the absence is not
+        // re-litigated as an omission — the same reason Plan 5 wrote down that
+        // trigger warnings are not in the menu bar.
         Button(menuStartLabel(defaultKind, wakeMode: defaultWakeMode,
                               keepsDisksAwake: defaultKeepDisksAwake)) {
             let start = defaultStart

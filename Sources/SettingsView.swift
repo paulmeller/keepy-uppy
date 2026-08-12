@@ -15,6 +15,12 @@ private enum SettingsMetrics {
 /// `SMAppService` status query and two UserDefaults reads with JSON decodes —
 /// twenty times a minute, all discarded. Tabs own their own state.
 struct SettingsView: View {
+    /// The only thing this view is handed, and it is passed straight through to
+    /// the one tab that needs it. `AdvancedSettingsTab` shows why a hot key
+    /// failed to register, which only the centre that tried to register it
+    /// knows — see the doc comment there for what a second instance would do.
+    @ObservedObject var hotKeys: HotKeyCenter
+
     var body: some View {
         // Five tabs, in the order a new user meets them: what the app does on
         // its own (General), what starts a session without you (Triggers), what
@@ -37,7 +43,7 @@ struct SettingsView: View {
                 .tabItem { Label("Display", systemImage: "display") }
             SafetySettingsTab()
                 .tabItem { Label("Safety & Guards", systemImage: "exclamationmark.shield") }
-            AdvancedSettingsTab()
+            AdvancedSettingsTab(hotKeys: hotKeys)
                 .tabItem { Label("CLI & Advanced", systemImage: "terminal") }
         }
         .frame(minWidth: SettingsMetrics.width, maxWidth: SettingsMetrics.width,

@@ -65,21 +65,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startHotKeys()
     }
 
-    /// **Nothing is bound unless the launch environment names it, and there is
-    /// deliberately no preference behind this yet.**
+    /// What was applied last, so an unrelated preference write does not churn
+    /// the registrations.
     ///
-    /// A stored binding is what the next task adds. Until then the only way to
-    /// arm one is an environment variable, because the alternative is not
-    /// merely untidy: `PreferencesSuite.name` is the *production* domain
-    /// outside XCTest, the installed app reads it live through `@AppStorage`,
-    /// and a stored binding outlives the process that wrote it. A "temporary
-    /// default" written from a development build would therefore arm an
-    /// arbitrary global shortcut in the user's shipping app and leave it armed
-    /// after the development build quit — the header's promise that the system
-    /// unregisters at termination ends the *registration*, not the *binding*.
-    ///
-    /// `#if DEBUG` as well as an environment variable, so a Release build
-    /// cannot be driven this way at all.
+    /// `UserDefaults.didChangeNotification` fires for **every** change in this
+    /// process — a Safety slider, a trigger rule, the login-item toggle — and
+    /// re-applying on each one would unregister and re-register the live
+    /// shortcuts several times per Settings visit. Each of those cycles briefly
+    /// frees the combination, which is exactly the window in which another
+    /// exclusive registrant could take it and leave this app reporting a
+    /// conflict it caused itself.
+    private var appliedHotKeyBindings: [HotKeyAction: HotKeyBinding] = [:]
+
     private func startHotKeys() {
         hotKeys.perform = { [weak self] action in
             // Carbon dispatches on the main thread, but `perform` is not
@@ -87,15 +84,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the hop is stated rather than assumed.
             Task { @MainActor in self?.performHotKeyAction(action) }
         }
+        // **Not under XCTest**, and this is a safety guard rather than test
+        // tidiness — the same guard, for the same reason, that
+        // `PreferencesSuite.name` makes about which domain to write.
+        //
+        // `xcodebuild test` hosts the bundle inside this app, so
+        // `applicationDidFinishLaunching` runs for real and this delegate is
+        // live for the whole run. Every hot key preference any test writes
+        // would therefore be picked up by the subscription below and
+        // *registered against the live window server*, exclusively, for the
+        // rest of the process. That is not hypothetical: it is how this guard
+        // was found. `SettingsPreferenceRoundTripTests` writes both shortcuts
+        // to prove they round trip, the host registered them within
+        // milliseconds, and `HotKeyRegistrationTests` then failed with
+        // `eventHotKeyExistsErr` against a registration nobody in the test had
+        // made.
+        //
+        // Those two tests used combinations nothing ships. The next test to
+        // write a preference might reasonably use ⌘⇧K, and then a suite run
+        // would quietly take that shortcut away from every app on the machine
+        // for as long as the run lasted. A test process must not be able to
+        // arm a global keystroke as a side effect of storing a value.
+        //
+        // The registration path itself is not left untested by this:
+        // `HotKeyRegistrationTests` drives `HotKeyCenter` directly and gives
+        // every combination back in the same test.
+        guard !PreferencesSuite.isRunningTests else { return }
+
+        applyHotKeyBindings()
+
+        // The recorder writes a preference and nothing else; this is what makes
+        // that write take effect. Without it the pane would store a binding,
+        // show it back, and register it only at the next launch — a control
+        // that looks like it worked and did nothing, which is the shape this
+        // project keeps finding.
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .sink { [weak self] _ in self?.applyHotKeyBindings() }
+            .store(in: &subscriptions)
+    }
+
+    /// The stored shortcuts, plus — in a development build only — whatever the
+    /// launch environment names.
+    ///
+    /// **The environment is the only override, and never a preference write.**
+    /// `PreferencesSuite.name` is the *production* domain outside XCTest, the
+    /// installed app reads it live through `@AppStorage`, and a stored binding
+    /// outlives the process that wrote it. A "temporary default" written from a
+    /// development build would therefore arm an arbitrary global shortcut in
+    /// the user's shipping app and leave it armed after the development build
+    /// quit — the header's promise that the system unregisters at termination
+    /// ends the *registration*, not the *binding*. `#if DEBUG` as well as an
+    /// environment variable, so a Release build cannot be driven this way at
+    /// all.
+    private func applyHotKeyBindings() {
+        var bindings = HotKeyPreference.allBindings(in: PreferencesSuite.defaults)
         #if DEBUG
-        let bindings = hotKeyDebugBindings(in: ProcessInfo.processInfo.environment)
-        guard !bindings.isEmpty else { return }
-        appLogger.log("Applying \(bindings.count) development hot key binding(s) from the environment")
+        // Last, so it wins: the point of the override is to drive an action
+        // during development without disturbing whatever is stored.
+        for (action, binding) in hotKeyDebugBindings(in: ProcessInfo.processInfo.environment) {
+            bindings[action] = binding
+        }
+        #endif
+
+        guard bindings != appliedHotKeyBindings else { return }
+        appliedHotKeyBindings = bindings
         hotKeys.apply(bindings)
         for (action, failure) in hotKeys.failures {
             appLogger.error("Hot key \(action.rawValue, privacy: .public) not registered: \(String(describing: failure))")
         }
-        #endif
     }
 
     /// Both arms call exactly what `MenuContent`'s own rows call.

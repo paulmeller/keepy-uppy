@@ -1229,3 +1229,151 @@ func cliRemoteInvocationForms(binaryPath: String) -> [String] {
 /// declining to produce is `reset` reporting "Daemon: not registered" with exit
 /// status 0 while the daemon is still registered and still running.
 let cliSetupThroughLinkNote = "keepy-uppy setup and keepy-uppy reset are the two commands the link can't serve. Both have to find the app bundle they were started from, and a link in /usr/local/bin isn't inside one — so they refuse through the link instead of reporting a result they can't stand behind. Run those with the full path above."
+
+// MARK: - The stored shortcuts, and what the recorder says about them
+
+/// The two global shortcuts as they are stored, arranged like
+/// `DefaultWakeModePreference`: read back with a documented answer rather than
+/// a failure, and the key named exactly once.
+///
+/// **It does not name the keys itself.** `HotKeyAction.preferenceKey` already
+/// does, and a second spelling here would be the very failure that discipline
+/// exists to prevent — two files agreeing on a string, with a typo in either
+/// producing a recorder that appears to work above a shortcut that never
+/// registers. So this type is only about the *value*: how a binding becomes a
+/// string, and what an unreadable one means.
+///
+/// **Unset is the documented answer, and this is the one preference in the app
+/// that could not have any other.** `DefaultWakeModePreference` falls back to
+/// `.clamshell` and `DefaultKeepDisksAwakePreference` to `false`, because an
+/// unrecognised value still has to produce *some* session. An unrecognised
+/// shortcut does not: it can simply not exist, and the alternative — falling
+/// back to a plausible combination — arms a global keystroke the user never
+/// chose, on the one surface that gives no feedback when it fires.
+enum HotKeyPreference {
+    /// Delegates, deliberately. Here so a call site reads as one preference
+    /// type rather than reaching into `HotKeyAction` for the key and into this
+    /// type for the value.
+    static func key(for action: HotKeyAction) -> String { action.preferenceKey }
+
+    /// The binding stored for `action`, or `nil` for unset — which includes
+    /// never written, written empty by the Clear button, and written with
+    /// something this build cannot parse. All three mean "no shortcut", and
+    /// they must, because the difference between them is invisible to the
+    /// person looking at the row.
+    static func binding(for action: HotKeyAction, in defaults: UserDefaults) -> HotKeyBinding? {
+        guard let stored = defaults.string(forKey: action.preferenceKey) else { return nil }
+        return HotKeyBinding(storedForm: stored)
+    }
+
+    /// `nil` removes the key. The recorder's Clear button instead writes an
+    /// empty string, because it holds the value through `@AppStorage`, which
+    /// has no way to express absence — `binding(for:in:)` reads both back as
+    /// unset, and `HotKeyPreferenceTests` pins that they agree.
+    static func setBinding(_ binding: HotKeyBinding?, for action: HotKeyAction,
+                           in defaults: UserDefaults) {
+        guard let binding else { return defaults.removeObject(forKey: action.preferenceKey) }
+        defaults.set(binding.storedForm, forKey: action.preferenceKey)
+    }
+
+    /// Everything currently set, in the shape `HotKeyCenter.apply` takes.
+    /// Actions with no shortcut are absent rather than present-and-nil, so
+    /// "nothing is bound" is the empty dictionary and the centre registers
+    /// nothing at all.
+    static func allBindings(in defaults: UserDefaults) -> [HotKeyAction: HotKeyBinding] {
+        var bindings: [HotKeyAction: HotKeyBinding] = [:]
+        for action in HotKeyAction.allCases {
+            if let binding = binding(for: action, in: defaults) { bindings[action] = binding }
+        }
+        return bindings
+    }
+}
+
+/// What each shortcut will actually do, under its row.
+///
+/// The stop row's second sentence is the one that earns this function. Its
+/// label already says "sessions started from the menu", but a label is read as
+/// a name and a name is read charitably: somebody who has a trigger rule
+/// running will read "stop" and expect their Mac to be released. It will not
+/// be — `stopAllSessions(all: false)` scopes to `app-<uid>`, and their trigger
+/// session is `agent-<uid>` — and the shortcut will look broken rather than
+/// scoped. Saying it here costs one clause and is the only warning available,
+/// because a global keystroke pressed in another app shows nothing at all.
+func hotKeyActionExplanation(_ action: HotKeyAction) -> String {
+    switch action {
+    case .startDefaultSession:
+        return "Starts the same session the first row of the menu starts, with whatever you've chosen in General and Display."
+    case .stopAppSessions:
+        return "Stops the sessions you started from this menu. Sessions started by a trigger rule or from the command line keep running — the menu's own Stop button reaches exactly the same set."
+    }
+}
+
+/// Why a shortcut that is set is not currently working.
+///
+/// Every case names what to do next. A row that reports a number and offers no
+/// action is a row that reads as the app being broken, and this is a feature
+/// whose whole risk is looking broken when it is merely conflicted.
+func hotKeyRegistrationFailureSentence(_ failure: HotKeyRegistrationFailure) -> String {
+    switch failure {
+    case .unusableBinding(let problem):
+        // The recorder's own sentence, not a second wording of it: one
+        // rejection described two ways is two bugs waiting to disagree.
+        return problem
+    case .alreadyTaken:
+        // `eventHotKeyExistsErr`, and it means precisely one thing: another
+        // `RegisterEventHotKey` client holds this combination exclusively.
+        // Deliberately not phrased as "macOS is using it" — that is the case
+        // this API is silent about, and `hotKeySystemConflictWarning` covers it.
+        return "Another app has already claimed this shortcut for itself, so macOS won't send it here. Pick a different combination."
+    case .refused(let status):
+        return "macOS wouldn't register this shortcut (error \(status)). Pick a different combination."
+    case .noEventHandler(let status):
+        return "Keepy Uppy couldn't start listening for shortcuts (error \(status)). Its shortcuts won't work until you quit and open it again."
+    }
+}
+
+/// **The standing note, always visible near the recorder, and the most
+/// important sentence in this pane.**
+///
+/// `kEventHotKeyExclusive` turns exactly one conflict into an error: another
+/// `RegisterEventHotKey` client holding the same combination exclusively. It is
+/// silent about the conflict people actually hit. An app that takes the key
+/// another way — an event tap, a non-exclusive registration, its own frontmost
+/// handling — is invisible from here: the call returns `noErr`, the row shows a
+/// shortcut that is set, and the key never arrives. Measured in
+/// `HotKeyRegistrationTests`, where ⌘Space registers cleanly with no error at
+/// all.
+///
+/// So this is not an apology and it is not padding. It is the only accurate
+/// description of what this API can promise, and without it a silently dead
+/// shortcut looks like the app being broken rather than like a collision the
+/// user can fix in five seconds by choosing another key.
+///
+/// It says "can't tell" rather than implying detection, because an error row
+/// appearing *sometimes* is what teaches a reader that its absence means
+/// success — and here its absence means nothing of the kind.
+let hotKeySilentConflictNote = "If another app already uses a combination, Keepy Uppy can't tell: the shortcut will look set here and then quietly do nothing. macOS gives no way to find out. If a shortcut you've set never works, that's almost certainly why — pick a different one."
+
+/// Shown when the combination is one of macOS's own — the part of "already
+/// taken" that *is* knowable, because `CopySymbolicHotKeys` enumerates them.
+///
+/// Carefully not worded as a failure. Nothing failed: `RegisterEventHotKey`
+/// returned `noErr` and the registration is live. The window server simply
+/// consumes the key before any registration is consulted, so it never arrives.
+/// Calling this an error would teach the reader that the *absence* of an error
+/// means the shortcut works, which is the inference this whole pane is trying
+/// to prevent.
+let hotKeySystemConflictWarning = "macOS uses this shortcut itself, so it will never reach Keepy Uppy. Pick a different combination, or change the macOS one in System Settings ▸ Keyboard ▸ Keyboard Shortcuts."
+
+/// The section footer.
+///
+/// It says the one thing that makes a global shortcut different from a menu
+/// shortcut, and it is the **only** place a user can learn it — because the
+/// menu deliberately does not show these bindings. See `MenuContent`, where
+/// that decision is written out.
+let hotKeyShortcutsSectionFootnote = "These work in any app, whether or not the Keepy Uppy menu is open. Leave one unset and it does nothing."
+
+/// The placeholder in a row with no shortcut. Named here rather than written
+/// into the view, so the tests above and the pane cannot disagree about what
+/// "unset" looks like.
+let hotKeyUnsetPlaceholder = "Not set"

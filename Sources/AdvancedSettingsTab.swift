@@ -17,6 +17,16 @@ import AppKit
 /// is the one this pane would show, confidently, about a link that is no longer
 /// there.
 struct AdvancedSettingsTab: View {
+    /// The app's one `HotKeyCenter`, passed in rather than made here.
+    ///
+    /// It has to be the same instance `AppDelegate` registers through, because
+    /// this pane's job includes showing *why a registration failed* — and a
+    /// second centre would have its own empty `failures` and would cheerfully
+    /// report that everything is fine. It would also try to register the same
+    /// combinations exclusively and collide with the real one, so the pane
+    /// would manufacture the very conflict it exists to report.
+    @ObservedObject var hotKeys: HotKeyCenter
+
     private let installation = CLIInstallation.forThisApp()
 
     @State private var state: CLIInstallState = .notInstalled
@@ -27,6 +37,31 @@ struct AdvancedSettingsTab: View {
 
     var body: some View {
         Form {
+            // Shortcuts first, above the CLI section: this is the one people
+            // come here to set, and the CLI section is the one they come here
+            // to read once and never again.
+            Section {
+                ForEach(HotKeyAction.allCases) { action in
+                    HotKeyRecorderRow(action: action, hotKeys: hotKeys)
+                }
+            } header: {
+                Text("Keyboard Shortcuts")
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(hotKeyShortcutsSectionFootnote)
+                        .settingsFootnote()
+                    // **Always visible, never conditional on a failure.** The
+                    // conflict it describes is the one nothing can detect, so
+                    // there is no state in which the app knows to show it — and
+                    // a note that appeared only when something went wrong would
+                    // teach the reader that its absence means the shortcut
+                    // works, which is precisely the inference that is unsafe
+                    // here.
+                    Text(hotKeySilentConflictNote)
+                        .settingsFootnote()
+                }
+            }
+
             Section {
                 Text(cliInstallStatusSentence(state, linkPath: installation.linkPath))
                     .font(.callout)

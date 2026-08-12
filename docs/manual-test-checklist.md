@@ -218,6 +218,51 @@ here, and running it is what finishes `wakeModeSettingsExplanation`'s copy for
 - [ ] With a `--keep-disks-awake` session live, `keepy-uppy status --json` still prints exactly `{"keepingAwake": true}` — a script written before this plan must not start finding a new field, and `sessions` is where the axis is reported (`wake=…; attached disks held awake`)
 - [ ] Settings → General's "Keep attached disks awake" switch is what a menu-started session uses, and the menu's start rows carry `(disks stay awake)` while it is on — a live session's own row deliberately does not, because the assertion is machine-wide and `pmset -g assertions` is where that truth lives
 
+**Global keyboard shortcuts (Plan 7):**
+
+**This is the one feature in the app with no self-verification available**, and
+these items are not a formality. A registered hot key that never fires is
+indistinguishable, from inside the process, from one that fires into a handler
+nobody wired up: `RegisterEventHotKey` returns `noErr` either way. The suite
+covers everything between the window server and the action — the handler is on
+the right target, decodes `EventHotKeyID`, checks the signature, dispatches to
+the right action, and stops when the centre is stopped — by sending a real
+`kEventHotKeyPressed` to that target. **The link it cannot close is the window
+server delivering a key a human pressed**, and that is what the first item here
+is. Nothing else in this file substitutes for it.
+
+- [ ] Set a shortcut in Settings ▸ CLI & Advanced, then press it **with another
+  app full-screen and the Keepy Uppy menu closed**. The session starts. This is
+  the whole feature: a shortcut that only works with the menu open is a menu
+  shortcut, which this deliberately is not
+- [ ] Set the second shortcut too, and press it. The sessions **you started from
+  the menu** end — and a session started by a trigger rule, or by `keepy-uppy
+  on` in a terminal, **keeps running**. That is the documented scope, not a bug:
+  `stopAllSessions(all: false)` reaches `app-<uid>` only. The row says so, and
+  this item exists to confirm the row is telling the truth
+- [ ] Bind a combination macOS itself owns (⌘Space, say). The row warns that
+  macOS uses it and the key will never arrive — **and note that no error was
+  returned**: the registration genuinely succeeded. This is the case
+  `kEventHotKeyExclusive` is silent about, and the warning comes from
+  `CopySymbolicHotKeys`, not from the registration failing
+- [ ] Bind a combination another running app already owns *without* using
+  `RegisterEventHotKey` exclusively — a text-expander or window-manager
+  shortcut is the usual case. **Nothing warns, and the shortcut does nothing.**
+  This is the failure the standing note in that pane exists for; confirm the
+  note is visible without having to do anything to provoke it
+- [ ] Clear a shortcut with the Clear button and press the old combination: it
+  does nothing, **immediately**, without quitting the app. A stale registration
+  would go on holding the combination away from whatever you rebind it to
+- [ ] Change a shortcut to a different combination and press both: the new one
+  works, the old one does nothing
+- [ ] Press ⌘W while recording: it is captured as a binding rather than closing
+  the Settings window. Press Escape while recording: it cancels and leaves the
+  previous binding alone
+- [ ] Quit the app and press a bound combination: nothing happens. (The system
+  unregisters at process termination — `UnregisterEventHotKey`'s own header
+  paragraph — so this confirms the registration died with the process. The
+  *binding* survives in preferences, which is why it works again on relaunch)
+
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary
 - [x] A non-agent client's condition report is rejected and logged

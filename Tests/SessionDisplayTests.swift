@@ -1938,6 +1938,37 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
                 },
                 readsBackWhatWasWritten: { SessionNotificationPreference.load().onTriggerStart }
             ),
+            // CLI & Advanced — the two global shortcuts, one row each.
+            //
+            // Both rows matter more than most here. The two keys are the only
+            // pair in this list that were introduced together, by one task, in
+            // one file — which is exactly the shape that produces two controls
+            // sharing a key — and the symptom would be a Settings pane where
+            // setting either shortcut silently rebinds the other. Two absurd
+            // combinations, distinct from each other, so neither row can pass
+            // by reading the other's value.
+            PreferenceUnderTest(
+                name: HotKeyAction.startDefaultSession.preferenceKey,
+                write: {
+                    HotKeyPreference.setBinding(Self.distinctiveStartBinding,
+                                                for: .startDefaultSession, in: self.defaults)
+                },
+                readsBackWhatWasWritten: {
+                    HotKeyPreference.binding(for: .startDefaultSession, in: self.defaults)
+                        == Self.distinctiveStartBinding
+                }
+            ),
+            PreferenceUnderTest(
+                name: HotKeyAction.stopAppSessions.preferenceKey,
+                write: {
+                    HotKeyPreference.setBinding(Self.distinctiveStopBinding,
+                                                for: .stopAppSessions, in: self.defaults)
+                },
+                readsBackWhatWasWritten: {
+                    HotKeyPreference.binding(for: .stopAppSessions, in: self.defaults)
+                        == Self.distinctiveStopBinding
+                }
+            ),
             // Safety & Guards — every field of it, through its own store.
             PreferenceUnderTest(
                 name: "safetyConfig",
@@ -1961,6 +1992,14 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
             ),
         ]
     }
+
+    /// `kVK_F20` and `kVK_F19` with all four modifiers — combinations nothing
+    /// ships, and distinct from each other so the two rows above cannot pass by
+    /// reading one another.
+    private static let distinctiveStartBinding = HotKeyBinding(
+        keyCode: 0x5A, modifiers: [.control, .option, .shift, .command])
+    private static let distinctiveStopBinding = HotKeyBinding(
+        keyCode: 0x50, modifiers: [.control, .option, .shift, .command])
 
     private static let distinctiveSafetyConfig = SafetyConfig(
         thermalSensitivity: .cautious, batteryCutoff: 37, maxSessionDuration: 3 * 3600,
@@ -2041,5 +2080,248 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
     /// would fold in every global default on the machine.
     private func storedKeys() -> Set<String> {
         Set((UserDefaults.standard.persistentDomain(forName: PreferencesSuite.name) ?? [:]).keys)
+    }
+}
+
+// MARK: - The stored shortcuts
+
+/// The preference behind the recorder. `HotKeyAction.preferenceKey` names the
+/// two keys (Task 8); everything here is about the value stored under them and
+/// about the one failure that matters — a stored string that no longer parses.
+final class HotKeyPreferenceTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        XCTAssertTrue(PreferencesSuite.removeAllValuesForTesting(),
+                      "refused to clear the suite — it is the shipping one")
+    }
+
+    private var defaults: UserDefaults { PreferencesSuite.defaults }
+
+    private let binding = HotKeyBinding(
+        keyCode: 0x5A, modifiers: [.control, .option, .shift, .command])
+
+    /// **Unset is the default, and it has to be.** Every other preference in
+    /// this app can afford a non-nil fallback; this one cannot, because its
+    /// fallback would be a global keystroke nobody chose, armed on the surface
+    /// with no feedback.
+    func testNobodyHasAShortcutUntilTheySetOne() {
+        for action in HotKeyAction.allCases {
+            XCTAssertNil(HotKeyPreference.binding(for: action, in: defaults),
+                         "\(action.rawValue) came with a shortcut nobody set")
+        }
+        XCTAssertTrue(HotKeyPreference.allBindings(in: defaults).isEmpty)
+    }
+
+    func testABindingRoundTripsThroughThePreference() {
+        for action in HotKeyAction.allCases {
+            HotKeyPreference.setBinding(binding, for: action, in: defaults)
+            XCTAssertEqual(HotKeyPreference.binding(for: action, in: defaults), binding)
+        }
+        XCTAssertEqual(HotKeyPreference.allBindings(in: defaults).count,
+                       HotKeyAction.allCases.count)
+    }
+
+    /// The key is `HotKeyAction.preferenceKey` and nothing else. Named once,
+    /// there, for the reason `DefaultWakeModePreference.key` is: the pane that
+    /// writes it and the centre that reads it are different files that never
+    /// call each other, and a typo in either is not a compile error.
+    func testThePreferenceUsesTheActionSOwnKeyAndNoOther() {
+        for action in HotKeyAction.allCases {
+            HotKeyPreference.setBinding(binding, for: action, in: defaults)
+            XCTAssertEqual(defaults.string(forKey: action.preferenceKey), binding.storedForm)
+            XCTAssertEqual(HotKeyPreference.key(for: action), action.preferenceKey)
+        }
+    }
+
+    /// A distinct key per action, proven by behaviour rather than by comparing
+    /// two strings: setting one must not disturb the other.
+    func testEachActionHasItsOwnStorage() {
+        let other = HotKeyBinding(keyCode: 0x50, modifiers: [.command, .shift])
+        HotKeyPreference.setBinding(binding, for: .startDefaultSession, in: defaults)
+        HotKeyPreference.setBinding(other, for: .stopAppSessions, in: defaults)
+
+        XCTAssertEqual(HotKeyPreference.binding(for: .startDefaultSession, in: defaults), binding)
+        XCTAssertEqual(HotKeyPreference.binding(for: .stopAppSessions, in: defaults), other)
+
+        HotKeyPreference.setBinding(nil, for: .startDefaultSession, in: defaults)
+        XCTAssertNil(HotKeyPreference.binding(for: .startDefaultSession, in: defaults))
+        XCTAssertEqual(HotKeyPreference.binding(for: .stopAppSessions, in: defaults), other,
+                       "clearing one shortcut cleared the other")
+    }
+
+    /// **An unparseable stored value is unset, never "some binding".** The
+    /// tempting fallback — substitute a sensible combination — arms a global
+    /// shortcut the user never chose. Compare `DefaultWakeModePreference`,
+    /// which *does* fall back, because an unrecognised wake mode still has to
+    /// produce a session whereas an unrecognised shortcut can simply not exist.
+    func testAnUnparseableStoredValueReadsBackAsUnsetRatherThanAsSomeBinding() {
+        for junk in ["", "   ", "nonsense", "{}", "null", "0", "{\"keyCode\":90}"] {
+            defaults.set(junk, forKey: HotKeyAction.startDefaultSession.preferenceKey)
+            XCTAssertNil(HotKeyPreference.binding(for: .startDefaultSession, in: defaults),
+                         "\(junk) parsed into a binding")
+            XCTAssertTrue(HotKeyPreference.allBindings(in: defaults).isEmpty)
+        }
+    }
+
+    /// The two ways the UI can unset one — the Clear button writes an empty
+    /// string through `@AppStorage`, `setBinding(nil:)` removes the key — read
+    /// back identically. Otherwise "cleared" would mean two different things
+    /// depending on which path cleared it.
+    func testBothWaysOfClearingReadBackTheSame() {
+        HotKeyPreference.setBinding(binding, for: .startDefaultSession, in: defaults)
+        HotKeyPreference.setBinding(nil, for: .startDefaultSession, in: defaults)
+        XCTAssertNil(HotKeyPreference.binding(for: .startDefaultSession, in: defaults))
+
+        HotKeyPreference.setBinding(binding, for: .startDefaultSession, in: defaults)
+        defaults.set("", forKey: HotKeyAction.startDefaultSession.preferenceKey)
+        XCTAssertNil(HotKeyPreference.binding(for: .startDefaultSession, in: defaults))
+    }
+
+    /// A stored binding that cannot work is still *stored* — it reads back —
+    /// and it is `hotKeyBindingProblem`'s job to refuse it, not this type's.
+    /// Otherwise a hand-edited preference would vanish with no explanation
+    /// anywhere, which is the same silence this feature is trying to remove.
+    func testAStoredBindingThatCannotWorkStillReadsBackSoTheRowCanExplainIt() {
+        let bare = HotKeyBinding(keyCode: 0x5A, modifiers: [])
+        HotKeyPreference.setBinding(bare, for: .startDefaultSession, in: defaults)
+        XCTAssertEqual(HotKeyPreference.binding(for: .startDefaultSession, in: defaults), bare)
+        XCTAssertNotNil(hotKeyBindingProblem(bare))
+    }
+}
+
+// MARK: - What the recorder says
+
+/// **The copy is the whole product here.** `RegisterEventHotKey` cannot detect
+/// the conflict users actually hit, so what this pane says about that gap is
+/// the only thing standing between a silently dead shortcut and a user
+/// concluding the app is broken.
+final class HotKeyCopyTests: XCTestCase {
+    /// Every row says what it will do, in words that match the scope the
+    /// mechanism can actually honour.
+    func testEveryActionHasAnExplanationDistinctFromEveryOther() {
+        var explanations: Set<String> = []
+        for action in HotKeyAction.allCases {
+            let explanation = hotKeyActionExplanation(action)
+            XCTAssertFalse(explanation.isEmpty, "\(action.rawValue) explains nothing")
+            explanations.insert(explanation)
+        }
+        XCTAssertEqual(explanations.count, HotKeyAction.allCases.count)
+    }
+
+    /// The row for the stop action must not claim the sessions it will not
+    /// stop. `stopAllSessions(all: false)` scopes to `app-<uid>`; this user's
+    /// own trigger session (`agent-<uid>`) and CLI session (`cli-<uid>`) keep
+    /// running, and this is the one surface with no feedback to reveal that.
+    func testTheStopExplanationNamesWhatItLeavesRunning() {
+        let explanation = hotKeyActionExplanation(.stopAppSessions).lowercased()
+        XCTAssertTrue(explanation.contains("trigger") || explanation.contains("command line"),
+                      "the stop row must say what it leaves running: \(explanation)")
+        for overclaim in ["everything", "all sessions", "every session"] {
+            XCTAssertFalse(explanation.contains(overclaim),
+                           "the stop row claims \(overclaim), which it cannot do: \(explanation)")
+        }
+    }
+
+    /// Every failure the centre can report becomes a sentence, and every one of
+    /// them says what to do next. A row that names an error and offers no
+    /// action is a row that reads as the app being broken.
+    func testEveryRegistrationFailureSaysWhatHappenedAndWhatToDo() {
+        let failures: [HotKeyRegistrationFailure] = [
+            .unusableBinding("A shortcut needs at least one modifier key."),
+            .alreadyTaken(hotKeyAlreadyTakenStatus),
+            .refused(OSStatus(-50)),
+            .noEventHandler(OSStatus(-50)),
+        ]
+        for failure in failures {
+            let sentence = hotKeyRegistrationFailureSentence(failure)
+            XCTAssertFalse(sentence.isEmpty, "\(failure) says nothing")
+            XCTAssertTrue(sentence.count > 20, "\(failure) says too little: \(sentence)")
+        }
+        // The three that name a status must name it, because "it didn't work"
+        // about an OSStatus nobody can see is not a bug report anybody can act
+        // on.
+        XCTAssertTrue(hotKeyRegistrationFailureSentence(.refused(OSStatus(-50))).contains("-50"))
+        XCTAssertTrue(hotKeyRegistrationFailureSentence(.noEventHandler(OSStatus(-50))).contains("-50"))
+    }
+
+    /// The refused-binding case shows the recorder's own sentence rather than a
+    /// second wording of it, so the pane cannot describe one rejection two
+    /// different ways.
+    func testARefusedBindingShowsTheSameSentenceTheRecorderWouldHave() {
+        let problem = hotKeyBindingProblem(HotKeyBinding(keyCode: 0x5A, modifiers: []))
+        XCTAssertNotNil(problem)
+        XCTAssertEqual(hotKeyRegistrationFailureSentence(.unusableBinding(problem!)), problem)
+    }
+
+    /// The one failure `kEventHotKeyExclusive` *can* report. It must not be
+    /// described as "macOS is using it", because that is the case this API is
+    /// silent about — it means another `RegisterEventHotKey` client.
+    func testTheAlreadyTakenSentenceBlamesAnotherAppRatherThanMacOS() {
+        let sentence = hotKeyRegistrationFailureSentence(.alreadyTaken(hotKeyAlreadyTakenStatus))
+        XCTAssertTrue(sentence.lowercased().contains("another app"), sentence)
+        XCTAssertTrue(sentence.lowercased().contains("different") ||
+                      sentence.lowercased().contains("another combination"), sentence)
+    }
+
+    /// **The standing note, and the reason this task exists in the shape it
+    /// does.** `kEventHotKeyExclusive` detects another `RegisterEventHotKey`
+    /// client holding the combination — the rarer case. It does not detect an
+    /// app that swallows the key another way: the call returns `noErr`, the row
+    /// shows success, and the shortcut silently never fires. Measured in
+    /// `HotKeyRegistrationTests`, where ⌘Space registers cleanly.
+    ///
+    /// So the note has to say three things: that it can happen, that the app
+    /// cannot tell, and what to do about it.
+    func testTheStandingNoteSaysASilentlyDeadShortcutIsPossibleAndWhatToDo() {
+        let note = hotKeySilentConflictNote.lowercased()
+        XCTAssertTrue(note.contains("another app"),
+                      "the note must name who takes the shortcut: \(note)")
+        XCTAssertTrue(note.contains("nothing") || note.contains("won't work")
+                      || note.contains("never"),
+                      "the note must say the shortcut can silently do nothing: \(note)")
+        XCTAssertTrue(note.contains("different") || note.contains("another one"),
+                      "the note must say what to do: \(note)")
+    }
+
+    /// And it must not promise detection it cannot deliver. Saying "Keepy Uppy
+    /// will tell you if a shortcut is taken" on the strength of
+    /// `kEventHotKeyExclusive` would be a claim the mechanism does not support,
+    /// and it is the claim a reader most naturally infers from an error row.
+    func testTheStandingNoteDoesNotPromiseToDetectEveryConflict() {
+        let note = hotKeySilentConflictNote.lowercased()
+        for overclaim in ["will tell you", "will warn you", "always detect", "detects every",
+                          "we check every"] {
+            XCTAssertFalse(note.contains(overclaim),
+                           "the note promises detection it cannot deliver: \(note)")
+        }
+        // It must be explicit that the app cannot see the conflict, not merely
+        // vague about it.
+        XCTAssertTrue(note.contains("can't tell") || note.contains("cannot tell")
+                      || note.contains("can't see") || note.contains("cannot see"),
+                      "the note must say plainly that the app cannot detect it: \(note)")
+    }
+
+    /// The part of "already taken" that *is* knowable — macOS's own symbolic
+    /// hot keys, which `CopySymbolicHotKeys` enumerates. This sentence is
+    /// shown for those, and it must not be confused with the exclusive-
+    /// registration error above: nothing failed, the registration succeeded,
+    /// and the key will simply never arrive.
+    func testTheSystemShortcutWarningSaysTheKeyWillNeverArrive() {
+        let warning = hotKeySystemConflictWarning.lowercased()
+        XCTAssertTrue(warning.contains("macos"), warning)
+        XCTAssertTrue(warning.contains("never") || warning.contains("won't reach")
+                      || warning.contains("nothing"), warning)
+        XCTAssertTrue(warning.contains("different") || warning.contains("another"), warning)
+    }
+
+    /// The section footer has to say the one thing that makes a *global*
+    /// shortcut different from a menu shortcut, because the menu deliberately
+    /// does not show these bindings (see `MenuContent`) and this is therefore
+    /// the only place a user can learn it.
+    func testTheSectionFootnoteSaysTheShortcutsWorkWithoutTheMenuBeingOpen() {
+        let footnote = hotKeyShortcutsSectionFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("menu"), footnote)
+        XCTAssertTrue(footnote.contains("any app") || footnote.contains("anywhere")
+                      || footnote.contains("without"), footnote)
     }
 }
