@@ -55,7 +55,7 @@ final class SessionNotificationTrackerTests: XCTestCase {
     func testTheFirstSnapshotReportsNothing() {
         var tracker = self.tracker()
         XCTAssertFalse(tracker.hasSnapshot)
-        XCTAssertEqual(tracker.record(current: [session(), triggerSession()], now: t0), [])
+        XCTAssertEqual(tracker.record(current: [session(), triggerSession()], now: t0).events, [])
         XCTAssertTrue(tracker.hasSnapshot)
     }
 
@@ -65,20 +65,20 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// that is better than N false ones in one tick.
     func testALostConnectionDropsTheBaselineRatherThanAnnouncingEverything() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [session(), session()], now: t0)
+        _ = tracker.record(current: [session(), session()], now: t0).events
         tracker.forgetSnapshot()
         XCTAssertFalse(tracker.hasSnapshot)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [])
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [])
     }
 
     /// ...and having forgotten, it re-primes and resumes reporting normally.
     func testForgettingThenRePrimingResumesNormalReporting() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [session()], now: t0)
+        _ = tracker.record(current: [session()], now: t0).events
         tracker.forgetSnapshot()
         let fresh = session()
-        XCTAssertEqual(tracker.record(current: [fresh], now: t1), [])
-        XCTAssertEqual(tracker.record(current: [], now: t2), [.stoppedBeingKeptAwake])
+        XCTAssertEqual(tracker.record(current: [fresh], now: t1).events, [])
+        XCTAssertEqual(tracker.record(current: [], now: t2).events, [.stoppedBeingKeptAwake])
     }
 
     /// Another user's session is not this app's business to narrate — the same
@@ -87,8 +87,8 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// table.
     func testAnotherUsersSessionEndingSaysNothing() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [session(ownerUID: otherUser)], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [])
+        _ = tracker.record(current: [session(ownerUID: otherUser)], now: t0).events
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [])
     }
 
     /// It is "nothing of yours is keeping this Mac awake", not "a session
@@ -96,14 +96,14 @@ final class SessionNotificationTrackerTests: XCTestCase {
     func testEndingOneOfTwoSessionsSaysNothing() {
         var tracker = self.tracker()
         let staying = session()
-        _ = tracker.record(current: [session(), staying], now: t0)
-        XCTAssertEqual(tracker.record(current: [staying], now: t1), [])
+        _ = tracker.record(current: [session(), staying], now: t0).events
+        XCTAssertEqual(tracker.record(current: [staying], now: t1).events, [])
     }
 
     func testEndingTheLastSessionSaysSo() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [session()], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [.stoppedBeingKeptAwake])
+        _ = tracker.record(current: [session()], now: t0).events
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [.stoppedBeingKeptAwake])
     }
 
     /// ...and another user's live session does not suppress your notification,
@@ -114,8 +114,8 @@ final class SessionNotificationTrackerTests: XCTestCase {
     func testAnotherUsersLiveSessionDoesNotSuppressYours() {
         var tracker = self.tracker()
         let theirs = session(ownerUID: otherUser)
-        _ = tracker.record(current: [session(), theirs], now: t0)
-        XCTAssertEqual(tracker.record(current: [theirs], now: t1), [.stoppedBeingKeptAwake])
+        _ = tracker.record(current: [session(), theirs], now: t0).events
+        XCTAssertEqual(tracker.record(current: [theirs], now: t1).events, [.stoppedBeingKeptAwake])
     }
 
     /// A session that ends and is replaced in the same tick has not stopped
@@ -123,8 +123,8 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// what is announced, never the individual ending.
     func testASessionReplacedInTheSameTickSaysNothingAboutStopping() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [session()], now: t0)
-        XCTAssertEqual(tracker.record(current: [session()], now: t1), [])
+        _ = tracker.record(current: [session()], now: t0).events
+        XCTAssertEqual(tracker.record(current: [session()], now: t1).events, [])
     }
 
     /// An empty table that stays empty is not an event. Without the
@@ -132,29 +132,29 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// Mac would announce that it had stopped being kept awake.
     func testStayingIdleIsNotAnEvent() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [])
+        _ = tracker.record(current: [], now: t0).events
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [])
     }
 
     // MARK: - The trigger event
 
     func testATriggerStartedSessionIsAnnouncedWhenItAppears() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [], now: t0)
-        XCTAssertEqual(tracker.record(current: [triggerSession()], now: t1),
+        _ = tracker.record(current: [], now: t0).events
+        XCTAssertEqual(tracker.record(current: [triggerSession()], now: t1).events,
                        [.triggerStartedSession])
     }
 
     func testASessionYouStartedYourselfIsNotAnnounced() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [], now: t0)
-        XCTAssertEqual(tracker.record(current: [session()], now: t1), [])
+        _ = tracker.record(current: [], now: t0).events
+        XCTAssertEqual(tracker.record(current: [session()], now: t1).events, [])
     }
 
     func testATriggerSessionOfAnotherUsersIsNotAnnounced() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [], now: t0)
-        XCTAssertEqual(tracker.record(current: [triggerSession(ownerUID: otherUser)], now: t1), [])
+        _ = tracker.record(current: [], now: t0).events
+        XCTAssertEqual(tracker.record(current: [triggerSession(ownerUID: otherUser)], now: t1).events, [])
     }
 
     /// `origin` is CLIENT-CHOSEN — `Session.authorized(id:owner:ownerUID:startedAt:)`
@@ -163,20 +163,20 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// Same conjunction, same reason, as `menuSessionGroup`.
     func testASessionClaimingToBeATriggerFromANonAgentClientIsNotAnnounced() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [], now: t0)
-        XCTAssertEqual(tracker.record(current: [session(role: .cli, origin: .trigger)], now: t1), [])
-        _ = tracker.record(current: [], now: t2)
+        _ = tracker.record(current: [], now: t0).events
+        XCTAssertEqual(tracker.record(current: [session(role: .cli, origin: .trigger)], now: t1).events, [])
+        _ = tracker.record(current: [], now: t2).events
         XCTAssertEqual(tracker.record(current: [session(role: .agent, origin: .manual)],
-                                      now: t2.addingTimeInterval(3)), [])
+                                      now: t2.addingTimeInterval(3)).events, [])
         // ...and this app's own session claiming it, which is the one shape a
         // *genuine* Keepy Uppy could produce: `DaemonConnection.startSession`
         // takes the origin as a parameter. The menu row for such a session may
         // honestly say "started automatically" — it is this app describing its
         // own session — but a banner announcing "one of your rules started a
         // session" would be wrong, because no rule did.
-        _ = tracker.record(current: [], now: t3)
+        _ = tracker.record(current: [], now: t3).events
         XCTAssertEqual(tracker.record(current: [session(role: .app, origin: .trigger)],
-                                      now: t3.addingTimeInterval(3)), [])
+                                      now: t3.addingTimeInterval(3)).events, [])
     }
 
     /// The weld. The banner and the menu row must not become two rules: the
@@ -190,8 +190,8 @@ final class SessionNotificationTrackerTests: XCTestCase {
                           session(role: .cli, origin: .trigger),
                           session(ownerUID: otherUser, role: .agent, origin: .trigger)] {
             var tracker = self.tracker()
-            _ = tracker.record(current: [], now: t0)
-            let announced = tracker.record(current: [candidate], now: t1)
+            _ = tracker.record(current: [], now: t0).events
+            let announced = tracker.record(current: [candidate], now: t1).events
                 .contains(.triggerStartedSession)
             XCTAssertEqual(announced, candidate.startedByTrigger(forUserID: me),
                            "the banner and the menu disagree about \(candidate.owner)")
@@ -203,8 +203,8 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// is the per-session noise this event set was chosen to avoid.
     func testTwoTriggerSessionsInOneTickAnnounceOnce() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [], now: t0)
-        XCTAssertEqual(tracker.record(current: [triggerSession(), triggerSession()], now: t1),
+        _ = tracker.record(current: [], now: t0).events
+        XCTAssertEqual(tracker.record(current: [triggerSession(), triggerSession()], now: t1).events,
                        [.triggerStartedSession])
     }
 
@@ -218,9 +218,9 @@ final class SessionNotificationTrackerTests: XCTestCase {
     func testASessionThisAppStoppedIsNotAnnounced() {
         var tracker = self.tracker()
         let stopped = session()
-        _ = tracker.record(current: [stopped], now: t0)
+        _ = tracker.record(current: [stopped], now: t0).events
         tracker.appWillStop(sessionIDs: [stopped.id], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [])
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [])
     }
 
     /// The menu's sweep row (`menuStopAllLabel`) stops several at once, and
@@ -230,9 +230,9 @@ final class SessionNotificationTrackerTests: XCTestCase {
         var tracker = self.tracker()
         let a = session()
         let b = session()
-        _ = tracker.record(current: [a, b], now: t0)
+        _ = tracker.record(current: [a, b], now: t0).events
         tracker.appWillStop(sessionIDs: [a.id, b.id], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [])
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [])
     }
 
     /// ...but a stop this app did NOT initiate is exactly the event worth
@@ -241,8 +241,8 @@ final class SessionNotificationTrackerTests: XCTestCase {
     /// things that happened without the user touching this app.
     func testASessionStoppedFromTheCommandLineIsAnnounced() {
         var tracker = self.tracker()
-        _ = tracker.record(current: [session(role: .cli)], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [.stoppedBeingKeptAwake])
+        _ = tracker.record(current: [session(role: .cli)], now: t0).events
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [.stoppedBeingKeptAwake])
     }
 
     /// A tick in which the user stopped one session and another ended by
@@ -252,9 +252,9 @@ final class SessionNotificationTrackerTests: XCTestCase {
         var tracker = self.tracker()
         let clicked = session()
         let expired = session(role: .cli)
-        _ = tracker.record(current: [clicked, expired], now: t0)
+        _ = tracker.record(current: [clicked, expired], now: t0).events
         tracker.appWillStop(sessionIDs: [clicked.id], now: t0)
-        XCTAssertEqual(tracker.record(current: [], now: t1), [.stoppedBeingKeptAwake])
+        XCTAssertEqual(tracker.record(current: [], now: t1).events, [.stoppedBeingKeptAwake])
     }
 
     /// The suppression must not leak into the next tick and swallow a real
@@ -263,13 +263,13 @@ final class SessionNotificationTrackerTests: XCTestCase {
         var tracker = self.tracker()
         let clicked = session()
         let other = session()
-        _ = tracker.record(current: [clicked, other], now: t0)
+        _ = tracker.record(current: [clicked, other], now: t0).events
         tracker.appWillStop(sessionIDs: [clicked.id], now: t0)
         // The clicked session goes; one of the user's is still live, so there
         // is nothing to announce either way.
-        XCTAssertEqual(tracker.record(current: [other], now: t1), [])
+        XCTAssertEqual(tracker.record(current: [other], now: t1).events, [])
         // The other one ends on its own a tick later, and that is news.
-        XCTAssertEqual(tracker.record(current: [], now: t2), [.stoppedBeingKeptAwake])
+        XCTAssertEqual(tracker.record(current: [], now: t2).events, [.stoppedBeingKeptAwake])
     }
 
     /// A stop the daemon refused, or one that never took effect, must not
@@ -279,13 +279,13 @@ final class SessionNotificationTrackerTests: XCTestCase {
     func testAStopThatNeverHappenedStopsSuppressingAfterItsWindow() {
         var tracker = self.tracker()
         let stubborn = session()
-        _ = tracker.record(current: [stubborn], now: t0)
+        _ = tracker.record(current: [stubborn], now: t0).events
         tracker.appWillStop(sessionIDs: [stubborn.id], now: t0)
         // Still there, tick after tick.
         let window = SessionNotificationTracker.stopSuppressionWindow
-        XCTAssertEqual(tracker.record(current: [stubborn], now: t0.addingTimeInterval(3)), [])
+        XCTAssertEqual(tracker.record(current: [stubborn], now: t0.addingTimeInterval(3)).events, [])
         XCTAssertEqual(
-            tracker.record(current: [], now: t0.addingTimeInterval(window + 1)),
+            tracker.record(current: [], now: t0.addingTimeInterval(window + 1)).events,
             [.stoppedBeingKeptAwake])
     }
 
@@ -304,44 +304,82 @@ final class SessionNotificationTrackerTests: XCTestCase {
     func testForgettingTheSnapshotAlsoForgetsWhatThisAppAskedToStop() {
         var tracker = self.tracker()
         let a = session()
-        _ = tracker.record(current: [a], now: t0)
+        _ = tracker.record(current: [a], now: t0).events
         tracker.appWillStop(sessionIDs: [a.id], now: t0)
         tracker.forgetSnapshot()
         // Reconnected, same session still live, and it later ends by itself.
-        XCTAssertEqual(tracker.record(current: [a], now: t1), [])
-        XCTAssertEqual(tracker.record(current: [], now: t2), [.stoppedBeingKeptAwake])
+        XCTAssertEqual(tracker.record(current: [a], now: t1).events, [])
+        XCTAssertEqual(tracker.record(current: [], now: t2).events, [.stoppedBeingKeptAwake])
     }
 
     // MARK: - The honesty test
 
-    /// Finding 1, as a TYPE-level guarantee. No process outside the daemon
-    /// knows WHY a session ended — `SafetyReason` reaches no client, by any
-    /// path — so a notification that names a reason is fabricating one, and the
-    /// way to guarantee it cannot is for the event to have nowhere to put one.
+    /// The TYPE-level guarantee, and it survived Plan 8 Task 6 intact — which
+    /// was the constraint that decided the shape of the reason events.
     ///
-    /// Asserted as shape rather than as strings, deliberately. The
-    /// string-matching version of this test (`testNoNotificationTextNamesASafetyReason`)
-    /// cannot work: `SafetyReason` is not `CaseIterable`, so it would hardcode
-    /// three cases and go on passing when a fourth landed, and its raw values —
-    /// `thermal`, `lowBattery`, `maxDuration` — are tokens no user-facing
-    /// sentence contains, so it would pass vacuously today *and* pass on copy
-    /// reading "Your Mac was overheating", which is precisely the fabrication
-    /// it was written to catch.
-    ///
-    /// Two mechanisms hold this, one of which is the compiler:
+    /// A notification may name only a reason the app was *given*, and the way to
+    /// guarantee that is for the event to have nowhere to put one it invented.
     /// `SessionNotificationEvent`'s `CaseIterable` conformance is synthesized
-    /// **only** for an enum whose cases carry no associated values, so
-    /// `case stoppedBeingKeptAwake(reason: SafetyReason)` does not build. The
-    /// `Mirror` check is the same fact asserted at runtime, so the guarantee is
-    /// visible in a failure message and not only in a compile error.
+    /// **only** for an enum whose cases all carry no associated values, so
+    /// `case stoppedBySafetyGuard(SafetyReason)` does not build here — which is
+    /// why there are three payload-free cases instead of one carrying a reason.
+    /// The `Mirror` check is the same fact asserted at runtime, so the guarantee
+    /// is visible in a failure message and not only in a compile error.
+    ///
+    /// The count is deliberately not pinned to a number any more: it is pinned
+    /// to `SafetyReason.allCases`, so adding a reason without an event fails
+    /// here, and adding an event nobody can reach fails the bijection test.
     func testTheNotificationEventCarriesNoReasonPayload() {
         for event in SessionNotificationEvent.allCases {
             XCTAssertTrue(Mirror(reflecting: event).children.isEmpty,
-                          "\(event) carries a payload — the only thing a notification could put "
-                          + "in it is a reason this app cannot know")
+                          "\(event) carries a payload — a reason a notification could put in it "
+                          + "is a reason nobody gave this app")
         }
-        XCTAssertEqual(SessionNotificationEvent.allCases.count, 2,
-                       "two events were decided in Task 1 Step 4; a third needs its own argument")
+        XCTAssertEqual(SessionNotificationEvent.allCases.count,
+                       2 + SafetyReason.allCases.count,
+                       "the two reason-free events, plus exactly one per safety reason")
+    }
+}
+
+/// **The weld.** `SafetyReason` and the reason-carrying events are two
+/// spellings of one list, and this is what keeps them that way — the same
+/// arrangement `Tests/CLICommandTests.swift` puts between `SessionKind.Family`
+/// and the CLI's flags.
+final class SessionNotificationBijectionTests: XCTestCase {
+    /// Forwards: every reason reaches an event, and back again unchanged.
+    func testEveryReasonMapsToAnEventAndBack() {
+        for reason in SafetyReason.allCases {
+            let event = sessionNotificationEvent(for: reason)
+            XCTAssertEqual(safetyReason(named: event), reason,
+                           "\(reason) does not survive the round trip through its event")
+        }
+    }
+
+    /// Backwards: every event that names a reason is reached by exactly one,
+    /// and every event that names none is reached by no reason at all. This is
+    /// the direction that catches an event nobody can produce.
+    func testEveryReasonCarryingEventIsReachedByExactlyOneReason() {
+        let reached = SafetyReason.allCases.map(sessionNotificationEvent(for:))
+        XCTAssertEqual(Set(reached).count, SafetyReason.allCases.count,
+                       "two reasons collapsed onto one event")
+
+        for event in SessionNotificationEvent.allCases {
+            guard let reason = safetyReason(named: event) else {
+                XCTAssertFalse(reached.contains(event),
+                               "\(event) claims to name no reason but a reason maps to it")
+                continue
+            }
+            XCTAssertEqual(reached.filter { $0 == event }.count, 1,
+                           "\(event) is reached by \(reason) and by something else")
+        }
+    }
+
+    /// The reason-free events are exactly the two that existed before, named
+    /// rather than counted — so a future event that quietly names no reason has
+    /// to be added here on purpose.
+    func testExactlyTwoEventsNameNoReason() {
+        let reasonFree = SessionNotificationEvent.allCases.filter { safetyReason(named: $0) == nil }
+        XCTAssertEqual(Set(reasonFree), [.stoppedBeingKeptAwake, .triggerStartedSession])
     }
 }
 
@@ -391,19 +429,73 @@ final class SessionNotificationCopyTests: XCTestCase {
                       "what a session does is the reason anyone cares that one started")
     }
 
-    /// Neither sentence may imply the app knows why anything happened, and the
-    /// vocabulary of causes is what that would look like in prose. This is the
-    /// string-level companion to the type-level guarantee — it is written over
-    /// words a *human* sentence would actually use, which is what the
-    /// `SafetyReason` raw values are not.
-    func testNoNotificationExplainsWhyAnythingHappened() {
+    /// **An event that carries no reason may not sound like it has one.**
+    ///
+    /// The string-level companion to the type-level guarantee, written over
+    /// words a *human* sentence would actually use — which is what the
+    /// `SafetyReason` raw values are not, and why the earlier draft of this
+    /// test was vacuous.
+    ///
+    /// It is now scoped by `safetyReason(named:)` rather than run over every
+    /// case, and that scoping is the honest half of the change: the reason
+    /// events are *supposed* to name a cause, and the test immediately below
+    /// requires them to. Together the pair say the whole rule — name a cause
+    /// exactly when you were given one.
+    func testAnEventWithNoReasonNamesNoCause() {
         let causes = ["because", "overheat", "too hot", "battery", "expired", "timed out",
-                      "safety", "temperature", "thermal"]
-        for event in SessionNotificationEvent.allCases {
+                      "safety", "temperature", "thermal", "guard", "on its own", "by itself",
+                      "nothing went wrong"]
+        for event in SessionNotificationEvent.allCases where safetyReason(named: event) == nil {
             let copy = sessionNotificationCopy(for: event)
             let text = (copy.title + " " + copy.body).lowercased()
             for cause in causes where text.contains(cause) {
-                XCTFail("\(event) names a cause: nothing outside the daemon knows one — \(text)")
+                XCTFail("\(event) names a cause it was never given — \(text)")
+            }
+        }
+    }
+
+    /// The distinctive word each reason's copy must contain, and — read across
+    /// the three — must not borrow from another reason. Deliberately one tight
+    /// token each rather than a list of near-synonyms: a generous list makes
+    /// the cross-check below toothless, which is how a copy edit that swapped
+    /// two banners would pass.
+    private func distinctiveWord(for reason: SafetyReason) -> String {
+        switch reason {
+        case .thermal: return "hot"
+        case .lowBattery: return "battery"
+        case .maxDuration: return "time limit"
+        }
+    }
+
+    /// **An event that carries a reason must say which**, in words, and must
+    /// not say somebody else's. Over `allCases`, so a fourth reason cannot ship
+    /// with a banner that names the wrong guard or none.
+    func testEveryReasonEventNamesItsOwnGuardAndNoOther() {
+        for reason in SafetyReason.allCases {
+            let copy = sessionNotificationCopy(for: sessionNotificationEvent(for: reason))
+            let text = (copy.title + " " + copy.body).lowercased()
+            XCTAssertTrue(text.contains(distinctiveWord(for: reason)),
+                          "\(reason)'s banner does not say which guard fired — \(text)")
+            for other in SafetyReason.allCases where other != reason {
+                XCTAssertFalse(text.contains(distinctiveWord(for: other)),
+                               "\(reason)'s banner also names \(other) — \(text)")
+            }
+        }
+    }
+
+    /// Every stop sentence — reason-carrying or not — stays scoped to the
+    /// user's own sessions. A thermal stop is machine-wide, so the temptation
+    /// to say "this Mac will now sleep" is strongest exactly where it is most
+    /// likely to be false: another account's session may still be holding it.
+    func testEveryStopSentenceIsScopedToYourSessions() {
+        let stopEvents = SessionNotificationEvent.allCases.filter { $0 != .triggerStartedSession }
+        for event in stopEvents {
+            let copy = sessionNotificationCopy(for: event)
+            let text = (copy.title + " " + copy.body).lowercased()
+            XCTAssertTrue(text.contains("you"), "\(event) does not scope its claim: \(text)")
+            for machineClaim in ["this mac will sleep", "this mac can sleep now",
+                                 "nothing is keeping this mac awake"] where text.contains(machineClaim) {
+                XCTFail("\(event): another account may still hold this Mac awake — \(text)")
             }
         }
     }
@@ -418,14 +510,22 @@ final class SessionNotificationPreferenceTests: XCTestCase {
                       "refused to clear the suite — it is the shipping one")
     }
 
+    /// Pairwise over all three, and against every other key in the suite —
+    /// extended rather than duplicated, so a fourth toggle joins one loop.
     func testEachToggleHasItsOwnKey() {
-        XCTAssertNotEqual(SessionNotificationPreference.stopKey,
-                          SessionNotificationPreference.triggerStartKey,
-                          "two toggles sharing a key is two controls fighting over one value")
-        for other in [DefaultSessionKindPreference.key, DefaultWakeModePreference.key,
-                      DefaultKeepDisksAwakePreference.key, TriggerStore.key] {
-            XCTAssertNotEqual(SessionNotificationPreference.stopKey, other)
-            XCTAssertNotEqual(SessionNotificationPreference.triggerStartKey, other)
+        let mine = [SessionNotificationPreference.stopKey,
+                    SessionNotificationPreference.triggerStartKey,
+                    SessionNotificationPreference.safetyStopKey]
+        for (index, key) in mine.enumerated() {
+            for other in mine[(index + 1)...] {
+                XCTAssertNotEqual(key, other,
+                                  "two toggles sharing a key is two controls fighting over "
+                                  + "one value")
+            }
+            for other in [DefaultSessionKindPreference.key, DefaultWakeModePreference.key,
+                          DefaultKeepDisksAwakePreference.key, TriggerStore.key] {
+                XCTAssertNotEqual(key, other)
+            }
         }
     }
 
@@ -433,11 +533,12 @@ final class SessionNotificationPreferenceTests: XCTestCase {
     /// from exactly one place — a toggle being switched on — so a user who
     /// never turns one on is never asked for anything, and a test suite reading
     /// an empty suite can never construct the live conformer.
-    func testBothFallBackToOff() {
+    func testAllThreeFallBackToOff() {
         XCTAssertFalse(SessionNotificationPreference.fallback)
         let loaded = SessionNotificationPreference.load()
         XCTAssertFalse(loaded.onStop)
         XCTAssertFalse(loaded.onTriggerStart)
+        XCTAssertFalse(loaded.onSafetyStop)
         XCTAssertFalse(loaded.wantsAnything)
     }
 
@@ -446,11 +547,20 @@ final class SessionNotificationPreferenceTests: XCTestCase {
         var loaded = SessionNotificationPreference.load()
         XCTAssertTrue(loaded.onStop)
         XCTAssertFalse(loaded.onTriggerStart)
+        XCTAssertFalse(loaded.onSafetyStop)
 
         PreferencesSuite.defaults.set(true, forKey: SessionNotificationPreference.triggerStartKey)
         loaded = SessionNotificationPreference.load()
         XCTAssertTrue(loaded.onStop)
         XCTAssertTrue(loaded.onTriggerStart)
+        XCTAssertFalse(loaded.onSafetyStop)
+
+        PreferencesSuite.defaults.set(true, forKey: SessionNotificationPreference.safetyStopKey)
+        loaded = SessionNotificationPreference.load()
+        XCTAssertTrue(loaded.onStop)
+        XCTAssertTrue(loaded.onTriggerStart)
+        XCTAssertTrue(loaded.onSafetyStop)
+        XCTAssertTrue(loaded.wantsAnything)
     }
 
     /// A stored value that is not a boolean falls back to off rather than to
@@ -472,9 +582,12 @@ final class SessionNotificationPreferenceTests: XCTestCase {
             PreferencesSuite.defaults.set(junk, forKey: SessionNotificationPreference.stopKey)
             PreferencesSuite.defaults.set(junk,
                                           forKey: SessionNotificationPreference.triggerStartKey)
+            PreferencesSuite.defaults.set(junk,
+                                          forKey: SessionNotificationPreference.safetyStopKey)
             let loaded = SessionNotificationPreference.load()
             XCTAssertFalse(loaded.onStop, "stored \"\(junk)\" must fall back")
             XCTAssertFalse(loaded.onTriggerStart, "stored \"\(junk)\" must fall back")
+            XCTAssertFalse(loaded.onSafetyStop, "stored \"\(junk)\" must fall back")
         }
     }
 
@@ -482,17 +595,43 @@ final class SessionNotificationPreferenceTests: XCTestCase {
     /// wired up crossed, which is a Settings pane where turning one thing on
     /// silently enables the other.
     func testEachEventIsGovernedByItsOwnToggle() {
-        let stopOnly = SessionNotificationPreferences(onStop: true, onTriggerStart: false)
+        let stopOnly = SessionNotificationPreferences(onStop: true, onTriggerStart: false,
+                                                      onSafetyStop: false)
         XCTAssertTrue(stopOnly.wants(.stoppedBeingKeptAwake))
         XCTAssertFalse(stopOnly.wants(.triggerStartedSession))
 
-        let triggerOnly = SessionNotificationPreferences(onStop: false, onTriggerStart: true)
+        let triggerOnly = SessionNotificationPreferences(onStop: false, onTriggerStart: true,
+                                                         onSafetyStop: false)
         XCTAssertFalse(triggerOnly.wants(.stoppedBeingKeptAwake))
         XCTAssertTrue(triggerOnly.wants(.triggerStartedSession))
 
-        let neither = SessionNotificationPreferences(onStop: false, onTriggerStart: false)
+        let nothingAtAll = SessionNotificationPreferences(onStop: false, onTriggerStart: false,
+                                                          onSafetyStop: false)
         for event in SessionNotificationEvent.allCases {
-            XCTAssertFalse(neither.wants(event), "\(event) fires with every toggle off")
+            XCTAssertFalse(nothingAtAll.wants(event), "\(event) fires with every toggle off")
+        }
+    }
+
+    /// **One toggle governs every reason case, and only the reason cases.**
+    /// Written over `SafetyReason.allCases` through the weld rather than over
+    /// three hand-named events, so a fourth reason cannot ship governed by
+    /// nothing.
+    func testTheOneSafetyToggleGovernsEveryReasonAndNothingElse() {
+        let safetyOnly = SessionNotificationPreferences(onStop: false, onTriggerStart: false,
+                                                        onSafetyStop: true)
+        for reason in SafetyReason.allCases {
+            XCTAssertTrue(safetyOnly.wants(sessionNotificationEvent(for: reason)),
+                          "\(reason) has no toggle")
+        }
+        XCTAssertFalse(safetyOnly.wants(.stoppedBeingKeptAwake),
+                       "the safety toggle switched on the plain notice too")
+        XCTAssertFalse(safetyOnly.wants(.triggerStartedSession))
+
+        let withoutSafety = SessionNotificationPreferences(onStop: true, onTriggerStart: true,
+                                                           onSafetyStop: false)
+        for reason in SafetyReason.allCases {
+            XCTAssertFalse(withoutSafety.wants(sessionNotificationEvent(for: reason)),
+                           "\(reason) fires with the safety toggle off")
         }
     }
 }
@@ -536,39 +675,72 @@ final class SessionNotifierTests: XCTestCase {
         /// How many times the notifier asked for a service. Zero is the
         /// assertion that matters with the toggles off.
         let builds: () -> Int
+        /// How many times the notifier asked the daemon *why*. Zero is the
+        /// assertion that matters whenever the safety toggle is off — that is
+        /// what keeps a new XPC verb off the wire for users who never opted in.
+        let asks: () -> Int
     }
 
-    private func harness(_ preferences: SessionNotificationPreferences) -> Harness {
+    /// `records` is what the daemon would have replied. `[]` — the default — is
+    /// every way a reason can be unavailable at once: an older daemon, a failed
+    /// call, an evicted record, and an ending no guard was behind. They are the
+    /// same value here because they are the same answer.
+    private func harness(_ preferences: SessionNotificationPreferences,
+                         records: [SafetyStopRecord] = []) -> Harness {
         let service = FakeNotificationService()
         let counter = Counter()
+        let asked = Counter()
         let notifier = SessionNotifier(
             ownerUID: me,
             preferences: { preferences },
             makeService: {
                 counter.value += 1
                 return service
+            },
+            safetyStops: {
+                asked.value += 1
+                return records
             })
-        return Harness(notifier: notifier, service: service, builds: { counter.value })
+        return Harness(notifier: notifier, service: service, builds: { counter.value },
+                       asks: { asked.value })
     }
 
     private final class Counter { var value = 0 }
 
+    /// All three on.
     private var everything: SessionNotificationPreferences {
-        SessionNotificationPreferences(onStop: true, onTriggerStart: true)
+        SessionNotificationPreferences(onStop: true, onTriggerStart: true, onSafetyStop: true)
+    }
+
+    /// The Plan 7 shape: told when things stop, never told why. The whole stop
+    /// path stays synchronous here, because the reason is not asked for at all.
+    private var withoutReasons: SessionNotificationPreferences {
+        SessionNotificationPreferences(onStop: true, onTriggerStart: true, onSafetyStop: false)
     }
 
     private var nothing: SessionNotificationPreferences {
-        SessionNotificationPreferences(onStop: false, onTriggerStart: false)
+        SessionNotificationPreferences(onStop: false, onTriggerStart: false, onSafetyStop: false)
+    }
+
+    /// One safety stop record for each of `sessions`, all naming `reason`.
+    private func records(for sessions: [Session], reason: SafetyReason,
+                         ownerUID: UInt32? = nil) -> [SafetyStopRecord] {
+        sessions.map {
+            SafetyStopRecord(sessionID: $0.id, ownerUID: ownerUID ?? $0.ownerUID,
+                             reason: reason, endedAt: Date(timeIntervalSince1970: 3))
+        }
     }
 
     func testAnEndingIsPostedWithTheEventsOwnCopy() {
-        let harness = self.harness(everything)
+        let harness = self.harness(withoutReasons)
         let live = session()
         harness.notifier.record(sessions: [live], now: Date(timeIntervalSince1970: 1))
         XCTAssertEqual(harness.service.posted, [])
         harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
         XCTAssertEqual(harness.service.posted,
                        [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
+        XCTAssertEqual(harness.asks(), 0,
+                       "the reason was asked for with the safety toggle switched off")
     }
 
     func testATriggerStartIsPostedWithTheEventsOwnCopy() {
@@ -599,7 +771,8 @@ final class SessionNotifierTests: XCTestCase {
     /// One toggle on must not carry the other event with it.
     func testOnlyTheEnabledEventIsPosted() {
         let harness = self.harness(
-            SessionNotificationPreferences(onStop: false, onTriggerStart: true))
+            SessionNotificationPreferences(onStop: false, onTriggerStart: true,
+                                           onSafetyStop: false))
         let live = session()
         harness.notifier.record(sessions: [live], now: Date(timeIntervalSince1970: 1))
         harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
@@ -620,12 +793,14 @@ final class SessionNotifierTests: XCTestCase {
     /// below would report nothing at all.
     func testTheBaselineIsKeptEvenWhileEveryToggleIsOff() {
         let service = FakeNotificationService()
-        var preferences = SessionNotificationPreferences(onStop: false, onTriggerStart: false)
+        var preferences = SessionNotificationPreferences(onStop: false, onTriggerStart: false,
+                                                         onSafetyStop: false)
         let notifier = SessionNotifier(ownerUID: me, preferences: { preferences },
-                                       makeService: { service })
+                                       makeService: { service }, safetyStops: { [] })
         let live = session()
         notifier.record(sessions: [live], now: Date(timeIntervalSince1970: 1))
-        preferences = SessionNotificationPreferences(onStop: true, onTriggerStart: true)
+        preferences = SessionNotificationPreferences(onStop: true, onTriggerStart: true,
+                                                     onSafetyStop: false)
         notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
         XCTAssertEqual(service.posted, [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
     }
@@ -648,6 +823,253 @@ final class SessionNotifierTests: XCTestCase {
         harness.notifier.forgetSnapshot()
         harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
         XCTAssertEqual(harness.service.posted, [])
+    }
+
+    // MARK: - Plan 8 Task 7: the reason, end to end
+
+    /// Drives one live session to zero and settles the deferred round trip.
+    private func endTheLastSession(_ harness: Harness, _ live: Session) async {
+        harness.notifier.record(sessions: [live], now: Date(timeIntervalSince1970: 1))
+        harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
+        // Awaited rather than yielded a hopeful number of times: the reason
+        // arrives over a round trip, and a test that guesses how long that takes
+        // passes on a quiet machine and fails on a loaded one.
+        await harness.notifier.reasonQuery?.value
+    }
+
+    /// **The reason REPLACES the reason-free event; it never accompanies it.**
+    /// A safety stop is a `.stopAll`, so the snapshot that gains a reason is the
+    /// same one that trips `.stoppedBeingKeptAwake` — posting both is two
+    /// banners for one event. Asserted as the *whole* posted list, so an extra
+    /// banner fails rather than hiding behind a `contains`.
+    func testASafetyStopPostsTheReasonInsteadOfThePlainNotice() async {
+        let live = session()
+        let harness = self.harness(everything, records: records(for: [live], reason: .thermal))
+        await endTheLastSession(harness, live)
+
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedByThermalGuard)])
+        XCTAssertEqual(harness.asks(), 1, "the reason was asked for more than once")
+    }
+
+    /// Every reason, not just the one the author picked — so a reason wired to
+    /// the wrong banner fails here rather than in somebody's Notification
+    /// Center.
+    func testEveryReasonReachesItsOwnBanner() async {
+        for reason in SafetyReason.allCases {
+            let live = session()
+            let harness = self.harness(everything, records: records(for: [live], reason: reason))
+            await endTheLastSession(harness, live)
+            XCTAssertEqual(harness.service.posted,
+                           [sessionNotificationCopy(for: sessionNotificationEvent(for: reason))],
+                           "\(reason) did not reach its own banner")
+        }
+    }
+
+    // MARK: - ...and the three ways it can be unavailable, which all say the same thing
+
+    /// **1. The daemon is too old to be asked.** `DaemonConnection` answers `[]`
+    /// without sending anything (`SafetyStopVerbGate`), which arrives here as an
+    /// empty reply — indistinguishable, on purpose, from the other two.
+    func testAnOldDaemonPostsThePlainNotice() async {
+        let live = session()
+        let harness = self.harness(everything, records: [])
+        await endTheLastSession(harness, live)
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
+    }
+
+    /// **2. The record aged out or was evicted.** The daemon replies, but not
+    /// about this session — which is exactly what a five-minute-old episode
+    /// looks like once its records have gone.
+    func testAnEvictedRecordPostsThePlainNotice() async {
+        let live = session()
+        let somebodyElsesEpisode = records(for: [session()], reason: .lowBattery)
+        let harness = self.harness(everything, records: somebodyElsesEpisode)
+        await endTheLastSession(harness, live)
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
+    }
+
+    /// **3. No guard was behind it at all** — a lease expired, or somebody typed
+    /// `keepy-uppy off`. The daemon has records, and none of them is about this.
+    ///
+    /// This is the one the honesty rule is really about: the app must not
+    /// upgrade "I have no record of a guard" into "nothing went wrong". The copy
+    /// posted is the reason-free one, which states no cause and implies none.
+    func testAnOrdinaryEndingPostsThePlainNotice() async {
+        let live = session()
+        let stale = SafetyStopRecord(sessionID: UUID(), ownerUID: me, reason: .maxDuration,
+                                     endedAt: Date(timeIntervalSince1970: 0))
+        let harness = self.harness(everything, records: [stale])
+        await endTheLastSession(harness, live)
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
+    }
+
+    /// With the reason toggle off the verb is never even sent, and the Plan 7
+    /// behaviour is byte-for-byte what it was.
+    func testWithTheReasonToggleOffNothingIsEverAsked() async {
+        let live = session()
+        let harness = self.harness(withoutReasons,
+                                   records: records(for: [live], reason: .thermal))
+        await endTheLastSession(harness, live)
+        XCTAssertEqual(harness.asks(), 0,
+                       "a user who did not opt in put a new XPC verb on the wire")
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
+    }
+
+    /// Reason on, plain notice off: the reason is posted when there is one...
+    func testWithOnlyTheReasonToggleOnTheReasonIsStillPosted() async {
+        let live = session()
+        let harness = self.harness(
+            SessionNotificationPreferences(onStop: false, onTriggerStart: false,
+                                           onSafetyStop: true),
+            records: records(for: [live], reason: .lowBattery))
+        await endTheLastSession(harness, live)
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedByLowBattery)])
+    }
+
+    /// ...and nothing is posted when there is not, because the plain notice is
+    /// the one the user switched off. Posting it anyway would be this app
+    /// answering a question with a notification nobody asked for.
+    func testWithOnlyTheReasonToggleOnAnUnattributableEndingIsSilent() async {
+        let live = session()
+        let harness = self.harness(
+            SessionNotificationPreferences(onStop: false, onTriggerStart: false,
+                                           onSafetyStop: true),
+            records: [])
+        await endTheLastSession(harness, live)
+        XCTAssertEqual(harness.service.posted, [])
+        XCTAssertEqual(harness.builds(), 0, "nothing to post, so nothing to build")
+    }
+
+    // MARK: - The interaction with Task 5's suppression
+
+    /// **A stop this app asked for stays silent, reason or no reason.** The
+    /// suppression governs the transition, and the reason event is a relabelling
+    /// of that same transition rather than a second path around it — so a record
+    /// naming a session this app stopped must not resurrect the banner.
+    ///
+    /// The record here is deliberately genuine and matching. The only thing
+    /// keeping this quiet is that the transition never produced an event to
+    /// relabel.
+    func testAStopThisAppAskedForStaysSilentEvenWithAMatchingRecord() async {
+        let live = session()
+        let harness = self.harness(everything, records: records(for: [live], reason: .thermal))
+        harness.notifier.record(sessions: [live], now: Date(timeIntervalSince1970: 1))
+        harness.notifier.appWillStop(sessionIDs: [live.id], now: Date(timeIntervalSince1970: 2))
+        harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
+        await harness.notifier.reasonQuery?.value
+
+        XCTAssertEqual(harness.service.posted, [])
+        XCTAssertEqual(harness.asks(), 0,
+                       "a suppressed transition still asked the daemon why")
+        XCTAssertEqual(harness.builds(), 0)
+    }
+
+    /// One ending this app asked for, one it did not, and a record for the
+    /// second. The suppression removes the first from the set to be explained,
+    /// so the second is fully explained and the reason is named.
+    func testAnUnrequestedEndingBesideARequestedOneIsStillAttributed() async {
+        let clicked = session()
+        let guarded = session()
+        let harness = self.harness(everything, records: records(for: [guarded], reason: .maxDuration))
+        harness.notifier.record(sessions: [clicked, guarded], now: Date(timeIntervalSince1970: 1))
+        harness.notifier.appWillStop(sessionIDs: [clicked.id], now: Date(timeIntervalSince1970: 2))
+        harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
+        await harness.notifier.reasonQuery?.value
+
+        XCTAssertEqual(harness.service.posted,
+                       [sessionNotificationCopy(for: .stoppedByMaxDuration)])
+    }
+}
+
+/// The attribution rule on its own — pure, so every edge is cheap to state.
+final class AttributedStopEventTests: XCTestCase {
+    private let me: UInt32 = 501
+    private let other: UInt32 = 502
+    private let when = Date(timeIntervalSince1970: 1_000)
+
+    private func record(_ id: UUID, uid: UInt32? = nil,
+                        _ reason: SafetyReason) -> SafetyStopRecord {
+        SafetyStopRecord(sessionID: id, ownerUID: uid ?? me, reason: reason, endedAt: when)
+    }
+
+    func testNoEndingsMeansNothingToAttribute() {
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [], records: [], ownerUID: me),
+                       .stoppedBeingKeptAwake)
+    }
+
+    func testAnExplainedEndingIsNamed() {
+        let id = UUID()
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [id],
+                                           records: [record(id, .thermal)], ownerUID: me),
+                       .stoppedByThermalGuard)
+    }
+
+    /// **Another account's record explains nothing of yours**, even for the
+    /// same episode: the reply is unfiltered by design, so the uid filter is
+    /// applied here, on the way in.
+    func testARecordBelongingToAnotherAccountIsNotYourExplanation() {
+        let id = UUID()
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [id],
+                                           records: [record(id, uid: other, .thermal)],
+                                           ownerUID: me),
+                       .stoppedBeingKeptAwake)
+    }
+
+    /// **Attribution is by id, never by recency.** The daemon keeps records for
+    /// five minutes, so a window-based match would happily explain a lease that
+    /// expired by itself shortly after a real thermal stop.
+    func testARecordForADifferentSessionExplainsNothing() {
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [UUID()],
+                                           records: [record(UUID(), .lowBattery)], ownerUID: me),
+                       .stoppedBeingKeptAwake)
+    }
+
+    /// **Partial attribution is the polite version of guessing.** A guard that
+    /// ended one of two sessions did not stop "your sessions".
+    func testAnEndingLeftUnexplainedFallsBackForAllOfThem() {
+        let explained = UUID()
+        let unexplained = UUID()
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [explained, unexplained],
+                                           records: [record(explained, .thermal)], ownerUID: me),
+                       .stoppedBeingKeptAwake)
+    }
+
+    func testEveryEndingExplainedByTheSameReasonIsNamed() {
+        let a = UUID(), b = UUID()
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [a, b],
+                                           records: [record(a, .lowBattery),
+                                                     record(b, .lowBattery)],
+                                           ownerUID: me),
+                       .stoppedByLowBattery)
+    }
+
+    /// Two reasons and no honest way to pick one, so it names neither.
+    func testDisagreeingReasonsNameNeither() {
+        let a = UUID(), b = UUID()
+        XCTAssertEqual(attributedStopEvent(endedUnrequested: [a, b],
+                                           records: [record(a, .thermal),
+                                                     record(b, .maxDuration)],
+                                           ownerUID: me),
+                       .stoppedBeingKeptAwake)
+    }
+
+    /// Whatever it answers is a reason-free event or one of the reason events —
+    /// never `.triggerStartedSession`, which would be this function reaching
+    /// into a different question entirely.
+    func testItOnlyEverAnswersWithAStopEvent() {
+        for reason in SafetyReason.allCases {
+            let id = UUID()
+            let event = attributedStopEvent(endedUnrequested: [id],
+                                            records: [record(id, reason)], ownerUID: me)
+            XCTAssertNotEqual(event, .triggerStartedSession)
+            XCTAssertEqual(safetyReason(named: event), reason)
+        }
     }
 }
 

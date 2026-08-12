@@ -413,7 +413,7 @@ func backgroundServicesFootnote(_ state: OnboardingService.State) -> String {
 
 // MARK: - Notifications
 
-/// The two toggles in General → Notifications.
+/// The three toggles in General → Notifications.
 ///
 /// The stop toggle is **scoped to the user's own sessions**, and that is not
 /// pedantry: `listSessions` is unfiltered and a Mac can have more than one
@@ -426,6 +426,27 @@ func backgroundServicesFootnote(_ state: OnboardingService.State) -> String {
 let notifyWhenStoppedTitle = "When nothing of yours is keeping this Mac awake"
 
 let notifyWhenTriggerStartsTitle = "When a trigger starts a session"
+
+/// The safety-stop toggle, and its footnote.
+///
+/// The pair exists because this control has to promise **exactly** what the
+/// mechanism delivers and not a word more, and that takes two sentences. The
+/// title says what it adds — which guard — and the footnote says the thing a
+/// title cannot: that a reason is not always available.
+///
+/// Saying so is not a disclaimer, it is the feature's own honesty rule surfaced
+/// where a user forms their expectation. There are three ways the reason can be
+/// missing (a daemon too old to be asked, a record that aged out, and an ending
+/// no guard was behind), all three end on the plain "your last session has
+/// ended" sentence, and a user who was promised a reason every time would read
+/// that plain banner as the app having *lost* one.
+///
+/// It also says which toggle covers the rest, because "sometimes you get the
+/// other notification instead" is only actionable if you know that the other
+/// notification has its own switch directly above.
+let notifyWhenSafetyGuardStopsTitle = "When a safety guard stops your sessions"
+
+let notifyWhenSafetyGuardStopsFootnote = "Names the guard that stopped them — too hot, low battery, or the time limit. A reason isn't always available: an older background service can't be asked for one, and neither can an ending no guard was behind. When there isn't one you get the plain notice above instead, if that one is switched on."
 
 /// What the grant is, in one sentence per state.
 ///
@@ -522,14 +543,18 @@ let notificationSettingsURL = "x-apple.systempreferences:com.apple.Notifications
 ///    asking for a grant as a second, separately-refusable notification client.
 ///
 /// 2. *Stopping a session yourself here is not announced, and stopping one from
-///    a Terminal is.* The first is Task 6's suppression, without which the
-///    commonest banner in the product would be the app explaining a click back
-///    to the person who made it. The second follows from what the app cannot
-///    see: a `keepy-uppy off` is indistinguishable from an expiry, a condition
-///    ending or a safety guard, because no reason ever crosses XPC. Said
-///    plainly, because somebody who has just learned that clicking Stop is
-///    silent and then gets a banner for typing `off` will otherwise file it.
-let notificationsSectionFootnote = "Keepy Uppy has to be running to tell you anything — a session that ends while the menu bar app is quit ends without a word. Stopping a session yourself in this menu is never announced, but stopping one with keepy-uppy off in a Terminal is: from here that looks the same as a session expiring or a safety guard ending it."
+///    a Terminal is.* The first is Plan 7 Task 6's suppression, without which
+///    the commonest banner in the product would be the app explaining a click
+///    back to the person who made it. The second follows from what the app
+///    cannot see: a `keepy-uppy off` is indistinguishable from an expiry or a
+///    condition ending.
+///
+///    **"or a safety guard ending it" used to be in that list and has been
+///    removed**, because Plan 8 Task 6 made it false: a guard's stop is the one
+///    ending the daemon now records a reason for, and the toggle below can name
+///    it. Leaving the phrase in would have been this pane telling a user that
+///    the control immediately beneath it cannot do what it says.
+let notificationsSectionFootnote = "Keepy Uppy has to be running to tell you anything — a session that ends while the menu bar app is quit ends without a word. Stopping a session yourself in this menu is never announced, but stopping one with keepy-uppy off in a Terminal is: from here that looks the same as a session expiring or a condition ending."
 
 /// Half of a **two-way** signpost. The three ways of being told a session ended
 /// are split across two tabs, and an unsignposted split is how somebody

@@ -191,6 +191,15 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     ///
     /// ## Callers: never polled, and gated before the first send
     ///
+    /// **The CLI deliberately has no caller here, and that is a decision.**
+    /// `keepy-uppy` is an invocation, not an observer: there is no long-lived
+    /// process to notice an ending, so there is nothing for a reason to be
+    /// attached to. Nor is there an existing answer to put one in — `status` is
+    /// a boolean that scripts parse and must not grow a field, and `sessions`
+    /// lists *live* sessions, which a stopped one is by definition not among.
+    /// `log show` carries the reason for anyone diagnosing, and the README
+    /// already points there.
+    ///
     /// This is the first verb added to this protocol since the daemon-skew
     /// hazard was measured (`Tests/UnimplementedVerbProbeTests.swift`): sending
     /// a verb an older daemon does not implement **invalidates the connection

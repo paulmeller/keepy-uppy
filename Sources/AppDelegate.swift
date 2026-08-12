@@ -10,10 +10,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// construct it and forward what the daemon already publishes — no policy,
     /// no filtering, no thresholds.
     ///
-    /// `DaemonConnection` is deliberately unchanged: it publishes the session
-    /// list and the connection state already, and putting a notification
-    /// concern inside the XPC client would be policy in the transport.
-    let notifier = SessionNotifier()
+    /// `DaemonConnection` still holds no notification policy: the closure below
+    /// is a *transport* call the notifier decides whether to make, and both the
+    /// decision (is there an ending to explain, and has the user asked for a
+    /// reason) and the gating (`SafetyStopVerbGate`) live away from this file.
+    ///
+    /// `lazy` because it takes `daemon`, and a stored property cannot be
+    /// initialised from another one. Not defaulted away, deliberately: the
+    /// notifier's initialiser refuses a default for `safetyStops` precisely so
+    /// that forgetting this line is a compile error rather than a feature that
+    /// silently never explains anything.
+    private(set) lazy var notifier = SessionNotifier(safetyStops: { [weak self] in
+        guard let self else { return [] }
+        return await self.daemon.recentSafetyStops()
+    })
 
     /// The global shortcuts, and the only thing in this app that can act
     /// without the menu being open.

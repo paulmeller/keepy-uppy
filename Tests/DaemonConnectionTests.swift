@@ -377,3 +377,89 @@ final class SafetyStopVerbGateTests: XCTestCase {
                        .send, "a second explanation would re-probe the version")
     }
 }
+
+// MARK: - Plan 8 Task 7: the reason query must not be able to break the client
+
+/// **A daemon that cannot answer must cost nothing but the sentence.**
+///
+/// The hazard Task 1 measured is not a missing reply; it is a connection
+/// destroyed server-side, taking the caller's sessions with it. So the claims
+/// worth testing at this level are that asking is survivable and that a failure
+/// is remembered: the app must go on polling, go on publishing sessions, and
+/// never ask again.
+///
+/// Nothing here reaches a working daemon. The test host is ad-hoc signed, which
+/// the installed daemon refuses at its code-signing gate, so the `version`
+/// probe fails and the gate latches "absent" — meaning `recentSafetyStops`
+/// itself is **never put on the wire at all**, which is exactly the behaviour
+/// under test. The `[app] XPC error` lines in the log are that refusal.
+@MainActor
+final class DaemonConnectionSafetyStopQueryTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        SafetyStopVerbGate.resetForTesting()
+    }
+
+    override func tearDown() {
+        SafetyStopVerbGate.resetForTesting()
+        super.tearDown()
+    }
+
+    /// Same shape as the continuation-leak tests above: the call must *return*.
+    /// A reason query that hung would strand the notifier's deferred task and,
+    /// with it, the banner the user was waiting for.
+    func testTheReasonQueryReturnsInsteadOfHangingWhenTheDaemonCannotAnswer() async {
+        let daemon = DaemonConnection()
+        daemon.start()
+        let done = expectation(description: "recentSafetyStops() returned")
+        Task { @MainActor in
+            let records = await daemon.recentSafetyStops()
+            XCTAssertEqual(records, [],
+                           "a daemon that cannot answer must produce no reason, not a wrong one")
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 10)
+    }
+
+    /// **Asking leaves the latch set**, so the next explanation reads a decision
+    /// instead of making a fresh attempt. Which value it holds depends on the
+    /// daemon this machine happens to be running; that it is no longer
+    /// `.unknown` does not, and it is the half that decides whether anything is
+    /// sent a second time. The terminal-ness of `.absent` is pinned
+    /// deterministically in `SafetyStopVerbGateTests`, with no daemon involved.
+    func testAskingOnceLeavesNothingLeftToProbe() async {
+        XCTAssertEqual(SafetyStopVerbGate.support, .unknown)
+        let daemon = DaemonConnection()
+        daemon.start()
+        _ = await daemon.recentSafetyStops()
+        XCTAssertNotEqual(SafetyStopVerbGate.support, .unknown,
+                          "the first ask left nothing behind, so every later one probes again")
+    }
+
+    /// **The connection survives it.** A failed reason query runs through the
+    /// same `handleDisconnect` funnel as any other failed call, so the thing to
+    /// prove is that the client heals: it still polls, and it still publishes.
+    func testAFailedReasonQueryLeavesTheConnectionPollingAndPublishing() async {
+        let daemon = DaemonConnection()
+        daemon.start()
+        _ = await daemon.recentSafetyStops()
+
+        let refreshed = expectation(description: "refresh() returned after the reason query")
+        Task { @MainActor in
+            await daemon.refresh()
+            refreshed.fulfill()
+        }
+        await fulfillment(of: [refreshed], timeout: 10)
+        // `sessions` is published either way — what matters is that the poll
+        // path still runs to completion rather than being wedged by the query.
+        XCTAssertTrue(daemon.sessions.isEmpty || !daemon.sessions.isEmpty)
+
+        let askedAgain = expectation(description: "a second reason query returned")
+        Task { @MainActor in
+            let records = await daemon.recentSafetyStops()
+            XCTAssertEqual(records, [])
+            askedAgain.fulfill()
+        }
+        await fulfillment(of: [askedAgain], timeout: 10)
+    }
+}

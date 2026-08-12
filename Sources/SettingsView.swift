@@ -87,6 +87,8 @@ struct GeneralSettingsTab: View {
     private var notifyWhenStopped: Bool = SessionNotificationPreference.fallback
     @AppStorage(SessionNotificationPreference.triggerStartKey, store: PreferencesSuite.defaults)
     private var notifyWhenTriggerStarts: Bool = SessionNotificationPreference.fallback
+    @AppStorage(SessionNotificationPreference.safetyStopKey, store: PreferencesSuite.defaults)
+    private var notifyWhenASafetyGuardStops: Bool = SessionNotificationPreference.fallback
     /// What macOS last said about the grant. Read only while a toggle is on —
     /// see `refreshAuthorization()`.
     @State private var authorization: NotificationAuthorization = .notDetermined
@@ -141,6 +143,17 @@ struct GeneralSettingsTab: View {
                 Toggle(notifyWhenTriggerStartsTitle, isOn: $notifyWhenTriggerStarts)
                     .onChange(of: notifyWhenTriggerStarts) { on in askOrRefresh(turnedOn: on) }
 
+                // Directly under the stop toggle, because it refines that one
+                // rather than standing beside it: with both on you get the
+                // reason when there is one and the plain notice when there is
+                // not. Its own footnote is attached to the row instead of going
+                // in the section footer, so the sentence about a reason not
+                // always being available sits against the control it qualifies.
+                Toggle(notifyWhenSafetyGuardStopsTitle, isOn: $notifyWhenASafetyGuardStops)
+                    .onChange(of: notifyWhenASafetyGuardStops) { on in askOrRefresh(turnedOn: on) }
+                Text(notifyWhenSafetyGuardStopsFootnote)
+                    .settingsFootnote()
+
                 // Present only when there is something wrong to report, which
                 // is the opposite of the "always present rather than appearing
                 // only when something is wrong" rule the Background Services
@@ -150,7 +163,7 @@ struct GeneralSettingsTab: View {
                 // a permission the user already gave.
                 if let note = notificationStatusNote(
                     state: authorization,
-                    anyToggleOn: notifyWhenStopped || notifyWhenTriggerStarts) {
+                    anyToggleOn: anyNotificationToggleOn) {
                     Text(note.sentence)
                         .settingsFootnote()
                     if note.offersSystemSettings {
@@ -239,8 +252,18 @@ struct GeneralSettingsTab: View {
     /// toggle is on" true of this pane as well as of `SessionNotifier` — with
     /// both toggles off, opening Settings touches UserNotifications not at all.
     private func refreshAuthorization() {
-        guard notifyWhenStopped || notifyWhenTriggerStarts else { return }
+        guard anyNotificationToggleOn else { return }
         Task { authorization = await UserNotificationService().authorizationState() }
+    }
+
+    /// **Written once**, because it is read from three places and a third toggle
+    /// omitted from any one of them is a live control whose fault report never
+    /// appears — or worse, a pane that touches UserNotifications with everything
+    /// switched off. `SessionNotificationPreferences.wantsAnything` answers the
+    /// same question for the notifier; this is the `@AppStorage` side of it,
+    /// which cannot use that type because these are three separate bindings.
+    private var anyNotificationToggleOn: Bool {
+        notifyWhenStopped || notifyWhenTriggerStarts || notifyWhenASafetyGuardStops
     }
 
     private func openNotificationSettings() {

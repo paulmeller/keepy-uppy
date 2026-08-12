@@ -1937,7 +1937,7 @@ final class NotificationAuthorizationCopyTests: XCTestCase {
     }
 }
 
-/// The two toggles' labels and the section's footer.
+/// The three toggles' labels and the section's footer.
 final class NotificationSettingsCopyTests: XCTestCase {
     /// The stop toggle is scoped to the user's own sessions, exactly as the
     /// banner it switches on is. `listSessions` is unfiltered and a Mac can
@@ -1945,13 +1945,64 @@ final class NotificationSettingsCopyTests: XCTestCase {
     /// a machine claim this event cannot make — the same union-sensitivity
     /// argument as `menuLidCaveat`.
     func testTheToggleLabelsAreDistinctAndTheStopOneIsScopedToYourSessions() {
-        XCTAssertNotEqual(notifyWhenStoppedTitle, notifyWhenTriggerStartsTitle)
+        let titles = [notifyWhenStoppedTitle, notifyWhenTriggerStartsTitle,
+                      notifyWhenSafetyGuardStopsTitle]
+        XCTAssertEqual(Set(titles).count, titles.count,
+                       "two rows in one section reading the same is two rows nobody can tell apart")
         XCTAssertTrue(notifyWhenStoppedTitle.lowercased().contains("yours")
                         || notifyWhenStoppedTitle.lowercased().contains("your"),
                       "another account's session may still hold the Mac awake: "
                       + notifyWhenStoppedTitle)
         XCTAssertTrue(notifyWhenTriggerStartsTitle.lowercased().contains("trigger"),
                       notifyWhenTriggerStartsTitle)
+        XCTAssertTrue(notifyWhenSafetyGuardStopsTitle.lowercased().contains("your"),
+                      "the safety row switches on a claim about your sessions: "
+                      + notifyWhenSafetyGuardStopsTitle)
+    }
+
+    /// **The row promises exactly what the mechanism delivers, and no more.**
+    ///
+    /// Two halves, and the second is the one the honesty rule demands: it tells
+    /// you the reason is not always available. A user promised a reason every
+    /// time reads the plain "your last session has ended" banner as the app
+    /// having lost one — which is a bug report about a working feature, and a
+    /// reason to distrust every other sentence the app shows.
+    func testTheSafetyRowPromisesTheGuardAndAdmitsItIsNotAlwaysAvailable() {
+        let footnote = notifyWhenSafetyGuardStopsFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("hot"), footnote)
+        XCTAssertTrue(footnote.contains("battery"), footnote)
+        XCTAssertTrue(footnote.contains("time limit"), footnote)
+        XCTAssertTrue(footnote.contains("isn't always available")
+                        || footnote.contains("is not always available")
+                        || footnote.contains("not always"),
+                      "the row has to admit a reason is not always available: " + footnote)
+        XCTAssertTrue(footnote.contains("plain notice") || footnote.contains("above"),
+                      "\"sometimes you get the other one\" is only actionable if the row says "
+                      + "which other one: " + footnote)
+    }
+
+    /// **And it never converts "I don't know" into "nothing happened".** The
+    /// footnote is the one piece of copy that talks about the missing reason,
+    /// so it is the one most likely to reach for a reassuring phrase that says
+    /// more than the app knows.
+    func testTheSafetyRowDoesNotExplainAwayAMissingReason() {
+        let footnote = notifyWhenSafetyGuardStopsFootnote.lowercased()
+        for overclaim in ["on its own", "by itself", "nothing went wrong",
+                          "no guard fired", "ended normally", "nothing to worry"]
+        where footnote.contains(overclaim) {
+            XCTFail("a missing reason is not evidence that nothing happened: " + footnote)
+        }
+    }
+
+    /// The section footer used to list a safety guard among the endings that
+    /// "look the same" from here. That became false the moment the row above
+    /// could name one, and a pane contradicting its own control is worse than
+    /// one that says less.
+    func testTheFooterNoLongerClaimsASafetyStopIsIndistinguishable() {
+        let footnote = notificationsSectionFootnote.lowercased()
+        XCTAssertFalse(footnote.contains("safety guard"),
+                       "the footer says a safety stop cannot be told apart, while the toggle "
+                       + "beneath it names one: " + footnote)
     }
 
     /// Limitation 1, stated in the copy rather than discovered. The app is the
@@ -2096,8 +2147,16 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
                         ?? DefaultKeepDisksAwakePreference.fallback) == true
                 }
             ),
-            // General — the two notification toggles. `true` for both, which is
-            // the opposite of their fallback, so neither can pass by accident.
+            // General — the three notification toggles. `true` for all of them,
+            // which is the opposite of their fallback, so none can pass by
+            // accident.
+            //
+            // The third row is the one that matters most here, and for the
+            // reason the shortcut pair below states: it was introduced into a
+            // file that already held two keys of the same shape, which is
+            // exactly how a third control ships reading the second one's value —
+            // a Settings pane where switching the safety notice on silently
+            // switches the plain one on too.
             PreferenceUnderTest(
                 name: SessionNotificationPreference.stopKey,
                 write: { self.defaults.set(true, forKey: SessionNotificationPreference.stopKey) },
@@ -2109,6 +2168,13 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
                     self.defaults.set(true, forKey: SessionNotificationPreference.triggerStartKey)
                 },
                 readsBackWhatWasWritten: { SessionNotificationPreference.load().onTriggerStart }
+            ),
+            PreferenceUnderTest(
+                name: SessionNotificationPreference.safetyStopKey,
+                write: {
+                    self.defaults.set(true, forKey: SessionNotificationPreference.safetyStopKey)
+                },
+                readsBackWhatWasWritten: { SessionNotificationPreference.load().onSafetyStop }
             ),
             // CLI & Advanced — the two global shortcuts, one row each.
             //
@@ -2223,7 +2289,8 @@ final class SettingsPreferenceRoundTripTests: XCTestCase {
                 rawValue: defaults.string(forKey: DefaultSessionKindPreference.key) ?? ""),
             DefaultSessionKindPreference.fallback)
         XCTAssertEqual(SessionNotificationPreference.load(),
-                       SessionNotificationPreferences(onStop: false, onTriggerStart: false))
+                       SessionNotificationPreferences(onStop: false, onTriggerStart: false,
+                                                      onSafetyStop: false))
         XCTAssertEqual(
             DefaultWakeModePreference.mode(
                 rawValue: defaults.string(forKey: DefaultWakeModePreference.key) ?? ""),

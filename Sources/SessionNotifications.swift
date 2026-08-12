@@ -14,31 +14,27 @@ import Foundation
 
 // MARK: - The events
 
-/// What the app is allowed to tell the user: two facts it can actually
-/// establish, and **structurally nothing else**.
+/// What the app is allowed to tell the user: facts it can actually establish,
+/// and **structurally nothing else**.
 ///
 /// No case carries an associated value, and that is the feature rather than a
-/// simplification. No process outside the daemon knows *why* a session ended.
-/// `SafetyReason` (`Shared/SafetyEngine.swift`) never crosses XPC — Plan 7's
-/// research grepped the whole tree and found eight references, all inside that
-/// one file, with the single point of observability being an `os_log` line in
-/// `Helper/DaemonRuntime.swift`'s `case .stopAll` arm. A client sees the
-/// consequence (the sessions are gone from the next `listSessions`) and never
-/// the cause. `Shared/SessionCompletion.swift`'s own doc comment has said so
-/// since the agent's completion actions were written: "Doesn't distinguish
-/// *why* a session ended (condition met, manual stop, safety guard, expiry,
-/// agent restart)."
+/// simplification. Until Plan 8 Task 6 no process outside the daemon knew *why*
+/// a session ended at all: `SafetyReason` (`Shared/SafetyEngine.swift`) crossed
+/// no boundary, a client saw the consequence (the sessions are gone from the
+/// next `listSessions`) and never the cause, and
+/// `Shared/SessionCompletion.swift`'s own doc comment had said so since the
+/// agent's completion actions were written: "Doesn't distinguish *why* a
+/// session ended (condition met, manual stop, safety guard, expiry, agent
+/// restart)."
 ///
-/// So a notification naming a reason would be **fabricating** one, and the
-/// guarantee against that is the **type**, not a string search over the copy.
-/// An earlier draft of this task specified a test asserting that no
-/// notification string contains a `SafetyReason`. That test cannot work, on two
-/// counts: `SafetyReason` is not `CaseIterable`, so it must hardcode three
-/// cases and would go on passing when a fourth landed; and its raw values are
-/// `thermal` / `lowBattery` / `maxDuration`, tokens no user-facing sentence
-/// contains — so it passes vacuously today *and* would pass on copy reading
-/// "Your Mac was overheating", which is precisely the fabrication it was
-/// written to catch.
+/// So a notification naming a reason **this app does not have** would be
+/// fabricating one, and the guarantee against that is the **type**, not a
+/// string search over the copy. An earlier draft specified a test asserting
+/// that no notification string contains a `SafetyReason`. That test cannot
+/// work: its raw values are `thermal` / `lowBattery` / `maxDuration`, tokens no
+/// user-facing sentence contains — so it passes vacuously *and* would pass on
+/// copy reading "Your Mac was overheating", which is precisely the fabrication
+/// it was written to catch.
 ///
 /// `CaseIterable` is what makes the guarantee structural: Swift synthesizes
 /// that conformance **only** for an enum whose cases all carry no associated
@@ -47,21 +43,80 @@ import Foundation
 /// `sessionNotificationCopy(for:)` takes the event and nothing else, so there
 /// is nowhere for one to arrive from either.
 ///
-/// (A reason-carrying channel is a *daemon* change and is deliberately
-/// deferred: `listSessions` replies with a JSON `[Session]` and an ended
-/// session is not in that array, so there is nowhere in the existing shape to
-/// hang one, and adding a parameter to an `@objc` protocol method changes the
-/// selector and breaks older clients. It is roughly a new
-/// `recentSafetyStops(reply:)` verb plus a bounded ring buffer in
-/// `DaemonRuntime` — modest, but not this task's.)
+/// ## What Plan 8 Task 6 changed, and what it did not
+///
+/// The daemon now keeps a bounded log of guard-ended sessions
+/// (`Shared/SafetyStopLog.swift`) and answers `recentSafetyStops`, so for
+/// **some** endings the app can attribute a cause — to the exact session ids it
+/// just watched disappear, never to "something recent". Plan 7's own execution
+/// report recorded the shape this had to take in advance: *"when it lands, the
+/// honest change is a THIRD event, not a payload bolted onto this one."*
+///
+/// So: payload-free cases, one per `SafetyReason`. The alternative — one
+/// `.stoppedBySafetyGuard(SafetyReason)` case — would have meant dropping
+/// `CaseIterable`, hand-writing `allCases`, and losing the guarantee this
+/// comment rests on, to save two cases. What buys back the safety of writing
+/// three by hand is `safetyReason(named:)` below: a **bijection** checked over
+/// `allCases` in both directions, so a fourth `SafetyReason` fails a test
+/// rather than quietly having no banner.
+///
+/// **The reason cases never accompany `.stoppedBeingKeptAwake`; they replace
+/// it.** A safety stop is a `.stopAll`, so the snapshot that gains a reason is
+/// the same snapshot that trips the reason-free event, and emitting both is two
+/// banners for one event. `attributedStopEvent` is the single place that
+/// chooses between them.
 enum SessionNotificationEvent: CaseIterable, Equatable {
     /// The last of *this user's* sessions has ended, and at least one of the
     /// endings was not something this app asked for.
+    ///
+    /// Also the **fallback for every way a reason can be unavailable** — an
+    /// older daemon that does not implement the verb, a record that aged out or
+    /// was evicted, or an ending no guard was behind at all. All three land on
+    /// this one sentence deliberately: it states no cause and implies none,
+    /// where copy like "it ended on its own" or "no guard fired" would convert
+    /// "I don't know" into "nothing happened".
     case stoppedBeingKeptAwake
     /// One of this user's own trigger rules started a session — the only thing
     /// in this product that happens with no user action at all, and currently
     /// invisible unless the menu happens to be open.
     case triggerStartedSession
+    /// A thermal guard ended them: this Mac was too hot.
+    case stoppedByThermalGuard
+    /// The battery guard ended them: too little charge left.
+    case stoppedByLowBattery
+    /// The maximum-session-length backstop ended them.
+    case stoppedByMaxDuration
+}
+
+// MARK: - The weld between a reason and the event that names it
+
+/// The event that names `reason`. Total, and an exhaustive `switch` on
+/// purpose: a fourth `SafetyReason` cannot be added without somebody deciding
+/// what it says to a user.
+func sessionNotificationEvent(for reason: SafetyReason) -> SessionNotificationEvent {
+    switch reason {
+    case .thermal: return .stoppedByThermalGuard
+    case .lowBattery: return .stoppedByLowBattery
+    case .maxDuration: return .stoppedByMaxDuration
+    }
+}
+
+/// The reason an event names, or `nil` for the events that name none.
+///
+/// The other half of the weld, and the reason both halves exist rather than one
+/// `switch`: together they are a bijection, checked over `allCases` in **both**
+/// directions (`SessionNotificationBijectionTests`) — the same arrangement
+/// `Tests/CLICommandTests.swift` puts between `SessionKind.Family` and the CLI's
+/// flags, and `TriggerConditionKind` puts between its own pair. One direction
+/// alone would let two reasons collapse onto one event, or let an event exist
+/// that no reason can reach.
+func safetyReason(named event: SessionNotificationEvent) -> SafetyReason? {
+    switch event {
+    case .stoppedBeingKeptAwake, .triggerStartedSession: return nil
+    case .stoppedByThermalGuard: return .thermal
+    case .stoppedByLowBattery: return .lowBattery
+    case .stoppedByMaxDuration: return .maxDuration
+    }
 }
 
 /// A notification's two lines, as a value, so the copy is testable without
@@ -97,7 +152,76 @@ func sessionNotificationCopy(for event: SessionNotificationEvent) -> SessionNoti
         return SessionNotificationCopy(
             title: "A trigger started a session",
             body: "One of your rules fired, and Keepy Uppy is keeping this Mac awake.")
+
+    // The three reason sentences. Each says everything the reason-free copy
+    // says *and* which guard fired, so replacing that event with one of these
+    // never costs the user information — which is what makes the substitution
+    // safe to make silently.
+    //
+    // Each stays inside the same union-sensitivity rule: the claim is about
+    // your sessions, never about what the Mac will now do. Another account may
+    // still be holding it awake, and a thermal stop is machine-wide, so "this
+    // Mac will now sleep" would be false in exactly the case the guard cares
+    // about most.
+    case .stoppedByThermalGuard:
+        return SessionNotificationCopy(
+            title: "Stopped: this Mac was too hot",
+            body: "Keepy Uppy ended your sessions so it can cool down. "
+                + "Nothing you started is keeping this Mac awake any more.")
+    case .stoppedByLowBattery:
+        return SessionNotificationCopy(
+            title: "Stopped: the battery was running out",
+            body: "Keepy Uppy ended your sessions to save what is left. "
+                + "Nothing you started is keeping this Mac awake any more.")
+    case .stoppedByMaxDuration:
+        return SessionNotificationCopy(
+            title: "Stopped: the time limit was reached",
+            body: "Your sessions ran for as long as Keepy Uppy allows, so it ended them. "
+                + "Nothing you started is keeping this Mac awake any more.")
     }
+}
+
+// MARK: - Attributing an ending, or honestly declining to
+
+/// **The whole point of the feature: the reason-carrying event when the app can
+/// attribute the ending, and the reason-free one whenever it cannot.**
+///
+/// - Parameters:
+///   - endedUnrequested: the ids that disappeared in this very tick without
+///     this app asking. Matching on ids rather than on a time window is what
+///     makes attribution *exact*: the daemon keeps records for five minutes, so
+///     a window would happily explain a lease that expired by itself a minute
+///     after a thermal stop, which is a fabricated cause with a real record
+///     behind it.
+///   - records: whatever `recentSafetyStops` replied. **`[]` means "no reason
+///     available" and never "no guard fired"** — an older daemon, a failed
+///     call, an evicted record and a genuinely ordinary ending all arrive here
+///     as the same empty array, and all four must land on the same sentence.
+///   - ownerUID: this user's. The reply is unfiltered by design, so the filter
+///     is applied here, on the way in, exactly as `SessionNotificationTracker`
+///     and `SessionCompletionTracker` both do.
+///
+/// Two conditions, and both are required:
+///
+/// 1. **Every** unrequested ending in the tick is explained. A tick in which a
+///    guard ended one session while another expired by itself is not a tick the
+///    app can describe as "a guard stopped your sessions" — it stopped one of
+///    them. Partial attribution is the polite version of guessing.
+/// 2. The explaining records name **one** reason. Two episodes inside one poll
+///    is vanishingly unlikely and trivially handled: there is no honest way to
+///    pick one of two causes, so it names neither.
+func attributedStopEvent(endedUnrequested: [UUID],
+                         records: [SafetyStopRecord],
+                         ownerUID: UInt32) -> SessionNotificationEvent {
+    let ids = Set(endedUnrequested)
+    guard !ids.isEmpty else { return .stoppedBeingKeptAwake }
+
+    let explaining = records.filter { $0.ownerUID == ownerUID && ids.contains($0.sessionID) }
+    guard Set(explaining.map(\.sessionID)) == ids else { return .stoppedBeingKeptAwake }
+
+    let reasons = Set(explaining.map(\.reason))
+    guard reasons.count == 1, let reason = reasons.first else { return .stoppedBeingKeptAwake }
+    return sessionNotificationEvent(for: reason)
 }
 
 // MARK: - The preference behind each event
@@ -123,6 +247,12 @@ func sessionNotificationCopy(for event: SessionNotificationEvent) -> SessionNoti
 enum SessionNotificationPreference {
     static let stopKey = "notifyWhenNothingIsKeepingAwake"
     static let triggerStartKey = "notifyWhenATriggerStartsASession"
+    /// One key for all three reason events, not one each. "Which guard?" is a
+    /// single question a user either wants answered or does not; three toggles
+    /// would be three ways to be told the same thing, and would make
+    /// `wants(_:)` a place where a fourth reason could be given somebody else's
+    /// idea of a sensible default.
+    static let safetyStopKey = "notifyWhenASafetyGuardStopsSessions"
 
     /// Named once, and used both as the `@AppStorage` starting value and as
     /// the answer for anyone who has never opened this pane.
@@ -132,7 +262,8 @@ enum SessionNotificationPreference {
         -> SessionNotificationPreferences {
         SessionNotificationPreferences(
             onStop: defaults.object(forKey: stopKey) as? Bool ?? fallback,
-            onTriggerStart: defaults.object(forKey: triggerStartKey) as? Bool ?? fallback)
+            onTriggerStart: defaults.object(forKey: triggerStartKey) as? Bool ?? fallback,
+            onSafetyStop: defaults.object(forKey: safetyStopKey) as? Bool ?? fallback)
     }
 }
 
@@ -148,25 +279,47 @@ enum SessionNotificationPreference {
 struct SessionNotificationPreferences: Equatable {
     let onStop: Bool
     let onTriggerStart: Bool
+    /// "…and say which guard." A refinement of `onStop` rather than a rival to
+    /// it: see `wants(_:)` for the four combinations and what each one means.
+    let onSafetyStop: Bool
 
-    init(onStop: Bool, onTriggerStart: Bool) {
+    init(onStop: Bool, onTriggerStart: Bool, onSafetyStop: Bool) {
         self.onStop = onStop
         self.onTriggerStart = onTriggerStart
+        self.onSafetyStop = onSafetyStop
     }
 
-    /// Exhaustive on purpose, like `SessionKind.wireDescription`: a third event
-    /// has to be given a toggle by whoever adds it, rather than inheriting
-    /// somebody else's idea of harmless from a `default`.
+    /// Exhaustive on purpose, like `SessionKind.wireDescription`: a further
+    /// event has to be given a toggle by whoever adds it, rather than
+    /// inheriting somebody else's idea of harmless from a `default`.
+    ///
+    /// **All three reason events answer to the one toggle**, which is what
+    /// makes the four combinations readable:
+    ///
+    /// | stop | guard | what happens |
+    /// | --- | --- | --- |
+    /// | on | off | the plain sentence, always. The reason is never even asked
+    ///   for, so a user who has not opted in never causes this app to send
+    ///   `recentSafetyStops` at all. |
+    /// | on | on | the reason when it is available, the plain sentence when it
+    ///   is not. |
+    /// | off | on | the reason when it is available, and silence when it is
+    ///   not — which is the literal reading of "tell me when a guard stops my
+    ///   sessions", and posting the plain sentence here would be posting the
+    ///   notification they switched off. |
+    /// | off | off | nothing, and no service is ever built. |
     func wants(_ event: SessionNotificationEvent) -> Bool {
         switch event {
         case .stoppedBeingKeptAwake: return onStop
         case .triggerStartedSession: return onTriggerStart
+        case .stoppedByThermalGuard, .stoppedByLowBattery, .stoppedByMaxDuration:
+            return onSafetyStop
         }
     }
 
     /// Whether anything at all is switched on — the gate that keeps the live
     /// `UNUserNotificationCenter` conformer from being constructed.
-    var wantsAnything: Bool { onStop || onTriggerStart }
+    var wantsAnything: Bool { onStop || onTriggerStart || onSafetyStop }
 }
 
 // MARK: - The tracker
@@ -269,7 +422,7 @@ struct SessionNotificationTracker {
     /// to prise them apart. That defect was reproduced in the agent — a stalled
     /// tick wrote a stale snapshot over a newer one and the next tick re-fired
     /// an already-reported ending — and this type is polled from a timer too.
-    mutating func record(current: [Session], now: Date) -> [SessionNotificationEvent] {
+    mutating func record(current: [Session], now: Date) -> Outcome {
         let mine = current.filter { $0.ownerUID == ownerUID }
         defer { previous = mine }
 
@@ -279,16 +432,16 @@ struct SessionNotificationTracker {
             now.timeIntervalSince($0.value) <= Self.stopSuppressionWindow
         }
 
-        guard let previous else { return [] }
+        guard let previous else { return Outcome(events: [], endedUnrequested: []) }
         var events: [SessionNotificationEvent] = []
 
         // Marks are consumed by the ending they were recorded for, whether or
         // not this tick is the one that announces anything — that is what stops
         // a mark leaking into a later tick and swallowing a real ending.
-        var unrequestedEndings = 0
+        var unrequestedEndings: [UUID] = []
         for ended in sessionsEndedSince(previous: previous, current: mine)
         where requestedStops.removeValue(forKey: ended.id) == nil {
-            unrequestedEndings += 1
+            unrequestedEndings.append(ended.id)
         }
 
         // The **transition**, not the ending: with two of yours running and one
@@ -296,7 +449,7 @@ struct SessionNotificationTracker {
         // "was any ending mine?" — a tick in which the user stopped one session
         // while another ended by itself still contains something nobody asked
         // for, and that is the whole value of this event.
-        if !previous.isEmpty, mine.isEmpty, unrequestedEndings > 0 {
+        if !previous.isEmpty, mine.isEmpty, !unrequestedEndings.isEmpty {
             events.append(.stoppedBeingKeptAwake)
         }
 
@@ -308,7 +461,31 @@ struct SessionNotificationTracker {
             events.append(.triggerStartedSession)
         }
 
-        return events
+        return Outcome(events: events, endedUnrequested: unrequestedEndings)
+    }
+
+    /// One tick's answer: what is worth saying, **and** which endings the
+    /// saying is about.
+    ///
+    /// The ids are here rather than inferred by the caller because only this
+    /// type can know them — it owns the baseline, and it owns which endings
+    /// this app asked for. Returning them is what lets the reason be attached
+    /// to *these* endings and to nothing else; `attributedStopEvent` is where
+    /// they are consumed.
+    ///
+    /// A single value rather than a getter beside the existing return, for
+    /// `recordAndReportEnded`'s reason: read, diff and write-back cannot be
+    /// prised apart by an `await` if the caller has no way to prise them apart,
+    /// and a second call before the getter was read would silently answer about
+    /// a different tick.
+    struct Outcome: Equatable {
+        let events: [SessionNotificationEvent]
+        /// Ids that disappeared in this tick without this app asking. Populated
+        /// whenever there were any — including ticks that announce nothing,
+        /// because one of two sessions ending is an unrequested ending that no
+        /// event describes. Only meaningful to a caller alongside
+        /// `.stoppedBeingKeptAwake`.
+        let endedUnrequested: [UUID]
     }
 
     /// A session this user's own trigger rule started.
@@ -357,6 +534,20 @@ final class SessionNotifier {
     private var tracker: SessionNotificationTracker
     private let preferences: () -> SessionNotificationPreferences
     private let makeService: () -> NotificationPosting
+    private let safetyStops: () async -> [SafetyStopRecord]
+
+    /// The deferred half of the most recent stop transition — the round trip
+    /// that asks why, and the post that follows it.
+    ///
+    /// Held rather than discarded so that a test can `await` it: the alternative
+    /// is a test that yields a hopeful number of times, which passes on a quiet
+    /// machine and fails on a loaded one. Nothing in production reads it, and
+    /// nothing cancels it.
+    ///
+    /// There is at most one in flight in practice, because the transition it
+    /// follows requires this user's session list to have just become empty and
+    /// cannot recur until something starts and ends again.
+    private(set) var reasonQuery: Task<Void, Never>?
 
     /// - Parameters:
     ///   - preferences: read per event rather than captured once, so a toggle
@@ -367,13 +558,22 @@ final class SessionNotifier {
     ///     constructed unless a toggle is on", and
     ///     `SessionNotifierTests.testWithEveryToggleOffNothingIsPostedAndNoServiceIsEverBuilt`
     ///     counts the calls so the claim is a test rather than a comment.
+    ///   - safetyStops: asks the daemon why. **Deliberately has no default**,
+    ///     unlike the two above, and the asymmetry is the point: their defaults
+    ///     are the production behaviour, whereas any default this one could have
+    ///     (`{ [] }`) is *the feature switched off*. A construction site that
+    ///     forgot to wire it would compile, run, and quietly never explain
+    ///     anything — which is the failure mode `Session.init`'s three defaulted
+    ///     parameters produced three separate times.
     init(ownerUID: UInt32 = UInt32(getuid()),
          preferences: @escaping () -> SessionNotificationPreferences
             = { SessionNotificationPreference.load() },
-         makeService: @escaping () -> NotificationPosting = { UserNotificationService() }) {
+         makeService: @escaping () -> NotificationPosting = { UserNotificationService() },
+         safetyStops: @escaping () async -> [SafetyStopRecord]) {
         self.tracker = SessionNotificationTracker(ownerUID: ownerUID)
         self.preferences = preferences
         self.makeService = makeService
+        self.safetyStops = safetyStops
     }
 
     /// One published `listSessions` snapshot.
@@ -384,9 +584,57 @@ final class SessionNotifier {
     /// baseline from whenever the app last happened to look, because the first
     /// diff against a stale baseline is the one that announces something that
     /// did not just happen.
+    /// **Stays synchronous, and the reason is ordering.** The tracker's
+    /// read-diff-write runs to completion before this method can suspend, so
+    /// two snapshots arriving close together cannot be folded in out of order —
+    /// which is the defect `SessionCompletionTracker` records having been
+    /// reproduced in the agent, where a stalled tick wrote a stale snapshot over
+    /// a newer one. Only the *reason* is deferred, and only when there is one to
+    /// ask for.
     func record(sessions: [Session], now: Date = Date()) {
-        let events = tracker.record(current: sessions, now: now)
+        let outcome = tracker.record(current: sessions, now: now)
         let wanted = preferences()
+
+        // Anything that needs no reason is posted from this same synchronous
+        // stretch. (In practice that is only `.triggerStartedSession`, and it
+        // cannot co-occur with the stop event: one requires this user's list to
+        // be empty and the other requires a new session in it.)
+        post(outcome.events.filter { $0 != .stoppedBeingKeptAwake }, wanted: wanted)
+
+        guard outcome.events.contains(.stoppedBeingKeptAwake) else { return }
+
+        // **The only thing in this app that ever causes `recentSafetyStops` to
+        // be sent, and the toggle is checked before anything is asked.** A user
+        // who has not opted in never puts that verb on the wire at all — which
+        // is a consent gate on top of the three in `SafetyStopVerbGate`, and
+        // the cheapest of them.
+        guard wanted.onSafetyStop else {
+            return post([.stoppedBeingKeptAwake], wanted: wanted)
+        }
+
+        let ended = outcome.endedUnrequested
+        let uid = tracker.ownerUID
+        reasonQuery = Task { [weak self] in
+            guard let self else { return }
+            // `[]` on every failure path, and `attributedStopEvent` turns that
+            // into the reason-free sentence. The app never learns *why it does
+            // not know*, because there is nothing different to say in any of
+            // those cases.
+            let records = await self.safetyStops()
+            let event = attributedStopEvent(endedUnrequested: ended, records: records,
+                                            ownerUID: uid)
+            // Re-read rather than reuse `wanted`: a round trip has happened, and
+            // this is the same "read the preference per event" rule the
+            // initialiser documents.
+            self.post([event], wanted: self.preferences())
+        }
+    }
+
+    /// Filters by preference and posts, building a service only if something
+    /// survives the filter — which is the whole of "the live conformer is never
+    /// constructed unless a toggle is on".
+    private func post(_ events: [SessionNotificationEvent],
+                      wanted: SessionNotificationPreferences) {
         let toPost = events.filter(wanted.wants)
         guard !toPost.isEmpty else { return }
         let service = makeService()
