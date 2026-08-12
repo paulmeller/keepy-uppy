@@ -1924,6 +1924,13 @@ func daemonVersionRowValue(_ reachability: DaemonReachability) -> String {
 /// (`HelperProtocol.startSession`), which is precisely the property that makes
 /// a mixed-vintage pair keep working. Reporting a difference without that
 /// clause turns a normal state into an alarm.
+///
+/// It does not say survivable is free, because that property cuts both ways.
+/// The key an old daemon ignores is a request the caller made and does not get
+/// (`SessionPowerSkew`), and a verb it predates is refused outright by
+/// `DaemonCapability` rather than sent — the CLI's `mode`, the menu's promote
+/// row. Sessions run; some newer options do not, and the sentence has to carry
+/// both halves or it is an alarm in the other direction.
 func daemonDiagnosticsSentence(_ reachability: DaemonReachability, appVersion: String) -> String {
     switch reachability {
     case .unasked:
@@ -1937,7 +1944,7 @@ func daemonDiagnosticsSentence(_ reachability: DaemonReachability, appVersion: S
     case .reachable(let version) where version == appVersion:
         return "The background service is answering, and it's the same build as this app."
     case .reachable(let version):
-        return "The background service is answering, but it's version \(version) while this app is \(appVersion). That's usually a service left running by the copy of Keepy Uppy that was replaced when this one was installed; restarting this Mac starts the new one. Sessions still work in the meantime."
+        return "The background service is answering, but it's version \(version) while this app is \(appVersion). That's usually a service left running by the copy of Keepy Uppy that was replaced when this one was installed; restarting this Mac starts the new one. Sessions still work, though some newer options are refused or silently ignored until then."
     }
 }
 

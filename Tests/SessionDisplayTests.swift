@@ -3051,6 +3051,33 @@ final class DiagnosticsCopyTests: XCTestCase {
                       || sentence.lowercased().contains("still fine"), sentence)
     }
 
+    /// **And it does not overclaim it.** "Sessions still work in the meantime",
+    /// full stop, was false in the two ways this plan exists to fix: an old
+    /// daemon silently drops a power axis it does not know, which `Session`'s
+    /// key-tolerance is precisely *why* (`SessionPowerSkew`), and a verb it
+    /// predates is refused rather than attempted (`DaemonCapability` — the
+    /// CLI's `mode`, the menu's promote row). Both are states a reader of that
+    /// sentence would have been told could not happen.
+    ///
+    /// So the qualification is asserted where it has to be — **after** the
+    /// claim, since a reassurance that ends the sentence is the one people
+    /// stop reading at — and both consequences are named, because "refused"
+    /// and "silently ignored" are what a user would otherwise report as two
+    /// different bugs.
+    func testTheMismatchSentenceQualifiesThatClaimRatherThanEndingOnIt() {
+        let sentence = daemonDiagnosticsSentence(.reachable(version: olderDaemon),
+                                                 appVersion: appVersion)
+        let lowered = sentence.lowercased()
+        guard let claim = lowered.range(of: "still work") else {
+            return XCTFail("the sentence no longer says sessions work at all: \(sentence)")
+        }
+        let qualification = lowered[claim.upperBound...]
+        XCTAssertTrue(qualification.contains("refused"),
+                      "nothing after the claim says newer options can be refused: \(sentence)")
+        XCTAssertTrue(qualification.contains("ignored"),
+                      "nothing after the claim says a request can be silently dropped: \(sentence)")
+    }
+
     /// **The one disagreement this pane will produce**, said before somebody
     /// files it: General ▸ Background Services can say "Running" — it asks
     /// `SMAppService` whether the job is *registered* — while this section says

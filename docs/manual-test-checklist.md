@@ -357,9 +357,10 @@ mechanism was verified out-of-band (a tool built the same way,
 - [ ] **The mismatch row, which is the reason the section exists.** Update the
   app in place while the old daemon is still the running process (or install a
   build with a bumped `CURRENT_PROJECT_VERSION` without restarting): the two
-  rows differ, the sentence names both versions and says sessions still work,
-  and **restarting this Mac clears it**. If it does not clear, the sentence is
-  wrong and must be rewritten rather than the behaviour explained away
+  rows differ, the sentence names both versions and says sessions still work
+  *though some newer options are refused or silently ignored*, and **restarting
+  this Mac clears it**. If it does not clear, the sentence is wrong and must be
+  rewritten rather than the behaviour explained away
 - [ ] Nothing in this section offers to reset, re-register or restart the
   background services. That is deliberate — see `Shared/DaemonRemoval.swift` —
   and a button appearing here later is a regression, not a feature
