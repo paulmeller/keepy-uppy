@@ -125,7 +125,54 @@ let agentPlistName = "au.com.workwireless.keepy-uppy.agent.plist"
     func registerAsAgent(reply: @escaping (Bool, String?) -> Void)
 
     func currentState(reply: @escaping (Bool) -> Void)
+
+    /// The daemon's own version, written by `bundleVersionText` — short version
+    /// and build number, the same way the app writes its own.
+    ///
+    /// **Declared in v2 and called by nobody until Plan 7 Task 10**, which is
+    /// the mild version of the problem `SessionKind.Family` exists to prevent:
+    /// a protocol verb with no caller is a promise nothing keeps. Its one caller
+    /// is `DaemonConnection.version()`, behind the CLI & Advanced tab's
+    /// Diagnostics section.
+    ///
+    /// It is read-only in the strongest sense available here — it takes no
+    /// argument, touches no session, and cannot change what this Mac does.
     func version(reply: @escaping (String) -> Void)
+}
+
+// MARK: - How a version is written
+
+/// **One formatter, so the daemon's reply and the app's own row cannot be
+/// written differently** — which would render every healthy install as a
+/// version mismatch, on the one pane a user opens because they already suspect
+/// something is wrong.
+///
+/// It lives here rather than in `Sources/` because `Helper/` needs it too, and
+/// beside `version(reply:)` because that is the wire it formats.
+///
+/// **The build number is in it, and that is the point.** All four targets in
+/// `project.yml` ship `MARKETING_VERSION: "0.1.0"` and have since the first
+/// commit, while `just bump` moves `CURRENT_PROJECT_VERSION` on every release —
+/// so a version string built from the short version alone compares *equal* for
+/// every pair of builds this project has ever produced, including the pair
+/// Diagnostics exists to catch: an app updated in place, still talking to the
+/// daemon the previous copy registered, until this Mac restarts.
+func bundleVersionText(shortVersion: String?, build: String?) -> String {
+    // "unknown" rather than an empty string: a blank where a version should be
+    // reads as a rendering failure rather than as missing information, and an
+    // empty string on one side of the comparison would report a mismatch that
+    // isn't one.
+    let short = (shortVersion?.isEmpty == false) ? shortVersion! : "unknown"
+    guard let build, !build.isEmpty else { return short }
+    return "\(short) (\(build))"
+}
+
+/// The two `Info.plist` keys, read off a bundle. Split from the formatter above
+/// so the formatting is testable without a bundle carrying the values under
+/// test — `Bundle` has no initialiser that takes an info dictionary.
+func bundleVersionText(of bundle: Bundle) -> String {
+    bundleVersionText(shortVersion: bundle.infoDictionary?["CFBundleShortVersionString"] as? String,
+                      build: bundle.infoDictionary?["CFBundleVersion"] as? String)
 }
 
 // MARK: - Cross-client isolation (Task 10)

@@ -2325,3 +2325,236 @@ final class HotKeyCopyTests: XCTestCase {
                       || footnote.contains("without"), footnote)
     }
 }
+
+// MARK: - Diagnostics
+
+/// The CLI & Advanced tab's third section: two versions, whether the daemon is
+/// answering, and the one command in this app whose exact characters matter to
+/// a machine rather than to a person.
+final class DiagnosticsCopyTests: XCTestCase {
+    /// What this app would call itself. Written as a `bundleVersionText`
+    /// result rather than as the literal `"0.1.0 (2)"` so that a change to the
+    /// format cannot leave these tests asserting against a shape the product
+    /// no longer produces.
+    private let appVersion = bundleVersionText(shortVersion: "0.1.0", build: "2")
+    /// The daemon a previous copy of this app registered, still running.
+    private let olderDaemon = bundleVersionText(shortVersion: "0.1.0", build: "1")
+
+    private var everyState: [DaemonReachability] {
+        [.unasked, .unreachable, .reachable(version: appVersion),
+         .reachable(version: olderDaemon)]
+    }
+
+    // MARK: How a version is written
+
+    func testAVersionIsTheShortVersionAndTheBuildNumber() {
+        XCTAssertEqual(bundleVersionText(shortVersion: "0.1.0", build: "2"), "0.1.0 (2)")
+    }
+
+    /// **The build number is the half that actually moves, and this is the
+    /// test that earns its presence.** Every target in `project.yml` ships
+    /// `MARKETING_VERSION: "0.1.0"` and has since the first commit, while
+    /// `just bump` moves `CURRENT_PROJECT_VERSION` on every release — so a
+    /// comparison on the short version alone reads *equal* for every pair of
+    /// builds this project has ever produced, including the one pair this
+    /// section exists to catch.
+    func testTwoBuildsOfTheSameMarketingVersionAreToldApart() {
+        XCTAssertNotEqual(bundleVersionText(shortVersion: "0.1.0", build: "1"),
+                          bundleVersionText(shortVersion: "0.1.0", build: "2"))
+    }
+
+    /// No empty parentheses trailing a version nobody can read.
+    func testAMissingBuildNumberDropsItsParenthesesRatherThanShowingAnEmptyPair() {
+        XCTAssertEqual(bundleVersionText(shortVersion: "0.1.0", build: nil), "0.1.0")
+        XCTAssertEqual(bundleVersionText(shortVersion: "0.1.0", build: ""), "0.1.0")
+    }
+
+    /// A bundle that cannot name its own version says so. The alternative is a
+    /// blank where a version should be, which reads as a rendering failure
+    /// rather than as missing information — and, worse, compares unequal to
+    /// everything and would report a mismatch that isn't one.
+    func testAnAbsentVersionSaysUnknownRatherThanNothing() {
+        XCTAssertEqual(bundleVersionText(shortVersion: nil, build: nil), "unknown")
+        XCTAssertEqual(bundleVersionText(shortVersion: "", build: nil), "unknown")
+    }
+
+    /// The app really does carry both keys. `Bundle.main` here is the test
+    /// host — `Keepy Uppy.app` itself — so this is a check on the shipping
+    /// `Info.plist`, not on a fixture.
+    ///
+    /// It cannot make the same check for the daemon, whose `Info.plist` is a
+    /// `__TEXT,__info_plist` section in a binary the test target cannot reach;
+    /// that half is verified by reading `project.yml` and by `otool`, and is
+    /// recorded in this task's report.
+    func testThisBuildCanNameItsOwnVersion() {
+        let text = bundleVersionText(of: .main)
+        XCTAssertNotEqual(text, "unknown", "the app's Info.plist has no CFBundleShortVersionString")
+        XCTAssertTrue(text.contains("("), "the app's Info.plist has no CFBundleVersion: \(text)")
+    }
+
+    // MARK: The four states
+
+    func testEveryStateGetsItsOwnSentenceAndItsOwnRowValue() {
+        let sentences = everyState.map { daemonDiagnosticsSentence($0, appVersion: appVersion) }
+        XCTAssertEqual(Set(sentences).count, sentences.count, "\(sentences)")
+        let values = everyState.map(daemonVersionRowValue)
+        XCTAssertEqual(Set(values).count, values.count, "\(values)")
+        for text in sentences + values {
+            XCTAssertFalse(text.isEmpty)
+        }
+    }
+
+    /// **"Nobody has asked yet" is not "nothing answered".** The same
+    /// distinction `AppDelegate` draws when it drops the first `$sessions`
+    /// value: an empty answer nobody asked for is not an answer that came back
+    /// empty, and rendering it as one puts a fault report on screen for a
+    /// daemon that is perfectly healthy.
+    func testTheUnaskedStateReportsNoFault() {
+        let sentence = daemonDiagnosticsSentence(.unasked, appVersion: appVersion).lowercased()
+        for wordOfFailure in ["isn't", "can't", "not answering", "failed", "wrong"] {
+            XCTAssertFalse(sentence.contains(wordOfFailure), sentence)
+        }
+        XCTAssertNotEqual(daemonVersionRowValue(.unasked), daemonVersionRowValue(.unreachable))
+    }
+
+    /// The row shows the daemon's own answer, verbatim. A restatement — "up to
+    /// date", "current" — would be this app's opinion in the one place a bug
+    /// report needs the daemon's own words.
+    func testTheRowShowsWhateverTheDaemonSaidRatherThanAJudgementOfIt() {
+        XCTAssertEqual(daemonVersionRowValue(.reachable(version: "9.9.9 (41)")), "9.9.9 (41)")
+    }
+
+    /// Two versions are named exactly when they differ. A matched sentence
+    /// repeating the number already in the row above it is noise; a mismatched
+    /// one that names only one of them cannot be acted on.
+    func testOnlyTheMismatchSentenceNamesBothVersions() {
+        for state in everyState {
+            let sentence = daemonDiagnosticsSentence(state, appVersion: appVersion)
+            let namesBoth = sentence.contains(appVersion) && sentence.contains(olderDaemon)
+            XCTAssertEqual(namesBoth, state == .reachable(version: olderDaemon), sentence)
+        }
+    }
+
+    /// The case the section exists for, end to end: an app updated in place
+    /// while the daemon the *previous* copy registered is still the running
+    /// process. Same marketing version, different build.
+    func testASameVersionDifferentBuildDaemonReadsAsAMismatchAndNotAsAMatch() {
+        XCTAssertNotEqual(
+            daemonDiagnosticsSentence(.reachable(version: olderDaemon), appVersion: appVersion),
+            daemonDiagnosticsSentence(.reachable(version: appVersion), appVersion: appVersion))
+    }
+
+    /// A mismatch is **not a failure**, and must not read as one: the wire
+    /// format is deliberately version-tolerant in both directions
+    /// (`HelperProtocol.startSession`'s doc comment), so sessions started
+    /// against an older daemon work. It must still say what clears it, because
+    /// a report with no next step reads as a defect.
+    func testTheMismatchSentenceSaysWorkContinuesAndWhatClearsIt() {
+        let sentence = daemonDiagnosticsSentence(.reachable(version: olderDaemon),
+                                                 appVersion: appVersion)
+        XCTAssertTrue(sentence.lowercased().contains("restart"), sentence)
+        XCTAssertTrue(sentence.lowercased().contains("still work")
+                      || sentence.lowercased().contains("still fine"), sentence)
+    }
+
+    /// **The one disagreement this pane will produce**, said before somebody
+    /// files it: General ▸ Background Services can say "Running" — it asks
+    /// `SMAppService` whether the job is *registered* — while this section says
+    /// nothing is answering, because a registered job that has crashed, or one
+    /// that refuses this app at the code-signing gate, is registered and
+    /// unreachable at the same time.
+    func testTheUnreachableSentencePointsAtTheStatusItWillDisagreeWith() {
+        let sentence = daemonDiagnosticsSentence(.unreachable, appVersion: appVersion)
+        XCTAssertTrue(sentence.contains("Background Services"), sentence)
+    }
+
+    /// **No copy in this section sends anybody at `keepy-uppy reset`, and no
+    /// control here offers it.** This is Task 10's recorded decision, pinned so
+    /// that "the pane could just offer a Reset button" has to delete a test
+    /// with a reason in it rather than be added on a quiet afternoon.
+    ///
+    /// The hazard is `Shared/DaemonRemoval.swift`: `prepareForRemoval` exists
+    /// because unregistering the daemon evicts the only process that can clear
+    /// `SleepDisabled`, and that setting outlives both the process and the next
+    /// reboot. The CLI verb already sequences that correctly. A one-click
+    /// version of it, on the pane somebody opens *because* something is
+    /// already wrong, is a way to reach the hazard by accident.
+    func testNothingHereOffersTheResetPath() {
+        let copy = everyState.map { daemonDiagnosticsSentence($0, appVersion: appVersion) }
+            + [diagnosticsSectionFootnote, diagnosticsLogCommand]
+        for text in copy {
+            let lowered = text.lowercased()
+            XCTAssertFalse(lowered.contains("reset"), text)
+            XCTAssertFalse(lowered.contains("unregister"), text)
+            XCTAssertFalse(lowered.contains("reinstall"), text)
+        }
+    }
+
+    // MARK: The command
+
+    /// **Checked against `README.md` itself, not against a copy of it.**
+    ///
+    /// This is the failure this project keeps naming: two files that never call
+    /// each other agree on a string, and a change to one is not a compile error
+    /// and not a crash. Here it would be a Copy button handing over a predicate
+    /// that no longer matches what a bug reporter was asked for. The same
+    /// `#filePath` route `SigningRequirementTests` uses to read the daemon's
+    /// launchd plist — the test bundle knows its own source path at compile
+    /// time, and `Tests/` sits beside `README.md` in the repo.
+    func testTheLogCommandIsTheOneTheREADMEAsksBugReportersFor() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let readme = try String(contentsOf: repoRoot.appendingPathComponent("README.md"),
+                                encoding: .utf8)
+        let quoted = readme
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("log show") }
+        XCTAssertEqual(quoted, [diagnosticsLogCommand],
+                       "the pane's Copy button and README.md must hand over the same command")
+    }
+
+    /// It is pasted into a shell, so the predicate is single-quoted around the
+    /// double quotes `log` itself requires. Unquoted, the shell eats the inner
+    /// quotes and `log` rejects the predicate.
+    func testTheCommandQuotesItsPredicateForAShell() {
+        XCTAssertTrue(
+            diagnosticsLogCommand.contains("'subsystem BEGINSWITH \"\(diagnosticsLogSubsystemPrefix)\"'"),
+            diagnosticsLogCommand)
+    }
+
+    /// `BEGINSWITH`, never `==`. The app logs under
+    /// `au.com.workwireless.keepy-uppy` (`Sources/DaemonConnection.swift`), the
+    /// daemon under `….helper` (`Helper/DaemonRuntime.swift`) and the agent
+    /// under `….agent` (`Agent/DaemonConnection.swift`) — an equality
+    /// predicate would fetch one third of a bug report and look complete.
+    func testThePredicateReachesEveryPartOfKeepyUppyAndNotJustTheApp() {
+        XCTAssertTrue(diagnosticsLogCommand.contains("BEGINSWITH"), diagnosticsLogCommand)
+        for subsystem in ["au.com.workwireless.keepy-uppy",
+                          "au.com.workwireless.keepy-uppy.helper",
+                          "au.com.workwireless.keepy-uppy.agent"] {
+            XCTAssertTrue(subsystem.hasPrefix(diagnosticsLogSubsystemPrefix), subsystem)
+        }
+    }
+
+    /// Measured rather than assumed, on this machine, while writing this
+    /// section: 346 of the lines the command returns over the last two days
+    /// carry `<private>` where a value should be. The daemon's every
+    /// "Accepted connection from …" is one of them. A bug reporter who pastes
+    /// the output and gets redactions back needs to know that is macOS, not a
+    /// truncated log — otherwise the reply is "please send the real one".
+    func testTheFootnoteWarnsThatSomeValuesComeBackRedacted() {
+        XCTAssertTrue(diagnosticsSectionFootnote.contains("<private>"),
+                      diagnosticsSectionFootnote)
+    }
+
+    /// The footnote says what the command is *for*. A monospaced string with a
+    /// Copy button beside it and no sentence explaining it is a control that
+    /// only helps somebody who already knew.
+    func testTheFootnoteSaysWhatTheCommandIsFor() {
+        let footnote = diagnosticsSectionFootnote.lowercased()
+        XCTAssertTrue(footnote.contains("terminal"), footnote)
+        XCTAssertTrue(footnote.contains("bug") || footnote.contains("issue"), footnote)
+    }
+}

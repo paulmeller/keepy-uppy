@@ -263,6 +263,45 @@ is. Nothing else in this file substitutes for it.
   paragraph — so this confirms the registration died with the process. The
   *binding* survives in preferences, which is why it works again on relaunch)
 
+**Diagnostics (Plan 7 ▸ Settings ▸ CLI & Advanced):**
+
+Everything this section *says* is unit-tested, state by state
+(`DiagnosticsCopyTests`), and the command it copies is compared against
+`README.md` itself rather than against a second copy of it. Two things the
+suite cannot reach: **what it looks like**, and **what the daemon actually
+replies**. The daemon's `version(reply:)` composes its answer from its own
+embedded `Info.plist`, and `Helper/` is unreachable from the test target — the
+mechanism was verified out-of-band (a tool built the same way,
+`__TEXT,__info_plist` via `-sectcreate`, reports both keys through
+`Bundle.main.infoDictionary`), but not this daemon on this Mac.
+
+- [ ] Open the section with everything healthy: **"Keepy Uppy" and "Background
+  service" show the same string**, including the build number in parentheses,
+  and the sentence beneath says it is the same build. A daemon reading
+  `unknown`, or `0.1.0` with no build number, means `Bundle.main.infoDictionary`
+  is empty in that process and the row is not the check it looks like
+- [ ] **Layout**, which nothing in the suite checks: the sentence and the footer
+  wrap rather than clip in the 560pt pane, and the command box does not overflow
+  it. The same open item Task 5 left for the Command Line section above it
+- [ ] Press Copy, then paste into Terminal and run it **as pasted, with no
+  `sudo`**: it runs, and returns lines from the app *and* the background service
+  (`…keepy-uppy:app` and `…keepy-uppy.helper:daemon` both appear). Some values
+  come back as `<private>`; the footer says so, and that is macOS, not a
+  truncated log
+- [ ] Stop the daemon (or take the app offline from it) and reopen the section:
+  it says **Not answering**, and says that General ▸ Background Services answers
+  a different question. Confirm the disagreement it predicts is the one you
+  actually see — General can legitimately still say "Running"
+- [ ] **The mismatch row, which is the reason the section exists.** Update the
+  app in place while the old daemon is still the running process (or install a
+  build with a bumped `CURRENT_PROJECT_VERSION` without restarting): the two
+  rows differ, the sentence names both versions and says sessions still work,
+  and **restarting this Mac clears it**. If it does not clear, the sentence is
+  wrong and must be rewritten rather than the behaviour explained away
+- [ ] Nothing in this section offers to reset, re-register or restart the
+  background services. That is deliberate — see `Shared/DaemonRemoval.swift` —
+  and a button appearing here later is a regression, not a feature
+
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary
 - [x] A non-agent client's condition report is rejected and logged

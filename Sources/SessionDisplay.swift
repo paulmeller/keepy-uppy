@@ -1377,3 +1377,98 @@ let hotKeyShortcutsSectionFootnote = "These work in any app, whether or not the 
 /// into the view, so the tests above and the pane cannot disagree about what
 /// "unset" looks like.
 let hotKeyUnsetPlaceholder = "Not set"
+
+// MARK: - Diagnostics
+
+/// What this app has been able to establish about the daemon, and the only
+/// input the Diagnostics copy takes.
+///
+/// **`.unasked` is a case rather than an initial `.unreachable`**, for the
+/// reason `AppDelegate` drops the first `$sessions` value it sees: an empty
+/// answer nobody asked for is not the same fact as an answer that came back
+/// empty. Collapsing the two would put a fault report on screen, for a
+/// perfectly healthy daemon, every time this pane appeared — for as long as one
+/// XPC round trip takes, which is exactly long enough to be seen.
+enum DaemonReachability: Equatable {
+    /// Between the pane appearing and the first reply, and never afterwards.
+    case unasked
+    /// Asked, and nothing answered.
+    case unreachable
+    /// Asked, and the daemon said this — verbatim, whatever it said.
+    case reachable(version: String)
+}
+
+/// The value beside "Background service".
+///
+/// It never judges what it was told. "Up to date" would be this app's opinion
+/// in the one row whose job is to carry the daemon's own words into a bug
+/// report; the sentence below the rows is where an opinion belongs.
+func daemonVersionRowValue(_ reachability: DaemonReachability) -> String {
+    switch reachability {
+    case .unasked: return "Checking…"
+    case .unreachable: return "Not answering"
+    case .reachable(let version): return version
+    }
+}
+
+/// The sentence beneath the two version rows — four states, four sentences.
+///
+/// The mismatch branch is the reason this section is worth having, and the
+/// reason `bundleVersionText` includes the build number: a daemon and an app of
+/// different vintages is not a hypothetical but the *normal* state of a Mac
+/// between an in-place update and its next restart, and nothing else in the
+/// product can see it.
+///
+/// It says the mismatch is survivable, because it is: `Session` crosses the
+/// wire as JSON in both directions and an unrecognised key is ignored
+/// (`HelperProtocol.startSession`), which is precisely the property that makes
+/// a mixed-vintage pair keep working. Reporting a difference without that
+/// clause turns a normal state into an alarm.
+func daemonDiagnosticsSentence(_ reachability: DaemonReachability, appVersion: String) -> String {
+    switch reachability {
+    case .unasked:
+        return "Asking the background service which version it is."
+    case .unreachable:
+        // Scoped to this app, not to the Mac. The daemon may be perfectly
+        // alive and serving a `keepy-uppy` session while this one connection is
+        // broken, so "nothing can keep this Mac awake" would be a claim this
+        // side of the connection is in no position to make.
+        return "Keepy Uppy isn't getting an answer from its background service, so this app can't start or stop sessions until it does. Settings → General, under Background Services, answers a different question — whether the service is registered — so it can say Running while this says otherwise. The log below is where the reason will be."
+    case .reachable(let version) where version == appVersion:
+        return "The background service is answering, and it's the same build as this app."
+    case .reachable(let version):
+        return "The background service is answering, but it's version \(version) while this app is \(appVersion). That's usually a service left running by the copy of Keepy Uppy that was replaced when this one was installed; restarting this Mac starts the new one. Sessions still work in the meantime."
+    }
+}
+
+/// The subsystem every logger in this project is under —
+/// `au.com.workwireless.keepy-uppy` in the app and in `Shared/`, `….helper` in
+/// the daemon, `….agent` in the agent — so the prefix below reaches all of
+/// them and an equality predicate would reach one.
+let diagnosticsLogSubsystemPrefix = "au.com.workwireless.keepy-uppy"
+
+/// **The one string in this section whose exact characters matter to a machine
+/// rather than to a person**, and the same command `README.md` already asks bug
+/// reporters for. `DiagnosticsCopyTests` reads that file and compares, rather
+/// than trusting two places to keep saying the same thing.
+///
+/// Single-quoted around the double quotes `log` requires: unquoted, a shell
+/// eats the inner quotes and `log` rejects the predicate.
+let diagnosticsLogCommand =
+    "log show --predicate 'subsystem BEGINSWITH \"\(diagnosticsLogSubsystemPrefix)\"'"
+
+/// The section footer.
+///
+/// It names `<private>` because the redaction is the first thing a bug reporter
+/// will hit and the easiest to mistake for a broken log. Measured while this
+/// section was written: over the previous two days on this machine, 346 of the
+/// lines that command returns carry `<private>` where a value should be —
+/// including every "Accepted connection from …" the daemon writes. macOS
+/// redacts non-`public` interpolations in `log show` output, and nothing this
+/// app can do at the console changes that.
+///
+/// It does not suggest `sudo`. `log show` needs no privilege for these
+/// subsystems — verified by running exactly this command as this user — and
+/// telling somebody to paste a root command they do not need is how a habit of
+/// pasting root commands starts.
+let diagnosticsSectionFootnote = "Everything Keepy Uppy has written to the system log — the menu bar app, the background service, the agent and the command line together. Paste it into Terminal; add --last 1h to narrow it down. It's the useful thing to attach to a bug report. Some values come back as <private>: that's macOS redacting them, not a gap in the log."

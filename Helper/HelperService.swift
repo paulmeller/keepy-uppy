@@ -186,8 +186,30 @@ final class HelperService: NSObject, HelperProtocol {
         reply(runtime.isKeepingAwake())
     }
 
+    /// This daemon's own version, and the only method here that reads nothing
+    /// and changes nothing.
+    ///
+    /// **Its first caller arrived in Plan 7 Task 10** — `DaemonConnection`,
+    /// behind the CLI & Advanced tab's Diagnostics section. Until then it was
+    /// declared, implemented, and called by nobody.
+    ///
+    /// It used to compose the reply here, from `CFBundleShortVersionString`
+    /// alone, falling back to `"0"`. Both halves of that were wrong for the
+    /// question the only caller asks. Every target ships the same
+    /// `MARKETING_VERSION`, so a short version alone is equal between *any* two
+    /// builds of this project — including a daemon left running by the copy of
+    /// the app that was replaced, which is the exact state Diagnostics has to be
+    /// able to show. `bundleVersionText` (Shared/XPCProtocol.swift) adds
+    /// `CFBundleVersion`, which `just bump` moves per release, and is the same
+    /// function the app formats its own version with, so a healthy install
+    /// cannot read as a mismatch through a formatting difference alone.
+    ///
+    /// An older daemon still answers with a bare `"0.1.0"`, and the app renders
+    /// that as a mismatch against its own `"0.1.0 (3)"`. That is the correct
+    /// answer, not a false alarm: a daemon that predates this change *is* an
+    /// older build than the app asking.
     func version(reply: @escaping (String) -> Void) {
         connectionProven()
-        reply(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0")
+        reply(bundleVersionText(of: .main))
     }
 }

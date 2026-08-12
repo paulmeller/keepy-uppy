@@ -70,6 +70,18 @@ final class DaemonConnectionFailurePathTests: XCTestCase {
             await daemon.stopAllSessions(all: false)
         }
     }
+
+    /// The newest verb, and the one whose failure a user is most likely to be
+    /// looking at when it happens: Diagnostics calls it precisely when
+    /// something has already gone wrong. Same contract as the four above — it
+    /// returns rather than leaving a continuation unresumed — and `nil` is the
+    /// answer that reaches the pane, which renders it as "not answering"
+    /// rather than as a version.
+    func testVersionReturnsInsteadOfHangingWhenTheConnectionFails() async {
+        let daemon = DaemonConnection()
+        daemon.start()
+        await expectCompletion("version() returned") { _ = await daemon.version() }
+    }
 }
 
 /// What the app actually asks the daemon for.

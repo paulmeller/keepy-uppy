@@ -14,12 +14,26 @@ private enum SettingsMetrics {
 /// this body, and re-ran every tab's `@State` default expression — an
 /// `SMAppService` status query and two UserDefaults reads with JSON decodes —
 /// twenty times a minute, all discarded. Tabs own their own state.
+///
+/// **The connection came back in Task 10 and the rule did not change.** It is a
+/// plain `let` below, not an `@ObservedObject`: a stored reference is inert,
+/// and passing it on costs nothing. `AdvancedSettingsTab` — the one tab that
+/// reads it — takes it the same way and subscribes to the single publisher it
+/// needs through `.onReceive`, which delivers to a closure instead of
+/// invalidating a view. Restoring `@ObservedObject` on either declaration
+/// reinstates the exact cost described above.
 struct SettingsView: View {
-    /// The only thing this view is handed, and it is passed straight through to
-    /// the one tab that needs it. `AdvancedSettingsTab` shows why a hot key
-    /// failed to register, which only the centre that tried to register it
-    /// knows — see the doc comment there for what a second instance would do.
+    /// `AdvancedSettingsTab` shows why a hot key failed to register, which only
+    /// the centre that tried to register it knows — see the doc comment there
+    /// for what a second instance would do.
     @ObservedObject var hotKeys: HotKeyCenter
+
+    /// Passed straight through to the same tab, whose Diagnostics section asks
+    /// it for the daemon's version. It has to be the app's one connection: a
+    /// second `DaemonConnection` made here would open its own privileged XPC
+    /// connection, poll it forever, and report on the health of something no
+    /// other part of the app is using.
+    let daemon: DaemonConnection
 
     var body: some View {
         // Five tabs, in the order a new user meets them: what the app does on
@@ -43,7 +57,7 @@ struct SettingsView: View {
                 .tabItem { Label("Display", systemImage: "display") }
             SafetySettingsTab()
                 .tabItem { Label("Safety & Guards", systemImage: "exclamationmark.shield") }
-            AdvancedSettingsTab(hotKeys: hotKeys)
+            AdvancedSettingsTab(hotKeys: hotKeys, daemon: daemon)
                 .tabItem { Label("CLI & Advanced", systemImage: "terminal") }
         }
         .frame(minWidth: SettingsMetrics.width, maxWidth: SettingsMetrics.width,

@@ -217,4 +217,24 @@ final class DaemonConnection: ObservableObject {
         }
         await refresh()
     }
+
+    /// The daemon's version, or `nil` if it did not answer.
+    ///
+    /// **`nil` is the whole of "not connected", and deliberately so.** The
+    /// Diagnostics section could have read `isConnected` instead, but that flag
+    /// is whatever the last poll left behind up to three seconds ago, whereas a
+    /// reply here is a round trip that completed at the moment the pane asked —
+    /// which is the same rule `call` above already follows, for the same reason:
+    /// `remoteObjectProxyWithErrorHandler` hands back a proxy quite happily for
+    /// a connection that is about to fail. One call, one fact, no second state
+    /// to keep in step.
+    ///
+    /// The first production caller of `HelperProtocol.version(reply:)`, which
+    /// was declared and implemented in v2 and called by nobody for four plans.
+    /// Deliberately the *only* verb this app's Diagnostics pane reaches for:
+    /// it takes no argument, touches no session, and cannot change what this
+    /// Mac does.
+    func version() async -> String? {
+        await call { proxy, reply in proxy.version { reply($0) } }
+    }
 }
