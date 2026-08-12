@@ -158,7 +158,7 @@ and it covers Ethernet on the same network as well.
 - [ ] Add-trigger sheet → "This Mac is on a network": the footnote says plainly that this is how a Wi-Fi network is named here, and why it is matched by address block rather than by name — a user looking for a Wi-Fi trigger must not be left hunting for one
 - [ ] While on Wi-Fi, "This Mac…" offers the block that Mac's Wi-Fi address sits in, and a rule built from it fires — i.e. the Wi-Fi case really is served by this condition
 - [ ] **Nothing, anywhere in the app, ever raises a Location Services prompt** — including opening the Add sheet on this row, saving a network rule, and letting the agent run with one live
-- [ ] The broader version of that, because the README now promises it: save one rule of **every** condition kind, leave the agent running for an hour with an external drive and a USB device attached, and confirm no privacy dialog of any kind appears (Location, Bluetooth, Files and Folders, removable volumes, Accessibility). Then open System Settings → Privacy & Security and confirm Keepy Uppy appears under nothing but Login Items — a grant that was never asked for still shows up there once something triggers it. Run this with both notification toggles left at their default of **off**: switching one on is the one thing in the app that raises a prompt, and the README's claim is scoped to exactly that exception
+- [ ] The broader version of that, because the README now promises it: save one rule of **every** condition kind, leave the agent running for an hour with an external drive and a USB device attached, and confirm no privacy dialog of any kind appears (Location, Bluetooth, Files and Folders, removable volumes, Accessibility). Then open System Settings → Privacy & Security and confirm Keepy Uppy appears under nothing but Login Items — a grant that was never asked for still shows up there once something triggers it. Run this with all three notification toggles left at their default of **off**: switching one on is the one thing in the app that raises a prompt, and the README's claim is scoped to exactly that exception
 - [ ] Settings → Triggers → On Session End: configuring a script and a webhook URL (e.g. `https://webhook.site/...`), then ending a session manually from the menu, confirms both fire within ~5s
 - [ ] `keepy-uppy finished` (with a script/webhook configured) runs immediately and the CLI process doesn't exit before the webhook POST actually leaves the machine — works even with the daemon not running
 - [ ] `keepy-uppy finished --tool claude-code` threads `--tool` through to the script's `KEEPY_UPPY_TOOL` env var and the webhook JSON's `"tool"` field
@@ -250,8 +250,10 @@ below, written by the tasks that built them; nothing here repeats them.
 - [ ] Upgrading from a build made before this plan does not lose any of the above
 - [ ] With another account's session live, its menu row reads `… — started by another user` and is **not** clickable — the boundary Task 5's amendment must never cross. (Your own automatic and command-line rows are covered under Settings → Triggers above; the automatic one is clickable, the command-line one is not.)
 
-*Notifications.* Both toggles ship **off**, and switching one on is the only
-thing in this product that asks macOS for anything.
+*Notifications.* All three toggles ship **off**, and switching one on is the only
+thing in this product that asks macOS for anything. Plan 8 Task 7 added the
+third — "When a safety guard stops your sessions" — and its own items are in the
+Plan 8 section below; what is here is the pair Plan 7 shipped.
 
 - [ ] Notifications, never turned on: no prompt has ever appeared — not at launch, not on first run, not when a session ends
 - [ ] Turning "When nothing of yours is keeping this Mac awake" on raises the system prompt **at that moment** and nowhere else
@@ -260,7 +262,7 @@ thing in this product that asks macOS for anything.
 - [ ] Refuse it: the toggle stays on and a reason appears beneath it naming System Settings, with a button that opens the right pane. What it must **not** do is sit there looking as though notifications are working
 - [ ] Grant it afterwards in System Settings **using that button, and switch straight back to the still-open Settings window**: the reason clears with no restart and no reopening. The pane re-reads the grant when it appears *and* when the app becomes active again, and it is the second of those that covers this trip — the window never went away, so appearing again was never going to happen
 - [ ] With the app quit, end a `keepy-uppy` session: nothing is announced, and the README says that is how it works
-- [ ] No notification ever claims to know *why* a session ended — in particular, a session ended by a safety guard produces the same wording as one that expired
+- [ ] With the third toggle **off**, no notification claims to know *why* a session ended — a session ended by a safety guard produces the same wording as one that expired. (This was unconditional until Plan 8 Task 7; it is now what the *stop* toggle alone does, and the reason-carrying half is in the Plan 8 section below)
 - [ ] "When a trigger starts a session" fires for a rule of yours firing, and not for a session you started yourself
 
 *The CLI on your `PATH`.* That `setup` and `reset` refuse through the link is
@@ -361,6 +363,36 @@ mechanism was verified out-of-band (a tool built the same way,
 - [ ] Nothing in this section offers to reset, re-register or restart the
   background services. That is deliberate — see `Shared/DaemonRemoval.swift` —
   and a button appearing here later is a regression, not a feature
+
+**Plan 8 (stopping triggers, live mode changes, reasons, per-rule effects):**
+
+Two of this plan's four halves already have items above, written by the tasks
+that built them: *Stopping a trigger session from the menu* sits under Settings →
+Triggers, and so do the per-rule wake mode, the per-rule lifetime, and the
+`defaults read` inspection of the wire shape. Nothing here repeats them.
+
+**Read this before running any of it.** The background service is a root
+`LaunchDaemon` that keeps running across an app update, so on a Mac that has not
+been restarted since installing this build, the service answering is the *old*
+one: `keepy-uppy mode` refuses outright, and the reason-carrying notification
+falls back to the plain wording. Both of those are covered as their own items
+below, deliberately — but every other item that says "live" assumes a restart has
+happened, and running one against the old service proves nothing. The two version
+gates that decide this were each chosen against the build number actually
+installed at the time, not against `project.yml`; they are correct for the two
+verbs they name and are not a general promise about any future mismatch.
+
+- [ ] The rule whose session you stopped from the menu is still **enabled**, and fires again the next time its condition becomes true. Stopping a session is not switching a rule off, and the reverse (switching a rule off does not end its session) is already an item above
+- [ ] With one of your own `keepy-uppy on` sessions and one from another account live at the same time, both are listed and **neither** has a Stop button — only your own menu-started and trigger-started rows do. This is the boundary Task 5's exception must not have widened
+- [ ] `keepy-uppy mode --session <id> --display-may-sleep` on a live default-mode session: `pmset -g | grep -i sleepdisabled` goes `1` → `0`, the menu row gains its `(lid open only)` tag, and the session keeps its **remaining time** rather than starting a new clock
+- [ ] Promote it back with the menu's `Make … survive a lid close` row: `pmset -g` goes `0` → `1` and the lid can then be shut. That row is offered on a `(lid open only)` session and **not** on a `(screen on, lid open only)` one — the second is a trade rather than a promotion, and `keepy-uppy mode` is where a trade belongs
+- [ ] Change the mode of a `--while-volume` session, then eject the volume: the session still ends within ~10s. The lifetime binding surviving the change is the entire reason this verb exists rather than "stop it and start another"
+- [ ] `keepy-uppy mode --session <id>` aimed at a session the **menu** started is refused, and the session is untouched — the same client scoping as `off --session`, which the verb inherits rather than reimplements
+- [ ] Let a session hit the max-duration backstop with "When a safety guard stops your sessions" **on**: the banner reads `Stopped: the time limit was reached`. Lower the maximum in Settings → Safety & Guards rather than waiting out the 8-hour default. Switch that toggle off with the plain one still on and the same ending produces the plain wording instead; both off, nothing appears
+- [ ] A guard fires while the app is **quit**: nothing is announced at all, on relaunch or ever. The app compares two of its own snapshots, so an ending it never watched has nothing to attribute — and the README says so
+- [ ] With the **old** installed background service still running and this build's app: a session ending unrequested produces the reason-free wording, the app stays connected, and `log show` shows **no** reconnect loop. Sending a verb an old daemon lacks invalidates the connection server-side and ends the caller's sessions, so "declined to ask" is the only correct behaviour and a reconnect loop is the symptom of having asked
+- [ ] A trigger rule saved with "Only with the lid open": while its session is live, **shut the lid and confirm this Mac sleeps.** The rule's mode really is the session's mode, and this is the direction where being wrong is invisible from every test — a rule that quietly kept the old unconditional `.clamshell` would look identical until the lid is down
+- [ ] Save one rule using a non-default wake mode or lifetime and one plain rule, then run the **v0.1.0 download**: it shows **no** rules at all — not "1 trigger was created by a newer version", which is the *later* builds' behaviour and is the item under the volume/network conditions above. Quit it without touching that pane and both rules are back under this build; change anything in that pane first and they are gone, including the plain one. That asymmetry is what the README's downgrade paragraph now states, and it is the one item here that can destroy real data — use a throwaway account
 
 **Safety guards:**
 - [x] A Release build refuses XPC connections from an unsigned binary

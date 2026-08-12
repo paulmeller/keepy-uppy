@@ -195,7 +195,10 @@ It holds off macOS's spin-down timer for as long as the session runs, so an
 external drive doesn't park itself in the middle of a backup. It's system-wide
 rather than per-drive — there's no per-device version of it in the API at all —
 and it can't overrule an enclosure that decides for itself when to spin down. A
-disk already parked when the session starts stays parked.
+disk already parked when the session starts stays parked. And if this Mac's
+background service is older than the app — which it is after an update, until
+you restart — it drops the request rather than failing it: the session runs, the
+disks don't stay awake, and the menu is where that's owned up to.
 
 **Network shares aren't covered, and can't be.** macOS offers nothing at any
 layer that says "keep this SMB or AFP mount alive"; the only thing that works
@@ -261,6 +264,20 @@ what it holds awake. A rule can pick any of the three wake modes and can hold
 attached disks out of idle, instead of every trigger silently getting
 lid-closed-and-no-disks. Leave both alone and that is still what you get.
 
+**A rule that uses either of those two controls can't be read by an older Keepy
+Uppy**, and that's worth knowing before you write one. Rules you leave alone are
+stored exactly as they always were, so every build reads them — that's the
+design, and it's what keeps a downgrade cheap. A rule that picks its own mode or
+its own lifetime is stored differently, and what an older build does with it
+depends on how old. Any build from `main` since the extra trigger conditions
+arrived keeps it, hides it and counts it in the Triggers pane — *"1 trigger was
+created by a newer version of Keepy Uppy … it has been kept"* — and hands it
+straight back the moment you run the newer build again. **The download has none
+of that machinery:** it shows no rules at all, and writes over them the next
+time anything in that pane changes. That's already true of any rule using one of
+the six conditions it never knew about, so it isn't a new hazard — but it's a
+real one, and it's what a per-rule effect costs.
+
 There's no Wi-Fi-network trigger and no Bluetooth-device one, and that's also a
 decision. Each needs a privacy grant that a background agent with no window can
 never obtain, and a refused grant doesn't produce an error — it produces a rule
@@ -310,14 +327,24 @@ a stray click can. `keepy-uppy mode` goes both ways, and it's also where to
 change a session that's holding the screen on, since no single mode both holds
 the screen and survives a shut lid.
 
-**Two notifications, both off until you turn one on:** when nothing of yours is
-keeping this Mac awake any more, and when a trigger starts a session. The app
-is what announces them, so a session that ends while it's quit ends without a
-word. Stopping a session yourself in the menu is never announced — you were
-there — but stopping one with `keepy-uppy off` in a terminal is, because from
-the app that looks exactly like a session expiring. And no notification ever
-says *why* a session ended: only the daemon knows that, and it doesn't tell
-anyone yet.
+**Three notifications, all off until you turn one on:** when nothing of yours is
+keeping this Mac awake any more, when a trigger starts a session, and when a
+safety guard stops your sessions. The app is what announces them, so a session
+that ends while it's quit ends without a word. Stopping a session yourself in
+the menu is never announced — you were there — but stopping one with
+`keepy-uppy off` in a terminal is, because from the app that looks exactly like
+a session expiring.
+
+**The third one names the guard** — too hot, low battery, or the time limit —
+and short of reading the daemon log it's the only place you're ever told *why* a
+session ended. **A reason isn't always available**, and you're told so rather
+than handed a guess: the daemon remembers a stop for five minutes and no
+longer, a background service older than the app can't be asked for one at all,
+and an ending no guard was behind has none to give. In each of those you get
+the plain notice instead, if that one is switched on. A reason is matched to
+the exact sessions that ended and never to whatever happened to end around the
+same time, so a guard stopping one session while another expires on its own
+clock is reported as neither.
 
 **Two global keyboard shortcuts**, needing no permission of any kind: one
 starts the session the menu's first row starts, the other stops the sessions
@@ -388,7 +415,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **791 unit tests**.
+by **975 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -414,9 +441,9 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 791 tests on `main`, and
+**v0.1 — new, and moving fast.** Signed and notarized, 975 tests on `main`, and
 a privilege boundary that's been through three adversarial review passes. What
-it hasn't had yet is months on other people's hardware, and six claims above
+it hasn't had yet is months on other people's hardware, and seven claims above
 have never been watched happen on a real machine:
 
 - closed-lid behaviour over a long job — the headline claim;
@@ -429,20 +456,29 @@ have never been watched happen on a real machine:
   works and one the window server will never deliver to are the same `noErr`,
   so only a human pressing the key settles it;
 - a notification appearing on screen — nothing here has ever asked for the
-  grant that would let one.
+  grant that would let one, so the banner naming the guard that stopped your
+  sessions has never been read off a real screen either;
+- the newest session controls against a real background service: stopping a
+  trigger's session from the menu, changing a running session's mode, and a rule
+  carrying its own wake mode and lifetime. Each is covered by tests and by XPC
+  round trips against a listener built for them, and none has been run against
+  an installed service — the one on the machine this was written on is older
+  than the requests it would have to answer.
 
-All six are designed for and covered as far as a test process can reach, which
+All seven are designed for and covered as far as a test process can reach, which
 is not the same thing.
 [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
 what only hardware can settle.
 
 **Most of this page is `main`, not the download.** The build on
-[Releases](../../releases) is **v0.1.0**, and `main` is more than sixty commits
-past it — its own notes say 182 tests. It knows `--for`, `--until`,
+[Releases](../../releases) is **v0.1.0**, and `main` is more than seventy
+commits past it — its own notes say 182 tests. It knows `--for`, `--until`,
 `--while-app` and three trigger conditions, and that is the lot: no
 `--while-process` and no `keepy-uppy finished`, so none of the AI-coding-agent
 wiring above; no wake modes, no `--keep-disks-awake`, and neither of the
-Settings controls that go with them; and none of
+Settings controls that go with them; no `keepy-uppy mode`, so a session's
+request is fixed the moment it starts; no per-rule wake mode or lifetime on a
+trigger; and none of
 `--while-display`, `--while-ac-power`, `--while-cpu-busy`, `--while-volume`,
 `--while-subnet`, `--while-vpn` or `--while-usb`, nor the six trigger
 conditions that arrived with them. Its Settings window has three tabs rather
