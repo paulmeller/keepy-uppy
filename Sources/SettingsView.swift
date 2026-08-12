@@ -199,6 +199,23 @@ struct GeneralSettingsTab: View {
             onboarding.refresh()
             refreshAuthorization()
         }
+        // **The grant is macOS's, and it changes while this pane is on screen.**
+        // The fault report above offers an "Open System Settings" button; taking
+        // it deactivates the app and leaves this window exactly where it was, so
+        // granting the permission over there and switching back fires no
+        // `onAppear` and the pane goes on saying macOS is blocking notifications
+        // about a grant that now exists. Same shape, same fix, as the CLI pane's
+        // trip to Terminal (`AdvancedSettingsTab`) — and here it is the flow the
+        // pane itself invited.
+        //
+        // Unconditional, unlike that pane's `refreshIfChanged`: this re-read
+        // starts an async query and assigns one `@State` enum, with nothing
+        // half-typed to clobber, and it is still gated on a toggle being on so
+        // becoming active with both off touches UserNotifications not at all.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+                refreshAuthorization()
+            }
     }
 
     /// **The only place in this project that asks for the notification grant,

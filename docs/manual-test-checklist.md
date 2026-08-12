@@ -243,7 +243,7 @@ thing in this product that asks macOS for anything.
 - [ ] Allow it, then **stop a session from the menu yourself: nothing is announced.** That is the suppression working, not a bug
 - [ ] …then run `keepy-uppy off` in a Terminal with one session live: the notification **does** arrive, once. Not once per session when two end together, and not at all while another session of yours is still live
 - [ ] Refuse it: the toggle stays on and a reason appears beneath it naming System Settings, with a button that opens the right pane. What it must **not** do is sit there looking as though notifications are working
-- [ ] Grant it afterwards in System Settings: the reason clears without restarting the app (the pane re-reads the grant every time it appears, so closing and reopening Settings is enough)
+- [ ] Grant it afterwards in System Settings **using that button, and switch straight back to the still-open Settings window**: the reason clears with no restart and no reopening. The pane re-reads the grant when it appears *and* when the app becomes active again, and it is the second of those that covers this trip — the window never went away, so appearing again was never going to happen
 - [ ] With the app quit, end a `keepy-uppy` session: nothing is announced, and the README says that is how it works
 - [ ] No notification ever claims to know *why* a session ended — in particular, a session ended by a safety guard produces the same wording as one that expired
 - [ ] "When a trigger starts a session" fires for a rule of yours firing, and not for a session you started yourself
