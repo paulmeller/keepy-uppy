@@ -137,8 +137,18 @@ extension HotKeyBinding {
     /// the failure this has to survive is a *stored* value that no longer
     /// parses, and a decoder that throws is easier to be sure about than a
     /// splitter that returns something plausible for nonsense.
+    ///
+    /// `.sortedKeys` because the key order is otherwise not stable — not even
+    /// within one process, measured — and one binding must have exactly one
+    /// stored form. Nothing in the app compares two of these as strings, so the
+    /// instability was invisible in production and showed up only where a
+    /// stored value was checked against a freshly encoded one; but a preference
+    /// that rewrites itself into a different spelling of the same value is
+    /// worth not shipping either.
     var storedForm: String {
-        guard let data = try? JSONEncoder().encode(self),
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let data = try? encoder.encode(self),
               let text = String(data: data, encoding: .utf8) else { return "" }
         return text
     }
