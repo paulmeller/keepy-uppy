@@ -28,6 +28,17 @@ enum CLICommand: Equatable {
     /// and every one that names an axis stops compiling until it is answered.
     case on(kind: SessionKind, persistence: SessionPersistence, power: PowerRequest)
     case off(StopTarget)
+    /// Changes what a session **already running** asks of this Mac, without
+    /// restarting it — which is the point, since restarting loses whatever the
+    /// session's lifetime was bound to.
+    ///
+    /// It carries the whole `PowerRequest`, exactly as `on` does and for the
+    /// same reason, and it names one session: there is no `--all` here, and no
+    /// bare form. `off`'s absent target means "all of mine" because stopping
+    /// everything you own is a coherent thing to ask for; changing the mode of
+    /// every session you own at once is not something anybody sits down to type,
+    /// and the *shape* of that mistake would be a sweep nobody named.
+    case mode(session: String, power: PowerRequest)
     case status(json: Bool)
     case sessions
     /// Fires the configured "on session end" script/webhook immediately —
@@ -52,7 +63,15 @@ enum CLICommand: Equatable {
 
 /// Named once: the command list appears in both failure messages below, and
 /// adding a verb should not mean remembering to update two strings.
-private let cliUsage = "usage: keepy-uppy on|off|status|sessions|finished|setup|reset"
+///
+/// **Internal rather than `private` since Plan 8 Task 9**, and for the reason it
+/// was named once in the first place: there was a *third* copy of it, spelled out
+/// as a literal in `CLIInstallationTests`' "the installed link runs" assertion,
+/// and adding `mode` broke it. That test does not care what the verbs are — it
+/// runs the link with no arguments and reads stderr as proof the entry resolves
+/// to a runnable binary — so it now reads this instead of a copy of it, and a
+/// ninth verb changes one line.
+let cliUsage = "usage: keepy-uppy on|off|mode|status|sessions|finished|setup|reset"
 
 /// Pure: no I/O, no XPC, no process exit — fully testable. `now` is
 /// injected so duration parsing can be tested without depending on the
@@ -66,6 +85,8 @@ func parseCLIArguments(_ args: [String], now: Date = Date()) -> Result<CLIComman
         return parseOn(rest, now: now)
     case "off":
         return parseOff(rest)
+    case "mode":
+        return parseMode(rest)
     case "status":
         return parseStatus(rest)
     case "sessions":
@@ -397,6 +418,111 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
                         power: PowerRequest(wakeMode: wakeMode.value ?? .clamshell,
                                             keepsDisksAwake: keepDisksAwake.value ?? false)))
 }
+
+/// `mode`'s one option: **which** session. An enum for a single case, in
+/// `OffOption`'s shape, because the usage line and the "is this a known token"
+/// test must not be able to disagree about it.
+private enum ModeOption: String, CaseIterable {
+    case session = "--session"
+}
+
+/// The same two-part shape as `onUsage`, built from the same exhaustive list
+/// (`WakeMode.selectingFlags`) plus the same one hand-concatenated flag — see
+/// `onUsage` for what that costs and which test pays for it;
+/// `CLIModeParsingTests.testTheUsageLineNamesEveryFlagThisVerbAccepts` is this
+/// verb's copy of it.
+///
+/// The trailing sentence is Task 9 Step 1's requirement stated where a user
+/// meets it. The absent-flag rule is the *same* rule `on` has and for the same
+/// reason, but it needs saying out loud here because the intuition it defeats is
+/// stronger: this verb acts on something already running, so "leave the axis I
+/// did not mention alone" is the obvious reading — and it is not what happens,
+/// because the verb sets the session's whole request rather than editing one
+/// axis of it.
+private let modeUsage = "usage: keepy-uppy mode --session <id> ["
+    + WakeMode.selectingFlags.joined(separator: " | ") + "]"
+    + " [" + keepDisksAwakeFlag + "]"
+    + " — sets the session's whole request, so a flag you leave out means what it means for"
+    + " 'on' (lid-closed mode, disks not held), not \"leave that as it is\""
+
+/// The same left-to-right pass, the same flag machinery, and deliberately not a
+/// second copy of either.
+///
+/// `WakeMode.selectedBy(flag:)` and `keepDisksAwakeFlag` are what `on` parses
+/// through, so there is exactly one list of power flags in this file. A second
+/// list is how `.whileExternalDisplay`, `.whileOnACPower` and `.whileCPUBusy`
+/// became kinds no client could ask for — see `OnOption`'s comment — and the
+/// same shape one axis over would be a `mode` that could not select a mode `on`
+/// could.
+///
+/// What it does **not** share is the end-condition list: a session's kind is
+/// fixed for its whole life, so `mode --for 2h` is not a request this verb could
+/// honour and is rejected as an unknown option rather than quietly ignored.
+private func parseMode(_ args: [String]) -> Result<CLICommand, CLIParseError> {
+    var scanner = ArgumentScanner(args, verb: "mode", usage: modeUsage)
+    var target = ExclusiveChoice<String>(group: ModeOption.allCases.map(\.rawValue))
+    var wakeMode = ExclusiveChoice<WakeMode>(group: WakeMode.selectingFlags)
+    var keepDisksAwake = ExclusiveChoice<Bool>(group: [keepDisksAwakeFlag])
+
+    while let token = scanner.next() {
+        if let mode = WakeMode.selectedBy(flag: token) {
+            if let error = wakeMode.choose(mode, by: token) { return .failure(error) }
+            continue
+        }
+
+        if token == keepDisksAwakeFlag {
+            if let error = keepDisksAwake.choose(true, by: token) { return .failure(error) }
+            continue
+        }
+
+        switch ModeOption(rawValue: token) {
+        case .session:
+            switch scanner.value(for: token) {
+            case .success(let id):
+                if let error = target.choose(id, by: token) { return .failure(error) }
+            case .failure(let error): return .failure(error)
+            }
+        case nil:
+            return .failure(scanner.unknownOption(token))
+        }
+    }
+
+    // **Absence is not a target here**, unlike `off`. There is no session this
+    // could sensibly default to, and defaulting to "all of mine" would turn a
+    // forgotten flag into a change to sessions nobody named — the widening
+    // `parseOff`'s comment is about, with a mode change instead of a stop.
+    guard let session = target.value else {
+        return .failure(CLIParseError(message: "mode needs a session to change; \(modeUsage)"))
+    }
+    // The same two absent-flag directions as `parseOn`, deliberately identical:
+    // no wake-mode flag means `.clamshell`, no disk flag means `false`. A verb
+    // whose absent flags meant "leave that axis alone" would be sending half a
+    // request, which is the shape `PowerRequest` and this whole verb exist to
+    // refuse.
+    return .success(.mode(session: session,
+                          power: PowerRequest(wakeMode: wakeMode.value ?? .clamshell,
+                                              keepsDisksAwake: keepDisksAwake.value ?? false)))
+}
+
+/// What `keepy-uppy mode` says when this Mac's daemon is too old to be asked to
+/// change a running session — which is a refusal by *this* process, before
+/// anything is sent, not a reply.
+///
+/// In `Shared/` rather than inline in `CLI/main.swift` for that file's standing
+/// reason: it is not reachable from the test target, so a sentence written there
+/// is one no test can read. `DaemonRemoval.unreachableNote` is the precedent —
+/// the same kind of "here is why nothing happened, and what to do" line, for the
+/// same binary, kept where it can be checked.
+///
+/// It names both ways out, because they are genuinely different trades: a
+/// restart replaces the daemon and costs whatever is running on this Mac, while
+/// stopping and starting a session costs only what that session's lifetime was
+/// bound to. Deliberately *not* sharing `SessionPowerSkew.olderDaemonRemedy`,
+/// which says "an older build than this app" — true, and in the wrong voice for
+/// something printed by a command-line tool that is not an app.
+let cliOldDaemonCannotChangeASessionNote =
+    "the background service on this Mac is an older build and can't change a session that's "
+    + "already running. Restart this Mac to update it, or stop the session and start a new one."
 
 // MARK: - The wake-mode surface
 

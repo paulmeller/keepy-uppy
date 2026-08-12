@@ -182,6 +182,181 @@ final class CLICommandParsingTests: XCTestCase {
     }
 }
 
+/// `keepy-uppy mode` — the verb that changes what a session **already running**
+/// asks of this Mac (Plan 8 Task 9).
+///
+/// The name reads against the verbs beside it (`on` / `off` / `mode` / `status`
+/// / `sessions` / `finished` / `setup` / `reset`): a bare noun for the thing
+/// being set, in a list where every other verb is one word, and the one word
+/// people already use for this ("what mode is that session in?").
+final class CLIModeParsingTests: XCTestCase {
+    /// The whole verb, minimally: a named session and the default request.
+    func testModeNamesASessionAndCarriesAWholeRequest() {
+        guard case .success(.mode(let session, let power)) =
+                parseCLIArguments(["mode", "--session", "abc-123"]) else {
+            return XCTFail("expected .mode")
+        }
+        XCTAssertEqual(session, "abc-123")
+        XCTAssertEqual(power, PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false),
+                       "absent flags mean what they mean for `on`, because this verb sets the "
+                       + "session's whole request rather than editing one axis of it")
+    }
+
+    /// **The reachability guard, one verb over from
+    /// `testEveryWakeModeIsReachableFromTheCommandLine`.**
+    ///
+    /// Written over `WakeMode.allCases` × `keepsDisksAwake`, so a request the
+    /// daemon can hold and this verb cannot express fails a test rather than
+    /// lurking — the exact hole Plan 4 closed for `WakeMode` and Plan 5 for
+    /// `TriggerConditionKind`, and the reason `SessionKind.Family` exists. A
+    /// fourth axis on `PowerRequest` makes the expected set bigger than anything
+    /// these invocations can produce, and this goes red.
+    func testEveryPowerRequestIsReachableFromTheNewVerb() {
+        let invocations = WakeMode.allCases.flatMap { mode -> [[String]] in
+            let modeFlags = mode.selectingFlag.map { [$0] } ?? []
+            return [modeFlags, modeFlags + [keepDisksAwakeFlag]]
+        }
+        let reachable = invocations.compactMap { flags -> PowerRequest? in
+            guard case .success(.mode(_, let power)) =
+                    parseCLIArguments(["mode", "--session", "abc-123"] + flags) else { return nil }
+            return power
+        }
+        XCTAssertEqual(reachable.count, invocations.count, "an invocation was refused outright")
+
+        for mode in WakeMode.allCases {
+            for held in [false, true] {
+                let wanted = PowerRequest(wakeMode: mode, keepsDisksAwake: held)
+                XCTAssertTrue(reachable.contains(wanted),
+                              "\(mode.rawValue)/disks=\(held) can be held by the daemon and asked "
+                              + "for by nobody")
+            }
+        }
+        // …and no more than that: distinct invocations must not collapse onto
+        // the same request, the converse `testEachInvocationSelectsADistinctMode`
+        // makes for `on`.
+        for (index, request) in reachable.enumerated() {
+            for other in reachable.dropFirst(index + 1) {
+                XCTAssertNotEqual(request, other, "two invocations selected the same request")
+            }
+        }
+    }
+
+    /// **The flags are `on`'s flags, parsed by `on`'s code**, which is the whole
+    /// of Step 1: a second list is how three `SessionKind`s became unreachable.
+    /// Asked as an equivalence over every combination rather than by inspecting
+    /// the parser, so a copied-and-diverged list fails here.
+    func testTheseAreTheSameFlagsOnParses() {
+        for mode in WakeMode.allCases {
+            for held in [false, true] {
+                let flags = (mode.selectingFlag.map { [$0] } ?? [])
+                    + (held ? [keepDisksAwakeFlag] : [])
+                guard case .success(.on(_, _, let fromOn)) = parseCLIArguments(["on"] + flags),
+                      case .success(.mode(_, let fromMode)) =
+                        parseCLIArguments(["mode", "--session", "abc-123"] + flags) else {
+                    return XCTFail("'\(flags.joined(separator: " "))' is not accepted by both verbs")
+                }
+                XCTAssertEqual(fromMode, fromOn,
+                               "\(flags.joined(separator: " ")) means something different to "
+                               + "`mode` than it does to `on`")
+            }
+        }
+    }
+
+    /// **Absence is not a target here, unlike `off`.** There is no session this
+    /// could default to, and a default of "all of mine" would turn a forgotten
+    /// flag into a change to sessions nobody named.
+    func testModeWithNoSessionIsRefusedRatherThanAppliedToAnything() {
+        guard case .failure(let error) = parseCLIArguments(["mode"]) else {
+            return XCTFail("expected failure — mode has no default target")
+        }
+        XCTAssertTrue(error.message.contains("--session"), error.message)
+
+        guard case .failure = parseCLIArguments(["mode", "--display-may-sleep"]) else {
+            return XCTFail("flags without a session must be refused too")
+        }
+    }
+
+    /// A session's kind is fixed for its whole life, so an end-condition flag is
+    /// not a request this verb could honour. Refused, rather than ignored — the
+    /// rule every verb here follows since `off --sesion` stopped everything.
+    func testAnEndConditionFlagIsRefusedRatherThanIgnored() {
+        for flags in [["--for", "2h"], ["--while-display"], ["--until", "17:00"]] {
+            guard case .failure = parseCLIArguments(["mode", "--session", "abc-123"] + flags) else {
+                return XCTFail("'mode \(flags.joined(separator: " "))' must be refused: a "
+                               + "session's kind cannot be changed")
+            }
+        }
+    }
+
+    func testModeRejectsTwoWakeModeFlagsAndARepeatedDiskFlag() {
+        for flags in [["--display-may-sleep", "--keep-display-awake"],
+                      [keepDisksAwakeFlag, keepDisksAwakeFlag],
+                      ["--session", "a", "--session", "b"]] {
+            guard case .failure = parseCLIArguments(["mode"] + flags) else {
+                return XCTFail("'mode \(flags.joined(separator: " "))' must be refused")
+            }
+        }
+    }
+
+    /// `--session` with no value must not swallow the next flag — the failure
+    /// `ArgumentScanner` exists for, checked on the verb whose value is a session
+    /// id somebody pasted.
+    func testASessionValueThatLooksLikeAFlagIsRefused() {
+        guard case .failure(let error) =
+                parseCLIArguments(["mode", "--session", "--display-may-sleep"]) else {
+            return XCTFail("expected failure")
+        }
+        XCTAssertTrue(error.message.contains("--display-may-sleep"),
+                      "the message must name the token that was not taken: \(error.message)")
+    }
+
+    /// `mode`'s copy of `testTheUsageLineNamesTheDiskFlag`, and it carries the
+    /// same weight: the usage line is the only list of this verb's options a user
+    /// ever sees, and `--keep-disks-awake` is in neither exhaustive list it is
+    /// built from.
+    ///
+    /// It also pins the sentence Step 1 asked for — the absent-flag rule stated
+    /// where the user meets it — because the intuition it defeats ("leave the
+    /// axis I didn't mention alone") is stronger on a verb that acts on something
+    /// already running.
+    func testTheUsageLineNamesEveryFlagThisVerbAcceptsAndTheAbsentFlagRule() {
+        guard case .failure(let error) =
+                parseCLIArguments(["mode", "--session", "abc-123", "--frobnicate"]) else {
+            return XCTFail("expected an unknown option to be refused")
+        }
+        for flag in WakeMode.selectingFlags + [keepDisksAwakeFlag, "--session"] {
+            XCTAssertTrue(error.message.contains(flag),
+                          "`mode`'s usage line does not mention \(flag): \(error.message)")
+        }
+        XCTAssertTrue(error.message.contains("whole request"),
+                      "the usage line must say that an absent flag is not \"leave that alone\": "
+                      + error.message)
+    }
+
+    /// The verb list a user is shown when they mistype the verb itself. A verb
+    /// missing from it is a verb nobody finds.
+    func testTheCommandListNamesTheNewVerb() {
+        guard case .failure(let error) = parseCLIArguments(["frobnicate"]) else {
+            return XCTFail("expected failure")
+        }
+        XCTAssertTrue(error.message.contains("mode"), error.message)
+    }
+
+    /// The sentence printed when this Mac's daemon is too old to be asked. It is
+    /// in `Shared/` precisely so it can be read here — `CLI/main.swift` is not
+    /// reachable from this target — and what matters is that it names both ways
+    /// out, because they cost differently.
+    func testTheOldDaemonNoteNamesBothWaysOut() {
+        XCTAssertTrue(cliOldDaemonCannotChangeASessionNote.lowercased().contains("restart"),
+                      cliOldDaemonCannotChangeASessionNote)
+        XCTAssertTrue(cliOldDaemonCannotChangeASessionNote.lowercased().contains("stop the session"),
+                      cliOldDaemonCannotChangeASessionNote)
+        XCTAssertFalse(cliOldDaemonCannotChangeASessionNote.contains("this app"),
+                       "a command-line tool is not \"this app\": "
+                       + cliOldDaemonCannotChangeASessionNote)
+    }
+}
+
 /// The wake-mode axis of `on` (spec §1, plan 4): *when* a session ends and
 /// *how* it keeps the Mac awake are orthogonal, and the CLI is where a user
 /// first gets to choose the second one.

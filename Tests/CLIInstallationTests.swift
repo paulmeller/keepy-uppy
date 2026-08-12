@@ -539,8 +539,11 @@ final class CLIInstallationRealFilesystemTests: XCTestCase {
 
         let invoked = run(installation.linkPath, [])
         XCTAssertNotEqual(invoked.status, 0, "no arguments is a usage error")
-        XCTAssertTrue(invoked.err.contains("usage: keepy-uppy on|off|status|sessions|finished|setup|reset"),
-                      "stderr was: \(invoked.err)")
+        // `cliUsage` itself, not a copy of it. This assertion is about the link
+        // resolving to something that runs and complains, not about which verbs
+        // exist — and a hand-written copy of the verb list here is a third copy
+        // of a string that was already named once precisely to have one.
+        XCTAssertTrue(invoked.err.contains(cliUsage), "stderr was: \(invoked.err)")
 
         XCTAssertEqual(installation.remove(), .removed)
         XCTAssertEqual(installation.state(), .notInstalled)

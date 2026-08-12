@@ -411,6 +411,185 @@ final class SafetyStopVerbGateTests: XCTestCase {
     }
 }
 
+// MARK: - Plan 8 Task 9: the gate in front of the mode change
+
+/// The second gate, and the one with **less** protection behind it — which is
+/// the thing worth pinning, because it is the difference a reader has to be able
+/// to see. `SafetyStopVerbGate` refuses while this user owns a live session, so
+/// a wrong version answer costs nothing there; this verb exists to act on a live
+/// session, so that gate cannot exist here at all and the version gate carries
+/// the whole weight.
+@MainActor
+final class ChangeSessionPowerGateTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        ChangeSessionPowerGate.resetForTesting()
+    }
+
+    override func tearDown() {
+        ChangeSessionPowerGate.resetForTesting()
+        super.tearDown()
+    }
+
+    func testAFreshProcessKnowsNothingAndProbesFirst() {
+        XCTAssertEqual(ChangeSessionPowerGate.support, .unknown)
+        XCTAssertEqual(ChangeSessionPowerGate.nextStep(support: .unknown), .askTheVersionFirst)
+    }
+
+    func testAClearedDaemonIsSentAndAnOldOneNeverIs() {
+        XCTAssertEqual(ChangeSessionPowerGate.nextStep(support: .present), .send)
+        XCTAssertEqual(ChangeSessionPowerGate.nextStep(support: .absent), .refuse)
+    }
+
+    /// **`.absent` is terminal** — Task 1's R1.2. Nothing observed later may talk
+    /// it back into asking, or one failure per reconnect becomes one teardown per
+    /// reconnect, and this user's sessions go with them.
+    func testOnceTheDaemonHasFailedNothingTalksTheLatchBackIntoAsking() {
+        ChangeSessionPowerGate.record(.absent)
+        ChangeSessionPowerGate.record(.present)
+        XCTAssertEqual(ChangeSessionPowerGate.support, .absent, "a failed latch was re-armed")
+        ChangeSessionPowerGate.record(.unknown)
+        XCTAssertEqual(ChangeSessionPowerGate.support, .absent)
+        XCTAssertEqual(ChangeSessionPowerGate.nextStep(support: ChangeSessionPowerGate.support),
+                       .refuse)
+    }
+
+    /// The latch is process-wide, not per-connection and not per-object: the
+    /// connection is rebuilt three seconds after every failure, and "does this
+    /// Mac's daemon implement a verb" is not a property of a connection.
+    func testTheLatchIsProcessWideRatherThanPerConnection() {
+        ChangeSessionPowerGate.record(.present)
+        _ = DaemonConnection()
+        _ = DaemonConnection()
+        XCTAssertEqual(ChangeSessionPowerGate.support, .present,
+                       "building connections reset a latch that has to outlive them")
+    }
+
+    /// A cleared probe is remembered, so the version call happens at most once
+    /// per process rather than once per click.
+    func testAClearedProbeIsRememberedSoNothingProbesTwice() {
+        ChangeSessionPowerGate.record(.present)
+        XCTAssertEqual(ChangeSessionPowerGate.nextStep(support: ChangeSessionPowerGate.support),
+                       .send)
+    }
+
+    /// **The two gates are independent facts about the same daemon**, and must
+    /// not be able to answer for each other: during exactly the upgrade window
+    /// these exist for, a daemon can have one verb and not the other.
+    func testLatchingOneVerbSaysNothingAboutTheOther() {
+        SafetyStopVerbGate.resetForTesting()
+        defer { SafetyStopVerbGate.resetForTesting() }
+
+        ChangeSessionPowerGate.record(.absent)
+        XCTAssertEqual(SafetyStopVerbGate.support, .unknown,
+                       "one verb's failure latched the other's gate")
+        SafetyStopVerbGate.record(.present)
+        XCTAssertEqual(ChangeSessionPowerGate.support, .absent)
+    }
+}
+
+/// **Asking must cost nothing but the change**, on a machine whose daemon cannot
+/// answer — the same claim `DaemonConnectionSafetyStopQueryTests` makes below,
+/// for the verb that has one fewer gate in front of it.
+///
+/// Nothing here reaches a working daemon: the test host is ad-hoc signed, which
+/// the installed daemon refuses at its code-signing gate, so the `version` probe
+/// fails, the gate latches "absent", and `changeSessionPower` is **never put on
+/// the wire at all** — which is exactly the behaviour under test. The
+/// `[app] XPC error` lines in the log are that refusal.
+@MainActor
+final class DaemonConnectionPowerChangeTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        ChangeSessionPowerGate.resetForTesting()
+    }
+
+    override func tearDown() {
+        ChangeSessionPowerGate.resetForTesting()
+        super.tearDown()
+    }
+
+    /// The call must *return*, and must report failure rather than a change that
+    /// did not happen.
+    func testTheChangeReturnsAndReportsFailureWhenTheDaemonCannotAnswer() async {
+        let daemon = DaemonConnection()
+        daemon.start()
+        let done = expectation(description: "changeSessionPower() returned")
+        Task { @MainActor in
+            let changed = await daemon.changeSessionPower(
+                of: UUID(), to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+            XCTAssertFalse(changed, "a daemon that cannot be asked must not report a change")
+            XCTAssertNotNil(daemon.powerRequestNote,
+                            "and the menu must say why nothing happened, rather than showing a "
+                            + "row that silently does nothing")
+            done.fulfill()
+        }
+        await fulfillment(of: [done], timeout: 10)
+    }
+
+    /// **Asking once leaves the latch set**, so a second click reads a decision
+    /// instead of making a fresh attempt. Which value it holds depends on the
+    /// daemon this machine is running; that it is no longer `.unknown` does not,
+    /// and it is the half that decides whether anything is sent again.
+    func testAskingOnceLeavesNothingLeftToProbe() async {
+        XCTAssertEqual(ChangeSessionPowerGate.support, .unknown)
+        let daemon = DaemonConnection()
+        daemon.start()
+        _ = await daemon.changeSessionPower(
+            of: UUID(), to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+        XCTAssertNotEqual(ChangeSessionPowerGate.support, .unknown,
+                          "the first ask left nothing behind, so every later one probes again")
+    }
+
+    /// A daemon already known to be too old is refused **without being asked**,
+    /// and the refusal says which of the two "nothing happened" sentences it is.
+    ///
+    /// **What this cannot prove, stated rather than implied**: that the send is
+    /// really skipped. `DaemonConnection` builds its `NSXPCConnection` against a
+    /// Mach service with no injection point, so there is no way from here to
+    /// observe what was and was not put on the wire — the same limitation
+    /// `SafetyStopVerbGate`'s wiring has, and the reason the decision itself is a
+    /// pure function tested above. This pins the branch's *visible* behaviour;
+    /// that `changeSessionPower` consults it before encoding anything is
+    /// read-verified.
+    func testADaemonAlreadyKnownToBeTooOldGetsTheUnavailableSentence() async {
+        ChangeSessionPowerGate.record(.absent)
+        let daemon = DaemonConnection()
+        let changed = await daemon.changeSessionPower(
+            of: UUID(), to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+        XCTAssertFalse(changed)
+        XCTAssertEqual(daemon.powerRequestNote, menuPowerChangeUnavailableNote,
+                       "the note has to name the cause a user can act on — a restart — rather "
+                       + "than the one they cannot")
+    }
+
+    /// The client heals: a failed change runs through the same `handleDisconnect`
+    /// funnel as any other failed call, so the thing to prove is that the poll
+    /// path still runs to completion afterwards.
+    func testAFailedChangeLeavesTheConnectionPollingAndPublishing() async {
+        let daemon = DaemonConnection()
+        daemon.start()
+        _ = await daemon.changeSessionPower(
+            of: UUID(), to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+
+        let refreshed = expectation(description: "refresh() returned after the change")
+        Task { @MainActor in
+            await daemon.refresh()
+            refreshed.fulfill()
+        }
+        await fulfillment(of: [refreshed], timeout: 10)
+
+        let askedAgain = expectation(description: "a second change returned")
+        Task { @MainActor in
+            let changed = await daemon.changeSessionPower(
+                of: UUID(), to: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+            XCTAssertFalse(changed)
+            askedAgain.fulfill()
+        }
+        await fulfillment(of: [askedAgain], timeout: 10)
+    }
+}
+
 // MARK: - Plan 8 Task 7: the reason query must not be able to break the client
 
 /// **A daemon that cannot answer must cost nothing but the sentence.**

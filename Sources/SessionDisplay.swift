@@ -985,6 +985,111 @@ func menuWakeModeSuffix(_ mode: WakeMode) -> String {
     return " (\(tag))"
 }
 
+// MARK: - Changing a running session's mode, from the menu
+
+/// The one extra row a live session can earn: **the label and the request
+/// together**, or `nil` when this session gets no such row.
+///
+/// One value rather than a `label` function beside a `request` function, because
+/// those are two lists that must agree — "which rows are offered" and "what
+/// clicking one sends" — and the disagreement would be invisible: a row that
+/// appeared where it should not, or that sent a request other than the one it
+/// named. Here the view cannot draw a row without holding the request it will
+/// send, and cannot send a request no row named.
+struct MenuPowerPromotion: Equatable {
+    let label: String
+    let request: PowerRequest
+}
+
+/// **One row, only on the exception, and only in the direction that cannot take
+/// anything away.**
+///
+/// Plan 7 rebuilt this menu to remove per-row accumulation and forbids submenus,
+/// so a three-way mode picker per session row is out. What is offered instead is
+/// a single row that appears exactly where a session gives something up, and the
+/// rule for *when* is `menuWakeModeTag`'s own — annotate the exception, not the
+/// rule — so a user whose sessions are all lid-safe sees the menu unchanged.
+///
+/// ## Which sessions get it, and the correction to the brief that produced this
+///
+/// The brief said "a session whose mode is **not** `.clamshell`". That is one
+/// mode too many, and the extra one is not a promotion at all:
+///
+/// * `.system` → `.clamshell` is a **strict gain**. Both hold idle system sleep
+///   off and neither holds the display (`PowerPlan.reduce`), so the only
+///   difference is that the session starts surviving a lid close. Nothing is
+///   given up, so a misclick costs nothing.
+/// * `.systemAndDisplay` → `.clamshell` is a **trade**: it gains the lid and
+///   *loses* the display assertion, because no single `WakeMode` holds both —
+///   the shut lid sleeps the display in hardware, so `.clamshell` asking for it
+///   would be a contradiction. That is a real limitation of the three-point
+///   enum, and a one-line menu row cannot honestly describe a trade without
+///   growing the second clause this menu was rebuilt to remove. So it is not
+///   offered, and the mode's own tag goes on saying what the session is.
+///
+/// The CLI expresses both, flag by flag, at a keyboard where the caveat is
+/// printed beside the change — which is where a trade belongs.
+///
+/// **No demotion from here, in any direction.** Promotion cannot lose a user's
+/// work; a demotion by misclick can, and this is a menu that opens under the
+/// cursor. `keepy-uppy mode` does both.
+///
+/// ## What the label may claim
+///
+/// The **session**, never the machine. The daemon unions every live session's
+/// request, so a concurrent `.clamshell` session from another client already
+/// holds this Mac lid-shut regardless of what this row does — which makes any
+/// machine-wide phrasing here false exactly when two sessions are live.
+/// `menuLidCaveat` is the one line allowed to speak about the Mac.
+///
+/// The quoted form follows `menuStopLabel`'s, and for its reason: with more than
+/// one row a person can act on, a bare "this session" names nothing.
+///
+/// - Parameter isOnlyOneOfYours: whether this is the only session with rows of
+///   its own — the same question `menuStopLabel` asks, so the two rows for one
+///   session agree about whether they need to name it.
+func menuPowerPromotion(for session: Session, isOnlyOneOfYours: Bool,
+                        now: Date) -> MenuPowerPromotion? {
+    // Exhaustive, so a fourth `WakeMode` has to be given an answer here rather
+    // than inheriting one — and the answer is a question about power semantics
+    // ("is `.clamshell` strictly stronger than this?"), which is exactly the
+    // kind a `default` must not answer on somebody's behalf.
+    switch session.wakeMode {
+    case .clamshell, .systemAndDisplay:
+        return nil
+    case .system:
+        break
+    }
+    let subject = isOnlyOneOfYours
+        ? "this session"
+        : "“\(remainingTimeText(for: session, now: now).lowercased())”"
+    return MenuPowerPromotion(
+        label: "Make \(subject) survive a lid close",
+        // **The whole request, with the disk axis carried across.** The verb
+        // sets what the session asks for, so sending `keepsDisksAwake: false`
+        // here would silently switch off something the session asked for and
+        // nobody clicked on.
+        request: PowerRequest(wakeMode: .clamshell, keepsDisksAwake: session.keepsDisksAwake))
+}
+
+/// Why nothing happened when that row was clicked: the daemon on this Mac is too
+/// old to be asked at all, so the app did not ask.
+///
+/// It shares its remedy with `SessionPowerSkew.note` because it shares its cause
+/// — a root LaunchDaemon left running by the copy of the app that was replaced —
+/// and the sentence is named once, there, rather than typed twice.
+let menuPowerChangeUnavailableNote =
+    "This Mac's background service can't change a session that's already running. "
+    + SessionPowerSkew.olderDaemonRemedy
+
+/// Why nothing happened when the daemon *was* asked and said no.
+///
+/// It ends by saying what is still true, which is the part that matters: the
+/// daemon rolls a refused change back before replying, so the session is running
+/// exactly as it was rather than in some state nobody can name.
+let menuPowerChangeRefusedNote =
+    "This Mac wouldn't make that change, so the session is still running the way it was."
+
 /// The one machine-wide claim the menu is allowed to make, and the one surface
 /// that can honestly make it.
 ///
@@ -1148,14 +1253,22 @@ func wakeModeSettingsExplanation(_ mode: WakeMode) -> String {
 /// explicit `wakeMode: .clamshell`, so it is lid-safe whatever is stored here.
 /// Said as the positive fact about triggers, which stays true under the union.
 ///
-/// "from now on" is not filler. A session's mode is fixed when it starts —
-/// nothing here reaches a running one — and someone who switches this picker to
-/// the lid-closed mode expecting their live `.system` session to follow will
-/// shut the lid on a Mac that then sleeps. Two surfaces still tell the truth
-/// (that session's own tag in the menu, and `menuLidCaveat`), so this clause is
-/// a nudge rather than the guard; it is here because it costs three words and
-/// the failure it heads off is the one that loses work.
-let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."
+/// "from now on" is not filler, and the clause after it changed in Plan 8 Task
+/// 9. Nothing **in this pane** reaches a running session — moving this picker
+/// still cannot — and someone who switches it to the lid-closed mode expecting
+/// their live `.system` session to follow will shut the lid on a Mac that then
+/// sleeps. That is the failure this sentence heads off, and it costs a few words.
+///
+/// What it may no longer say is *"a session's mode is fixed when it starts"*,
+/// which is what this comment used to say and what the note implied. Task 8 made
+/// it false: a running session can be switched to the lid-closed mode from the
+/// menu (`menuPowerPromotion`) or with `keepy-uppy mode`. So the note points at
+/// the thing that *can* reach a running session instead of leaving a reader to
+/// conclude that nothing can — a nudge that sends someone to the surface that
+/// solves their problem is strictly better than one that tells them there isn't
+/// one. Two surfaces still tell the truth about what is in force right now (that
+/// session's own tag in the menu, and `menuLidCaveat`).
+let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on use this. A session that's already running keeps the mode it started with, though the menu can switch one to lid-closed. The command line picks a mode per session with its own flags, and an automatic trigger always keeps this Mac awake with the lid closed."
 
 // MARK: - The stored disk default
 
@@ -1222,8 +1335,15 @@ let keepDisksAwakeSettingsFootnote = "Attached disks stay spun up while the sess
 /// the two controls answer the same question about the same thing and a reader
 /// must not have to infer that the scope carries over.
 ///
-/// "from now on" is not filler here either: a session's request is fixed when it
-/// starts, and nothing in this pane reaches a running one.
+/// "from now on" is not filler here either: **nothing in this pane** reaches a
+/// running session. That clause is deliberately about the pane and not about the
+/// session, because since Plan 8 Task 8 "a session's request is fixed when it
+/// starts" would be false — `keepy-uppy mode` sets a running session's whole
+/// request, this axis included. The note's own mention of the command line
+/// therefore covers it already, which is why the sentence itself did not have to
+/// change and the note above it did: the menu's promote row is a *wake-mode* row
+/// and offers nothing on this axis, so there is nothing here to point a reader
+/// at that the existing clause does not.
 let keepDisksAwakeSettingsScopeNote = "Sessions you start from the menu from now on use this. The command line asks per session with \(keepDisksAwakeFlag), and an automatic trigger never asks for it."
 
 // MARK: - The CLI & Advanced pane

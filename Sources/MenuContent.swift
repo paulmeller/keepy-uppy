@@ -134,6 +134,36 @@ struct MenuContent: View {
         }
     }
 
+    /// The rows a session the user can act on gets: its Stop button, and — only
+    /// where a session has given up surviving a lid close — one row that gives
+    /// it back.
+    ///
+    /// **Whether that second row exists at all is `menuPowerPromotion`'s
+    /// decision, not this view's**, and it hands back the request as well as the
+    /// label. A view body cannot be tested, so the rule about which rows appear
+    /// and the request each one sends both live in the tested function; what is
+    /// left here is drawing what it returned. It is the same division
+    /// `menuSessionGroup` already gets, for the same reason.
+    ///
+    /// The promote row follows its own session's Stop row rather than being
+    /// collected into a section of its own, so the two rows about one session
+    /// are adjacent — and there is at most one of them per session, in the
+    /// uncommon case, so this is not the per-row accumulation Plan 7 removed.
+    ///
+    /// `notifier` is deliberately **not** told about this click, unlike the Stop
+    /// row above it: this ends nothing. Telling it would suppress a banner about
+    /// an ending that is not happening.
+    @ViewBuilder
+    private func sessionRows(for session: Session, now: Date) -> some View {
+        stopRow(for: session, now: now)
+        if let promotion = menuPowerPromotion(for: session,
+                                              isOnlyOneOfYours: stoppable.count == 1, now: now) {
+            Button(promotion.label) {
+                Task { await daemon.changeSessionPower(of: session.id, to: promotion.request) }
+            }
+        }
+    }
+
     var body: some View {
         let now = Date()
 
@@ -186,7 +216,7 @@ struct MenuContent: View {
             // only a binary meeting `SigningRequirement` is admitted as
             // `app-<uid>`, so this is us reading our own session's origin, not
             // taking another client's word for it.
-            ForEach(mine) { session in stopRow(for: session, now: now) }
+            ForEach(mine) { session in sessionRows(for: session, now: now) }
 
             // Only worth offering once there is more than one to sweep; with a
             // single session it would just duplicate the line above it, which
@@ -218,7 +248,16 @@ struct MenuContent: View {
             // mixed in above it because the sweep does not touch them, and a
             // "stop all" sitting under rows it will not stop is the kind of
             // near-miss this menu was rebuilt to remove.
-            ForEach(yoursAutomatic) { session in stopRow(for: session, now: now) }
+            // `sessionRows`, not `stopRow`, so a trigger session gets the
+            // promote row on the same terms as one of this app's own. It is
+            // unreachable today — `Agent/EvidenceLoopRunner.swift` builds every
+            // trigger session with an explicit `.clamshell`, so there is nothing
+            // to promote — and it is written this way deliberately rather than
+            // scoped to `mine`: `SessionIsolation.authorize` already permits the
+            // change for exactly this group, so a row here would be honoured,
+            // and a per-rule wake mode would otherwise arrive as a session whose
+            // menu row says "lid open only" with no way to fix it.
+            ForEach(yoursAutomatic) { session in sessionRows(for: session, now: now) }
 
             // Shown, never clickable — this user's command-line sessions, this
             // user's sessions from a client this build cannot name, and another

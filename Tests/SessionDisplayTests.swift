@@ -1174,6 +1174,123 @@ final class WakeModeMenuCopyTests: XCTestCase {
         XCTAssertFalse(line.contains(WakeMode.system.rawValue),
                        "a wire name has no business in the menu: \(line)")
     }
+
+    // MARK: - The one row that changes a running session (Plan 8 Task 9)
+
+    /// **Exactly the mode for which `.clamshell` takes nothing away gets a row**,
+    /// and the assertion is written against `PowerPlan.reduce` rather than
+    /// against a list of modes, so a fourth `WakeMode` has to be argued about
+    /// rather than inherited.
+    ///
+    /// The rule: promoting is offered only where the promoted plan is a superset
+    /// of the current one on every axis. `.system` qualifies; `.systemAndDisplay`
+    /// does not, because `.clamshell` does not hold the display — so that change
+    /// is a trade, not a promotion, and a one-line row cannot honestly offer a
+    /// trade. `.clamshell` has nothing to gain.
+    func testARowIsOfferedExactlyWhereClamshellTakesNothingAway() {
+        for mode in WakeMode.allCases {
+            let current = PowerPlan.reduce([PowerRequest(wakeMode: mode, keepsDisksAwake: false)])
+            let promoted = PowerPlan.reduce([PowerRequest(wakeMode: .clamshell,
+                                                          keepsDisksAwake: false)])
+            let isStrictGain = mode != .clamshell
+                && promoted.assertions.isSuperset(of: current.assertions)
+                && (promoted.sleepDisabled || !current.sleepDisabled)
+
+            let offered = menuPowerPromotion(for: session(mode), isOnlyOneOfYours: true,
+                                             now: t0) != nil
+            XCTAssertEqual(offered, isStrictGain,
+                           "\(mode.rawValue): a row may be offered only where switching to "
+                           + "clamshell gives up nothing this session already has")
+        }
+    }
+
+    /// **The row sends the whole request, disk axis included.** The verb behind
+    /// it sets what the session asks for, so a request built with
+    /// `keepsDisksAwake: false` would switch off something the session asked for
+    /// and nobody clicked on. Both values, so a hard-coded `true` fails too.
+    func testThePromotionCarriesTheDiskAnswerTheSessionAlreadyHad() {
+        for held in [false, true] {
+            guard let promotion = menuPowerPromotion(
+                for: session(.system, keepsDisksAwake: held), isOnlyOneOfYours: true, now: t0)
+            else { return XCTFail("expected a row for a .system session") }
+            XCTAssertEqual(promotion.request,
+                           PowerRequest(wakeMode: .clamshell, keepsDisksAwake: held),
+                           "the row must promote the mode and change nothing else")
+        }
+    }
+
+    /// The label describes the **session**, never the machine — `menuWakeModeTag`'s
+    /// rule, and it binds harder on a button: the daemon unions every live
+    /// session's request, so a concurrent `.clamshell` session already holds this
+    /// Mac lid-shut and any machine-wide claim here would be false exactly when
+    /// two sessions are live.
+    func testTheRowDescribesTheSessionAndNotTheMac() {
+        guard let promotion = menuPowerPromotion(for: session(.system), isOnlyOneOfYours: true,
+                                                 now: t0) else {
+            return XCTFail("expected a row")
+        }
+        XCTAssertTrue(promotion.label.contains("this session"), promotion.label)
+        XCTAssertTrue(promotion.label.lowercased().contains("lid"),
+                      "the row must name the axis it changes: \(promotion.label)")
+        XCTAssertFalse(promotion.label.lowercased().contains("mac"),
+                       "a per-session row cannot make a machine-wide claim: \(promotion.label)")
+        XCTAssertFalse(promotion.label.contains(WakeMode.clamshell.rawValue),
+                       "a wire name has no business in the menu: \(promotion.label)")
+    }
+
+    /// With more than one row a person can act on, "this session" names nothing —
+    /// so it names the session the way its own Stop row does. Same question, same
+    /// parameter, so the two rows for one session cannot disagree about whether
+    /// they need to say which one they mean.
+    func testWithSeveralActionableRowsThePromotionNamesItsSession() {
+        let timed = session(.system, kind: .duration(until: t0.addingTimeInterval(3600)))
+        guard let alone = menuPowerPromotion(for: timed, isOnlyOneOfYours: true, now: t0),
+              let among = menuPowerPromotion(for: timed, isOnlyOneOfYours: false, now: t0) else {
+            return XCTFail("expected a row in both cases")
+        }
+        XCTAssertTrue(alone.label.contains("this session"), alone.label)
+        XCTAssertTrue(among.label.contains("“1h 0m left”"),
+                      "with a second actionable row it must say which session: \(among.label)")
+        XCTAssertEqual(alone.request, among.request, "only the wording may differ")
+    }
+
+    /// **No demotion is offered from here, in any direction.** The row's request
+    /// is always the strongest mode: promoting cannot lose a user's work, and a
+    /// demotion by misclick in a menu that opens under the cursor can. The CLI
+    /// does both, at a keyboard, with the caveat printed beside it.
+    func testNoRowEverWeakensASession() {
+        for mode in WakeMode.allCases {
+            for held in [false, true] {
+                guard let promotion = menuPowerPromotion(
+                    for: session(mode, keepsDisksAwake: held), isOnlyOneOfYours: true, now: t0)
+                else { continue }
+                XCTAssertEqual(promotion.request.wakeMode, .clamshell,
+                               "\(mode.rawValue): the menu only ever offers the strongest mode")
+                XCTAssertEqual(promotion.request.keepsDisksAwake, held,
+                               "\(mode.rawValue): and never turns the other axis off")
+            }
+        }
+    }
+
+    /// The two sentences that explain a change that did not happen. They differ
+    /// in what a person can do next, which is the only reason there are two:
+    /// one is fixed by restarting this Mac, the other cannot be fixed by
+    /// anything the user does and instead says what is still true.
+    func testTheTwoUnchangedNotesSayDifferentThingsAndBothSayWhatIsStillTrue() {
+        XCTAssertTrue(menuPowerChangeUnavailableNote.hasSuffix(SessionPowerSkew.olderDaemonRemedy),
+                      "the remedy is named once and shared, not typed twice: "
+                      + menuPowerChangeUnavailableNote)
+        XCTAssertTrue(menuPowerChangeUnavailableNote.lowercased().contains("already running"),
+                      menuPowerChangeUnavailableNote)
+
+        XCTAssertNotEqual(menuPowerChangeRefusedNote, menuPowerChangeUnavailableNote)
+        XCTAssertFalse(menuPowerChangeRefusedNote.lowercased().contains("restart"),
+                       "restarting fixes an old daemon, not a refused write: "
+                       + menuPowerChangeRefusedNote)
+        XCTAssertTrue(menuPowerChangeRefusedNote.lowercased().contains("still running"),
+                      "a refused change is rolled back, and the note's job is to say the session "
+                      + "is unharmed: " + menuPowerChangeRefusedNote)
+    }
 }
 
 /// The stored default session kind — the oldest of the three preferences and
@@ -1414,9 +1531,8 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
     /// client's *future* sessions. Someone reading it must not conclude that a
     /// `keepy-uppy on` in a terminal, or a trigger firing while they are away,
     /// will follow it — neither does — nor that the session already running
-    /// changed mode when they moved the picker. A session's mode is fixed at
-    /// start; the picker cannot reach it. That last misreading is the one that
-    /// loses work: it ends with someone shutting the lid on a Mac that then
+    /// changed mode when they moved the picker. That last misreading is the one
+    /// that loses work: it ends with someone shutting the lid on a Mac that then
     /// sleeps.
     func testTheScopeNoteSaysWhichSessionsThisActuallyGoverns() {
         XCTAssertTrue(wakeModeSettingsScopeNote.contains("menu"), wakeModeSettingsScopeNote)
@@ -1430,6 +1546,25 @@ final class DefaultWakeModePreferenceTests: XCTestCase {
         // this preference says. Stated as the positive fact, which is the one
         // that stays true under the union.
         XCTAssertTrue(wakeModeSettingsScopeNote.contains("lid closed"), wakeModeSettingsScopeNote)
+    }
+
+    /// **The half of that note which stopped being true, and had to point
+    /// somewhere instead of asserting an absence.**
+    ///
+    /// Until Plan 8 Task 8 a session's mode really was fixed at start, and this
+    /// note's job was to head off the one misreading that loses work. The nudge
+    /// is still needed — moving the picker still does not reach a running
+    /// session — but "nothing can" is now false, and a nudge that says there is
+    /// no way to do the thing is worse than one that names the way.
+    ///
+    /// It must therefore say both halves: a running session keeps what it started
+    /// with, *and* the menu can change one. Neither alone is honest.
+    func testTheScopeNoteNamesTheThingThatCanReachARunningSession() {
+        XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("already running"),
+                      "the note must still say that moving this picker does not reach a live "
+                      + "session: " + wakeModeSettingsScopeNote)
+        XCTAssertTrue(wakeModeSettingsScopeNote.lowercased().contains("can switch"),
+                      "…and must now point at what does: " + wakeModeSettingsScopeNote)
     }
 }
 

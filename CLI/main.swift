@@ -196,6 +196,72 @@ case .off(.session(let id)):
         semaphore.signal()
     }
 
+case .mode(let id, let power):
+    // **The version probe comes first, and the mode change is only sent if it
+    // clears.** Plan 8 Task 1 measured that sending a verb the daemon does not
+    // implement invalidates the connection *server-side*, which in the real
+    // daemon ends every `clientBound` session the calling identity owns. So this
+    // asks `version` — a verb every daemon this project has ever shipped
+    // implements — and `DaemonCapability` decides, with every uncertain answer
+    // meaning "absent".
+    //
+    // Three things about the shape, in the order they will be asked:
+    //
+    // - **Nothing here is polled and nothing is latched**, and neither is an
+    //   omission. `keepy-uppy` is one invocation: it connects, sends at most one
+    //   probe and at most one change, and exits. Task 1's R1.2 exists because a
+    //   long-lived client rebuilds its connection every few seconds and would
+    //   re-arm a per-connection latch; a process that makes one call has nothing
+    //   to re-arm. The app's copy of this decision is `ChangeSessionPowerGate`,
+    //   where the latch is real and is `static`.
+    // - **This process's exposure to being wrong is nil, and that is
+    //   structural rather than lucky.** A teardown ends the `clientBound`
+    //   sessions owned by `cli-<uid>`, and `parseOn` gives every session this
+    //   binary starts `persistence: .detached` — so there are none. It is still
+    //   gated, because the gate is also what turns "the daemon tore the
+    //   connection down" into a sentence somebody can act on, and because that
+    //   structural fact is a property of `parseOn` today rather than a promise.
+    // - **The failure is reported, not silent.** An old daemon here means the
+    //   change did not happen, and saying so is the difference between a user
+    //   restarting their Mac and a user believing their session changed.
+    proxy.version { reply in
+        guard DaemonCapability.supports(.changeSessionPower, versionReply: reply) else {
+            FileHandle.standardError.write(
+                "keepy-uppy: \(cliOldDaemonCannotChangeASessionNote)\n".data(using: .utf8)!)
+            exitCode = 1
+            semaphore.signal()
+            return
+        }
+        guard let payload = try? JSONEncoder().encode(power) else {
+            FileHandle.standardError.write("keepy-uppy: internal error encoding request\n".data(using: .utf8)!)
+            exitCode = 1
+            semaphore.signal()
+            return
+        }
+        proxy.changeSessionPower(id, powerJSON: payload) { ok, error in
+            if ok {
+                // The whole request, in the words `keepy-uppy sessions` already
+                // prints — one description of a request, so the two surfaces
+                // cannot describe the same session differently.
+                print("Session \(id) now: \(power.sessionListDescription)")
+                // The same caveat `on` prints, on stderr, in the accepted
+                // branch, for the same reason and with more force: a wake-mode
+                // flag *removes* the lid-closed guarantee, neither flag's name
+                // mentions it, and here the session it is being removed from is
+                // one that is already running and may already be relied on.
+                // Reused rather than rewritten — a second sentence saying the
+                // same thing is a second sentence to keep true.
+                if let caveat = power.wakeMode.lidCloseCaveat {
+                    FileHandle.standardError.write("keepy-uppy: note: \(caveat)\n".data(using: .utf8)!)
+                }
+            } else {
+                FileHandle.standardError.write("keepy-uppy: \(error ?? "failed")\n".data(using: .utf8)!)
+                exitCode = 1
+            }
+            semaphore.signal()
+        }
+    }
+
 case .status(let json):
     proxy.currentState { disabled in
         if json {

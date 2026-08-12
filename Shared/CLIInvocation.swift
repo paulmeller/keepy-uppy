@@ -120,7 +120,10 @@ enum CLIBundleGuard {
         switch command {
         case .setup: return "setup"
         case .reset: return "reset"
-        case .on, .off, .status, .sessions, .finished: return nil
+        // `mode` is pure XPC, like `on` and `off`: it needs the daemon, never
+        // the bundle it was shipped in. Refusing it through the link would break
+        // a working verb for no gain.
+        case .on, .off, .mode, .status, .sessions, .finished: return nil
         }
     }
 

@@ -15,13 +15,26 @@ final class DaemonConnection: ObservableObject {
     @Published private(set) var keepingAwake = false
     @Published private(set) var isConnected = false
 
-    /// Set when the daemon admitted a session that does not carry the power
-    /// request this app sent — see `SessionPowerSkew`. `nil` whenever the last
-    /// start was honoured, which is every start against a matching daemon.
+    /// **The one line the menu shows when a power request did not fully land**,
+    /// and there are now three ways that happens. `nil` whenever everything was
+    /// honoured, which is every request against a matching daemon.
     ///
-    /// Recomputed on every `startSession`, and cleared when the last session
-    /// this app knows about goes away, because the sentence is about a *live*
-    /// session and would otherwise outlive the thing it describes.
+    /// 1. The daemon admitted a *start* that does not carry what was asked for
+    ///    (`SessionPowerSkew`, an older daemon's decoder dropping a key).
+    /// 2. The daemon is too old to be asked to *change* a running session at all
+    ///    (`ChangeSessionPowerGate` refused, so nothing was sent).
+    /// 3. The daemon was asked and said no — the machine would not enter that
+    ///    state, and it rolled the session back.
+    ///
+    /// One property and one menu line rather than three, because they are one
+    /// thing to a person reading it: *the power request you made is not what is
+    /// in force, and here is why*. Two of the three even share a remedy
+    /// (`SessionPowerSkew.olderDaemonRemedy`). Three published notes would be
+    /// three lines that could appear at once in a menu rebuilt to carry less.
+    ///
+    /// Recomputed on every request, and cleared when the last session this app
+    /// knows about goes away, because every sentence it can hold is about a
+    /// *live* session and would otherwise outlive the thing it describes.
     @Published private(set) var powerRequestNote: String?
 
     private var connection: NSXPCConnection?
@@ -255,6 +268,69 @@ final class DaemonConnection: ObservableObject {
         await refresh()
     }
 
+    /// Changes what a **running** session asks of this Mac, and reports whether
+    /// the daemon did it.
+    ///
+    /// `power` is a whole `PowerRequest` with no default, exactly like
+    /// `startSession(kind:power:)` above and for the identical reason: this verb
+    /// sets the session's whole request, so a caller that supplied one axis
+    /// would be silently resetting the other.
+    ///
+    /// **The gate is `ChangeSessionPowerGate`, and it is passed before anything
+    /// is sent** — see that type for what it can and cannot protect. What is
+    /// here is the sequencing: at most one version probe per process, then at
+    /// most one send, and a refusal turned into a sentence rather than into
+    /// silence. A menu row that did nothing and said nothing would be the
+    /// "button that silently does nothing" this menu was rebuilt to remove.
+    @discardableResult
+    func changeSessionPower(of sessionID: UUID, to power: PowerRequest) async -> Bool {
+        switch ChangeSessionPowerGate.nextStep(support: ChangeSessionPowerGate.support) {
+        case .refuse:
+            powerRequestNote = menuPowerChangeUnavailableNote
+            return false
+        case .askTheVersionFirst:
+            // Safe to send to any daemon: `version(reply:)` has existed since v2
+            // and the daemon serving this Mac answers it. This is the only
+            // probe, it happens at most once per process, and its answer is
+            // latched below whichever way it goes.
+            let reply = await version()
+            ChangeSessionPowerGate.record(
+                DaemonCapability.supports(.changeSessionPower, versionReply: reply)
+                    ? .present : .absent)
+            guard case .send = ChangeSessionPowerGate.nextStep(
+                support: ChangeSessionPowerGate.support) else {
+                powerRequestNote = menuPowerChangeUnavailableNote
+                return false
+            }
+        case .send:
+            break
+        }
+
+        guard let payload = try? JSONEncoder().encode(power) else { return false }
+        let changed: Bool? = await call { proxy, reply in
+            proxy.changeSessionPower(sessionID.uuidString, powerJSON: payload) { ok, error in
+                if let error { appLogger.error("changeSessionPower failed: \(error)") }
+                reply(ok)
+            }
+        }
+        // Refresh either way: on success the menu has to show the new mode, and
+        // on failure it has to go on showing the old one — which is what the
+        // daemon left running, since a refused change is rolled back there
+        // (`DaemonRuntime.changeSessionPower`).
+        await refresh()
+        guard let changed else {
+            // **Latched on failure, not on having asked** (Task 1's R1.2), for
+            // `recentSafetyStops()`'s reason: a failed call is what a missing
+            // verb looks like from here, and there is no reply to tell it apart
+            // from a daemon that merely went away.
+            ChangeSessionPowerGate.record(.absent)
+            powerRequestNote = menuPowerChangeUnavailableNote
+            return false
+        }
+        if !changed { powerRequestNote = menuPowerChangeRefusedNote }
+        return changed
+    }
+
     /// The daemon's version, or `nil` if it did not answer.
     ///
     /// **`nil` is the whole of "not connected", and deliberately so.** The
@@ -455,6 +531,100 @@ enum SafetyStopVerbGate {
         guard liveSessionsOfThisUser == 0 else { return .refuse(.sessionsAreStillLive) }
         switch support {
         case .absent: return .refuse(.daemonCannotAnswer)
+        case .unknown: return .askTheVersionFirst
+        case .present: return .send
+        }
+    }
+}
+
+// MARK: - The gate in front of the *other* verb an old daemon may not have
+
+/// **When this app may send `changeSessionPower`.**
+///
+/// A sibling of `SafetyStopVerbGate` above rather than a generalisation of it,
+/// and the difference between them is the whole reason both exist:
+///
+/// * That gate has **three** protections. The load-bearing one is structural —
+///   it refuses while this user owns any live session, so a wrong answer from
+///   the version gate costs nothing at all.
+/// * This one has **two**. That third protection is not merely unimplemented
+///   here, it is *unavailable in principle*: this verb's entire purpose is to
+///   act on a live session, so "refuse while a session is live" would refuse
+///   every call there will ever be.
+///
+/// Folding the two into one type would mean either dropping that gate from the
+/// verb that has it, or writing a flag that turns it off — and a flag that
+/// disables the load-bearing protection is exactly the thing a later change
+/// flips for the wrong verb. Each type names the protections its own verb has,
+/// and the two rules that must not drift between them are shared where they
+/// belong: `DaemonCapability` owns which build clears which verb, and Task 1's
+/// "every uncertain answer means absent" is written there, once.
+///
+/// So what is left here carries the whole weight:
+///
+/// 1. **Never polled.** There is no timer near this. Its callers are a menu row
+///    somebody clicked and a command somebody typed — at most a handful of times
+///    in a login session, and none at all for a user who never has a session in
+///    a mode worth promoting (the row does not appear otherwise). This is Task
+///    1's R1.1, and it is the protection a later change to this file cannot get
+///    wrong, because it is the absence of a caller.
+/// 2. **A version gate, probed once and latched, and the latch is `static`.**
+///    Task 1's R1.2: the `NSXPCConnection` is rebuilt 3 s after every failure,
+///    so a latch scoped to one would re-arm on every reconnect and reproduce the
+///    hazard at reconnect cadence. `.absent` is terminal.
+///
+/// **The residual risk, stated rather than buried**: `DaemonCapability`'s own
+/// comment records that a build number orders releases but does not identify
+/// source, so two local builds made without a bump share a number and this gate
+/// can clear a daemon that predates the verb on a developer's machine. For the
+/// other verb that is survivable because of gate 3. Here it is the whole
+/// exposure, and what it would cost is this app's own `clientBound` sessions.
+/// It is why `.changeSessionPower`'s build number was chosen against what is
+/// *installed* rather than against what `project.yml` tracked.
+@MainActor
+enum ChangeSessionPowerGate {
+    /// What is known about the daemon's ability to answer. Starts `.unknown`
+    /// once per process; `.absent` is terminal.
+    ///
+    /// Its own type rather than `SafetyStopVerbGate.Support`, so that "what this
+    /// process knows about verb A" and "…about verb B" cannot be assigned to
+    /// each other by accident. They are different facts about the same daemon,
+    /// and a daemon that has one verb and not the other is the ordinary state
+    /// during exactly the upgrade window these gates are for.
+    enum Support: Equatable {
+        case unknown
+        case present
+        case absent
+    }
+
+    /// What to do next. No `Refusal` reasons: there is only one, which is that
+    /// this daemon cannot answer — the other gate needs to tell two refusals
+    /// apart precisely because it has a second one.
+    enum Step: Equatable {
+        case askTheVersionFirst
+        case send
+        case refuse
+    }
+
+    private(set) static var support: Support = .unknown
+
+    /// Records what was learned. `.absent` is one-way: nothing this process
+    /// observes later can talk it back into asking.
+    static func record(_ learned: Support) {
+        guard support != .absent else { return }
+        support = learned
+    }
+
+    /// Test-only. Production has no path back to `.unknown` — see `record`.
+    static func resetForTesting() { support = .unknown }
+
+    /// Pure, so the decision is testable without an XPC connection —
+    /// `DaemonConnection` builds its `NSXPCConnection` against a Mach service
+    /// with no injection point, so the method around it is verifiable only by
+    /// reading plus a build.
+    static func nextStep(support: Support) -> Step {
+        switch support {
+        case .absent: return .refuse
         case .unknown: return .askTheVersionFirst
         case .present: return .send
         }

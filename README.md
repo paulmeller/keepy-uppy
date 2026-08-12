@@ -107,6 +107,7 @@ keepy-uppy on --while-vpn                    # until the tunnel drops
 keepy-uppy on --while-usb 05ac:024f          # until that device is unplugged
 keepy-uppy off                               # stop yours
 keepy-uppy off --all                         # stop everything
+keepy-uppy mode --session <id>               # change a running session, see below
 keepy-uppy status --json                     # {"keepingAwake": true}
 keepy-uppy sessions
 ```
@@ -153,6 +154,35 @@ Pick the default for a headless box or a docked laptop you'll shut; pick a flag
 when the Mac is open in front of you and you'd rather it behaved normally in
 every other respect. Settings → Display picks the mode for sessions you start
 from the menu bar.
+
+### Changing your mind, without restarting the session
+
+```sh
+keepy-uppy sessions                                   # find the id
+keepy-uppy mode --session <id>                        # lid can be shut
+keepy-uppy mode --session <id> --display-may-sleep    # lid open only
+keepy-uppy mode --session <id> --keep-disks-awake     # …and hold the disks
+```
+
+`mode` sets a **running** session's whole request, which matters because
+stopping and starting one is not the same thing: a `--while-volume` session
+restarted is a new session that won't end when the *original* drive goes, and a
+timed one starts its clock again.
+
+It takes exactly the flags `on` takes, and they mean exactly what they mean
+there — including when you leave one out. `mode --session <id>` with no flags
+sets the lid-closed mode and stops holding disks awake, because it sets the
+whole request rather than editing the one axis you mentioned. That's the same
+rule as `on` and it bites harder here, so `keepy-uppy mode` with no flags is
+worth reading twice.
+
+You can change sessions **you** started from a terminal; sessions started from
+the menu bar are the menu bar's, exactly as with `off --session`. The menu has a
+row of its own for this, on any of its sessions that gave up the closed lid.
+
+If the background service on this Mac is older than this build, `mode` says so
+and changes nothing — restart the Mac to pick up the new one, or stop the
+session and start a fresh one.
 
 One more flag, on an axis of its own — it combines with any wake mode and any
 `--while-…`:
@@ -257,6 +287,14 @@ started; stopping the session does.
 **It can still show you a session it can't stop.** A `keepy-uppy on` session of
 yours, and another account's sessions, are listed without a Stop button. End
 your own with `keepy-uppy off`, or let the condition or the duration end them.
+
+**One row changes a session instead of ending it.** A session of yours that gave
+up the closed lid — the ones tagged "lid open only" — gets a second row that
+switches it back, without restarting it. It only ever goes that way: switching
+*to* the lid-closed mode can't cost you anything, and switching away from it by
+a stray click can. `keepy-uppy mode` goes both ways, and it's also where to
+change a session that's holding the screen on, since no single mode both holds
+the screen and survives a shut lid.
 
 **Two notifications, both off until you turn one on:** when nothing of yours is
 keeping this Mac awake any more, and when a trigger starts a session. The app

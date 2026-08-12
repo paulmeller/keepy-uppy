@@ -95,6 +95,23 @@ enum SessionPowerSkew {
         Axis.allCases.filter { $0.differs(requested, admitted) }
     }
 
+    /// **The remedy, named once.**
+    ///
+    /// Two different sentences in this app end with it: this one, about a
+    /// request an old daemon dropped on the way in, and
+    /// `menuPowerChangeUnavailableNote`, about a *change* an old daemon is too
+    /// old to be asked for at all. Different problems, one cause and one fix —
+    /// the daemon is a root LaunchDaemon that keeps running across app updates,
+    /// so nothing short of a restart replaces it.
+    ///
+    /// It lives here rather than beside the menu copy because this is the type
+    /// whose whole subject is what an older daemon costs, and because the menu's
+    /// copy file cannot be seen from the CLI or the daemon while this can. Two
+    /// copies of it would drift, and the one that drifts is always the one whose
+    /// file never mentions the other.
+    static let olderDaemonRemedy =
+        "It's an older build than this app — restarting this Mac starts the new one."
+
     /// The sentence to show, or `nil` when the request survived intact —
     /// which is the overwhelmingly common case and must say nothing at all.
     ///
@@ -112,6 +129,6 @@ enum SessionPowerSkew {
         // a comma-joined list of two reads as a truncated one.
         let listed = phrases.count == 1 ? phrases[0] : phrases.joined(separator: " and ")
         return "This session is running, but the background service ignored \(listed). "
-            + "It's an older build than this app — restarting this Mac starts the new one."
+            + olderDaemonRemedy
     }
 }
