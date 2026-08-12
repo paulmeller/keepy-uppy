@@ -179,9 +179,19 @@ enum DaemonRemoval {
             // is not going to clear the setting whether or not it stays
             // registered" — is true of a daemon that is *gone* and false of one
             // flavour of this case. A daemon from a build predating
-            // `prepareForRemoval` replies "does not implement selector", which
-            // lands here, and that daemon is alive, ticking, and would converge
-            // if it were asked in a vocabulary it knows. The window is real
+            // `prepareForRemoval` does not reply at all: an unimplemented verb
+            // is not a per-call error but a destroyed connection — the caller's
+            // error handler fires with `NSCocoaErrorDomain` 4097
+            // (`xpcConnectionInterrupted`), no reply is ever delivered, and the
+            // *server* side of the connection is invalidated too. Measured over
+            // an isolated `NSXPCListener.anonymous()`, never against a live
+            // daemon: `Tests/UnimplementedVerbProbeTests.swift`. So it reaches
+            // the same error handler an absent daemon reaches and lands here —
+            // while that daemon is alive, ticking, and would converge if it were
+            // asked in a vocabulary it knows. The server-side teardown is not a
+            // partial converge, either: on its own it ends only that caller's
+            // `clientBound` sessions, so a `detached` session — or anyone
+            // else's — still holds this Mac. The window is real
             // rather than theoretical: the job is launched on demand and
             // respawned only after an unsuccessful exit, so an in-place bundle
             // overwrite restarts nothing, and the old process does not notice

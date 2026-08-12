@@ -393,9 +393,11 @@ case .reset:
                 // this target — and it is the difference between telling a user
                 // what to go and check and telling them what is true of their
                 // Mac. It matters most in the case the note reads oddest for: a
-                // daemon too old to know `prepareForRemoval` answers "does not
-                // implement selector" and lands here while still alive and
-                // still holding the setting on.
+                // daemon too old to know `prepareForRemoval` never answers it —
+                // an unimplemented verb interrupts the connection instead of
+                // erroring per message (`Tests/UnimplementedVerbProbeTests.swift`,
+                // and `DaemonRemoval.next(after:)` for what that costs) — so it
+                // lands here while still alive and still holding the setting on.
                 FileHandle.standardError.write(
                     "keepy-uppy: \(DaemonRemoval.unreachableNote(sleepStillDisabled: PowerControl.sleepDisabled()))\n"
                         .data(using: .utf8)!)
