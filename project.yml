@@ -56,6 +56,16 @@ targets:
       # this onto a second target: nothing outside `Sources/` imports
       # UserNotifications.
       - sdk: UserNotifications.framework
+      # THIS TARGET ONLY, and it is the one framework here that would be
+      # actively wrong anywhere else. Global hot keys are `RegisterEventHotKey`
+      # (spec §4 chose it over an event tap because it needs no Accessibility
+      # grant), which lives in Carbon's HIToolbox — and a keyboard shortcut is
+      # meaningless to the root daemon, the CLI and the agent, none of which has
+      # a keyboard or a run loop that receives one. `Sources/HotKey.swift` and
+      # `Sources/HotKeyCenter.swift` are therefore in `Sources/` rather than
+      # `Shared/`: putting them in `Shared/` is what would drag this framework
+      # onto the other three targets.
+      - sdk: Carbon.framework
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist

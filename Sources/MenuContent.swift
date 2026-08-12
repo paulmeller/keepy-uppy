@@ -30,28 +30,27 @@ struct MenuContent: View {
     @AppStorage(DefaultKeepDisksAwakePreference.key, store: PreferencesSuite.defaults)
     private var defaultKeepDisksAwake: Bool = DefaultKeepDisksAwakePreference.fallback
 
-    /// Settings' General tab writes the raw value; an unrecognised one (an
-    /// enum case removed in a later version, say) falls back rather than
-    /// dropping the quick-start entry entirely.
-    private var defaultKind: DefaultSessionKind {
-        DefaultSessionKind(rawValue: defaultKindRaw) ?? .indefinite
+    /// The whole of what the leading Start row will start, assembled once.
+    ///
+    /// `MenuDefaultStart` rather than three properties and a `PowerRequest`
+    /// built inline, because this menu is no longer the only thing that starts
+    /// "what the menu would start": the `.startDefaultSession` global hot key
+    /// does too, and it has no view to read `@AppStorage` from. Both build this
+    /// type, so an axis added to the stored default reaches both — which is the
+    /// drift the disk axis would already have caused, having arrived after the
+    /// hot key was first sketched against "the same two values".
+    ///
+    /// Each fallback stays named in its own preference type rather than
+    /// repeated here: a wrong wake-mode fallback silently starts weaker
+    /// sessions than the user asked for and looks identical in every surface.
+    private var defaultStart: MenuDefaultStart {
+        MenuDefaultStart(kindRawValue: defaultKindRaw,
+                         wakeModeRawValue: defaultWakeModeRaw,
+                         keepsDisksAwake: defaultKeepDisksAwake)
     }
 
-    /// Same arrangement, one file further out: the fallback is named in
-    /// `DefaultWakeModePreference` rather than repeated here, because unlike
-    /// the kind above — where a wrong fallback shows the wrong duration and is
-    /// obvious — a wrong wake-mode fallback silently starts weaker sessions
-    /// than the user asked for, and looks identical in every surface.
-    private var defaultWakeMode: WakeMode {
-        DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
-    }
-
-    /// The whole request these rows will start, assembled once. Every start
-    /// button reads this rather than passing axes individually, so a row cannot
-    /// start a session with one of them left behind.
-    private var defaultPower: PowerRequest {
-        PowerRequest(wakeMode: defaultWakeMode, keepsDisksAwake: defaultKeepDisksAwake)
-    }
+    private var defaultKind: DefaultSessionKind { defaultStart.kind }
+    private var defaultWakeMode: WakeMode { defaultStart.power.wakeMode }
 
     /// Every live session with the row it has earned, computed once per
     /// rebuild. The decision itself is `menuSessionGroup` — a pure function in
@@ -172,17 +171,19 @@ struct MenuContent: View {
         // made once, not a per-start choice.
         Button(menuStartLabel(defaultKind, wakeMode: defaultWakeMode,
                               keepsDisksAwake: defaultKeepDisksAwake)) {
+            let start = defaultStart
             Task {
-                await daemon.startSession(kind: defaultKind.sessionKind(now: Date()),
-                                          power: defaultPower)
+                await daemon.startSession(kind: start.sessionKind(now: Date()),
+                                          power: start.power)
             }
         }
         ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
             Button(menuStartLabel(kind, wakeMode: defaultWakeMode,
                                   keepsDisksAwake: defaultKeepDisksAwake)) {
+                let power = defaultStart.power
                 Task {
                     await daemon.startSession(kind: kind.sessionKind(now: Date()),
-                                              power: defaultPower)
+                                              power: power)
                 }
             }
         }

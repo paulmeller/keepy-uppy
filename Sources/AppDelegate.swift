@@ -15,6 +15,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// concern inside the XPC client would be policy in the transport.
     let notifier = SessionNotifier()
 
+    /// The global shortcuts, and the only thing in this app that can act
+    /// without the menu being open.
+    ///
+    /// It holds no policy: `HotKeyCenter` knows how to register a combination
+    /// and how to say why it could not, and `performHotKeyAction` below routes
+    /// what fires into the same two calls the menu's own rows make. Nothing
+    /// here can do something the menu cannot.
+    let hotKeys = HotKeyCenter()
+
     private var subscriptions: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -53,5 +62,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &subscriptions)
 
         daemon.start()
+        startHotKeys()
+    }
+
+    /// **Nothing is bound unless the launch environment names it, and there is
+    /// deliberately no preference behind this yet.**
+    ///
+    /// A stored binding is what the next task adds. Until then the only way to
+    /// arm one is an environment variable, because the alternative is not
+    /// merely untidy: `PreferencesSuite.name` is the *production* domain
+    /// outside XCTest, the installed app reads it live through `@AppStorage`,
+    /// and a stored binding outlives the process that wrote it. A "temporary
+    /// default" written from a development build would therefore arm an
+    /// arbitrary global shortcut in the user's shipping app and leave it armed
+    /// after the development build quit — the header's promise that the system
+    /// unregisters at termination ends the *registration*, not the *binding*.
+    ///
+    /// `#if DEBUG` as well as an environment variable, so a Release build
+    /// cannot be driven this way at all.
+    private func startHotKeys() {
+        hotKeys.perform = { [weak self] action in
+            // Carbon dispatches on the main thread, but `perform` is not
+            // main-actor-isolated (it is called from a C function pointer), so
+            // the hop is stated rather than assumed.
+            Task { @MainActor in self?.performHotKeyAction(action) }
+        }
+        #if DEBUG
+        let bindings = hotKeyDebugBindings(in: ProcessInfo.processInfo.environment)
+        guard !bindings.isEmpty else { return }
+        appLogger.log("Applying \(bindings.count) development hot key binding(s) from the environment")
+        hotKeys.apply(bindings)
+        for (action, failure) in hotKeys.failures {
+            appLogger.error("Hot key \(action.rawValue, privacy: .public) not registered: \(String(describing: failure))")
+        }
+        #endif
+    }
+
+    /// Both arms call exactly what `MenuContent`'s own rows call.
+    ///
+    /// The `notifier.appWillStop` line is not optional garnish: it is marked
+    /// **before** the call and synchronously, so that the commonest way for the
+    /// last session to end — this very keystroke — cannot produce a banner
+    /// explaining the keystroke back to the person who just made it. The menu's
+    /// Stop rows do the same thing for the same reason.
+    private func performHotKeyAction(_ action: HotKeyAction) {
+        switch action {
+        case .startDefaultSession:
+            let start = MenuDefaultStart(readingFrom: PreferencesSuite.defaults)
+            appLogger.log("Hot key: starting the menu's default session")
+            Task {
+                await daemon.startSession(kind: start.sessionKind(now: Date()),
+                                          power: start.power)
+            }
+        case .stopAppSessions:
+            // Exactly the set `stopAllSessions(all: false)` will end —
+            // `SessionIsolation` scopes it to this client's own `ClientID`,
+            // which is what `.thisApp` means. This user's own trigger and
+            // command-line sessions are deliberately not in it; see
+            // `HotKeyAction.stopAppSessions`.
+            let userID = UInt32(getuid())
+            let mine = daemon.sessions.filter {
+                menuSessionGroup(for: $0, userID: userID) == .thisApp
+            }
+            appLogger.log("Hot key: stopping \(mine.count) session(s) started from the menu")
+            notifier.appWillStop(sessionIDs: mine.map(\.id))
+            Task { await daemon.stopAllSessions(all: false) }
+        }
     }
 }
