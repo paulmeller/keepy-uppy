@@ -62,9 +62,13 @@ finishes — whether that's a build, an agent run, or an eight-hour render.
 
 ## Get started
 
-Grab the notarized `.dmg` from [Releases](../../releases), drag it to
-`/Applications`, open it, and hit **Enable Keepy Uppy**. macOS asks you to
-approve the background services once. That's it.
+```sh
+brew install --cask paulmeller/tap/keepy-uppy
+```
+
+Or grab the notarized `.dmg` from [Releases](../../releases) and drag it to
+`/Applications`. Either way: open it and hit **Enable Keepy Uppy**. macOS asks
+you to approve the background services once. That's it.
 
 Headless box that'll never run the app?
 
