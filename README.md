@@ -22,10 +22,11 @@ Close the lid. Walk away.
 clamshell, on battery, with nothing plugged in. That takes a privileged daemon
 and a system-level power setting, which is exactly what Keepy Uppy ships.
 
-**It's a command line first, an app second.** The daemon is the product. The
-menu bar is optional. Every session, every guard and every trigger is reachable
-from a script, from CI, from a Shortcut and over SSH — because the CLI talks to
-the same daemon the UI does.
+**Most people will only ever open the menu bar.** Drag it to Applications, hit
+Enable, and every session, guard and trigger is a click away — no terminal
+required. What's underneath is a daemon, not the app, so the same things are
+just as reachable from a script, from CI, from a Shortcut and over SSH, because
+the CLI talks to the same daemon the UI does.
 
 ```sh
 ssh mac-mini 'zsh -lc "keepy-uppy on --for 8h"'
@@ -293,12 +294,13 @@ notifications and nothing else. The one thing macOS asks you to approve to
 *use* Keepy Uppy is still the pair of background Login Items, once, when you
 enable it.
 
-## The menu bar, if you want one
+## The menu bar
 
-The app is optional, and it's where you watch what's running. The menu lists
-every live session, and each row says where its session came from: you started
-it, one of your own rules started it automatically, it came from a terminal, or
-it belongs to another account on this Mac.
+It's the whole interface for most people, and it's where you watch what's
+running — nothing here requires the terminal at all. The menu lists every live
+session, and each row says where its session came from: you started it, one of
+your own rules started it automatically, it came from a terminal, or it belongs
+to another account on this Mac.
 
 **A session your own rule started has a Stop button.** So does one you started
 here. The daemon otherwise scopes every stop to the client that asked — that's
