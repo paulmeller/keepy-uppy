@@ -408,9 +408,6 @@ state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
 by **976 unit tests**.
 
-Full design rationale, including the roads not taken:
-[`docs/superpowers/specs/`](docs/superpowers/specs/).
-
 ## Build it yourself
 
 ```sh
