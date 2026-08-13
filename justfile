@@ -14,6 +14,7 @@ dmg_path := derived_data + "/" + app_name + ".dmg"
 signing_identity := env_var_or_default("KEEPY_UPPY_SIGNING_IDENTITY", "")
 team_id := env_var_or_default("KEEPY_UPPY_TEAM_ID", "")
 notary_profile := env_var_or_default("KEEPY_UPPY_NOTARY_PROFILE", "")
+cask_tap := env_var_or_default("KEEPY_UPPY_CASK_TAP", "../homebrew-tap")
 
 generate:
     xcodegen generate
@@ -110,3 +111,35 @@ notarize: bump dmg
         --wait
     xcrun stapler staple "{{dmg_path}}"
     @echo "shipped $(plutil -extract CFBundleShortVersionString raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist") ($(plutil -extract CFBundleVersion raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist"))"
+
+# Point the Homebrew cask at a release that is already published:
+# `just cask v0.1.1`.
+#
+# Hashes the *published* asset rather than the one in {{derived_data}}. A
+# sha256 taken from the local build is right only for as long as the two
+# stay byte-identical, and nothing enforces that they do — hashing what
+# users will actually download is the only version of this that cannot
+# drift silently. `curl -f` is what turns a wrong tag into a failure here
+# rather than a cask nobody can install.
+#
+# Deliberately NOT chained to `notarize`. That recipe staples a DMG; it
+# does not publish one. The URL written here doesn't exist until the
+# release has been created, and a cask pointing at a 404 is worse than a
+# cask one version behind.
+cask tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cask="{{cask_tap}}/Casks/keepy-uppy.rb"
+    test -f "$cask" || { echo "no cask at $cask — set KEEPY_UPPY_CASK_TAP"; exit 1; }
+    url="https://github.com/paulmeller/keepy-uppy/releases/download/{{tag}}/Keepy.Uppy.dmg"
+    tmp="$(mktemp -t keepy-uppy-cask)"
+    trap 'rm -f "$tmp"' EXIT
+    echo "hashing $url"
+    curl -fsSL -o "$tmp" "$url"
+    sha="$(shasum -a 256 "$tmp" | cut -d' ' -f1)"
+    version="$(echo '{{tag}}' | sed 's/^v//')"
+    sed -i '' -e "s|^  version \".*\"$|  version \"$version\"|" \
+              -e "s|^  sha256 \".*\"$|  sha256 \"$sha\"|" "$cask"
+    echo "cask -> $version"
+    echo "        $sha"
+    echo "commit and push {{cask_tap}} to publish it"
