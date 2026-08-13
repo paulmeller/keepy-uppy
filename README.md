@@ -27,15 +27,6 @@ and trigger is one click away, and you never have to open a terminal. Unless
 you want to: underneath is a daemon, not an app, so all of it is just as
 reachable from a script, from CI, from a Shortcut and over SSH.
 
-```sh
-ssh mac-mini 'zsh -lc "keepy-uppy on --for 8h"'
-```
-
-The login shell isn't decoration. A command sent over `ssh` runs in a non-login
-shell whose `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`, so a bare `keepy-uppy`
-isn't found there no matter where you installed it. Ask for a login shell, as
-above, or give the full path to the binary inside the app bundle.
-
 **It knows when to stop.** Most keep-awake tools do what you tell them, right
 up until your laptop is at 96°C in a backpack with 3% battery. Keepy Uppy has
 guards that end sessions when it's overheating, when the battery is running
