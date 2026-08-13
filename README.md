@@ -218,9 +218,6 @@ still does exactly what it always did.
 configuration profile change when the lock kicks in, and an app isn't allowed to
 install one — the setting is yours to change in System Settings → Lock Screen.
 
-*All three flags, the picker and that switch are on `main` only — the current
-download predates them. See [Status](#status).*
-
 CLI sessions outlive the shell that started them. Menu-bar sessions end when
 you quit the app. That's deliberate — one is for automation, the other is for
 you.
@@ -296,9 +293,6 @@ notifications and nothing else. The one thing macOS asks you to approve to
 *use* Keepy Uppy is still the pair of background Login Items, once, when you
 enable it.
 
-*Six of those nine conditions are on `main` only — the current download has
-three. See [Status](#status).*
-
 ## The menu bar, if you want one
 
 The app is optional, and it's where you watch what's running. The menu lists
@@ -356,9 +350,6 @@ sweep away something you didn't name. macOS won't tell an app that another app
 already owns a combination, so a shortcut that never fires is almost always one
 that's already taken; pick another.
 
-*Notifications, the shortcuts and the Install button are on `main` only — the
-current download has none of them. See [Status](#status).*
-
 ## Safety, in detail
 
 Configurable in Settings → Safety & Guards, and enforced by the daemon
@@ -415,7 +406,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **975 unit tests**.
+by **976 unit tests**.
 
 Full design rationale, including the roads not taken:
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
@@ -441,12 +432,13 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 975 tests on `main`, and
-a privilege boundary that's been through three adversarial review passes. What
-it hasn't had yet is months on other people's hardware, and seven claims above
-have never been watched happen on a real machine:
+**v0.1 — new, and moving fast.** Signed and notarized, 976 tests, and a
+privilege boundary that's been through three adversarial review passes. What
+it hasn't had yet is months on other people's hardware. Closed-lid behaviour
+over a real job is verified — a live session was watched surviving a genuine
+lid close on real hardware, confirmed against macOS's own sleep/wake log
+rather than taken on faith — but six other claims above have not:
 
-- closed-lid behaviour over a long job — the headline claim;
 - the thermal and battery guards actually firing;
 - a VPN going *down* under a live session (there was exactly one VPN on the Mac
   this was written on and it was already up; planting a fake one needs root);
@@ -465,26 +457,22 @@ have never been watched happen on a real machine:
   an installed service — the one on the machine this was written on is older
   than the requests it would have to answer.
 
-All seven are designed for and covered as far as a test process can reach, which
+All six are designed for and covered as far as a test process can reach, which
 is not the same thing.
 [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
 what only hardware can settle.
 
-**Most of this page is `main`, not the download.** The build on
-[Releases](../../releases) is **v0.1.0**, and `main` is more than seventy
-commits past it — its own notes say 182 tests. It knows `--for`, `--until`,
-`--while-app` and three trigger conditions, and that is the lot: no
-`--while-process` and no `keepy-uppy finished`, so none of the AI-coding-agent
-wiring above; no wake modes, no `--keep-disks-awake`, and neither of the
-Settings controls that go with them; no `keepy-uppy mode`, so a session's
-request is fixed the moment it starts; no per-rule wake mode or lifetime on a
-trigger; and none of
-`--while-display`, `--while-ac-power`, `--while-cpu-busy`, `--while-volume`,
-`--while-subnet`, `--while-vpn` or `--while-usb`, nor the six trigger
-conditions that arrived with them. Its Settings window has three tabs rather
-than five, and none of the app's newer surfaces: no notifications, no keyboard
-shortcuts, and no button to put `keepy-uppy` on your `PATH`. Nothing since has
-been notarized into a release, so build it yourself if you want any of it now.
+**This page describes the current download.** [Releases](../../releases) has
+**v0.1.1**, and it's current in every way that matters — everything above is
+in it: wake modes, `--keep-disks-awake`, `keepy-uppy mode`, all nine trigger
+conditions, per-rule wake mode and lifetime, the five-tab Settings window,
+notifications, keyboard shortcuts, and the `PATH` install button. `main` is
+two commits ahead, both documentation only.
+
+An earlier **v0.1.0** is also on Releases, for anyone who wants the smaller,
+first-notarized build: `--for`, `--until`, `--while-app`, and three trigger
+conditions only — none of the AI-coding-agent wiring, wake modes, or anything
+else added since.
 
 If something misbehaves, an issue with the daemon log is genuinely useful:
 
