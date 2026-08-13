@@ -100,7 +100,7 @@ struct SafetySettingsTab: View {
             } header: {
                 Text("Session Limit")
             } footer: {
-                Text("A backstop for a session that was started and forgotten. It applies to every session, including ones started from the command line.")
+                Text("A backstop for a session that was started and forgotten. It spends only time on battery, so a Mac left on mains power is never stopped by it, and plugging in pauses the budget rather than refunding it. It applies to every session, including ones started from the command line.")
                     .settingsFootnote()
             }
         }

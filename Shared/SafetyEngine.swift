@@ -130,6 +130,31 @@ struct SafetyEngine {
     /// head start on the cooldown clock.
     private var recoveredSince: Date?
 
+    /// Battery time the current run of sessions has spent, and the reading it
+    /// was last measured from.
+    ///
+    /// The backstop is a budget of *battery* time rather than wall clock,
+    /// because the risk it guards against is a forgotten session flattening a
+    /// battery or cooking a closed laptop in a bag — neither of which a
+    /// mains-powered Mac is doing. Timing wall clock instead ended the exact
+    /// session `keepy-uppy on` exists to hold open.
+    ///
+    /// It has to be *accrued* rather than measured from an unplug instant, for
+    /// the failure either alternative produces:
+    ///
+    /// - Gating a wall-clock check on `onBattery` stops everything the moment
+    ///   the charger leaves a Mac that has been plugged in all day, since
+    ///   `age >= maximum` is already true. A guard that fires on unplugging is
+    ///   worse than no guard, because it fires exactly when the user is leaving.
+    /// - Restarting the clock on each unplug means a laptop that touches a
+    ///   charger occasionally never reaches the backstop at all.
+    ///
+    /// Like `pendingWarning` and `recoveredSince`, this is engine-local and so
+    /// starts fresh if the daemon restarts under a live session. That is the
+    /// existing behaviour of every other clock here, not a new gap.
+    private var batteryTimeAccrued: TimeInterval = 0
+    private var batteryClockLastRead: Date?
+
     init(config: SafetyConfig) { self.config = config }
 
     /// True while a trigger-driven start must not be honoured. Manual starts
@@ -137,6 +162,7 @@ struct SafetyEngine {
     var triggersSuppressed: Bool { suppressionReason != nil }
 
     mutating func evaluate(_ inputs: SafetyInputs) -> SafetyOutcome {
+        advanceBatteryClock(inputs)
         releaseSuppressionIfClear(inputs)
 
         guard let reason = breach(inputs) else {
@@ -171,6 +197,27 @@ struct SafetyEngine {
         return .stopAll(reason: reason)
     }
 
+    /// Accrues battery time between readings, and only between readings: a
+    /// stretch the engine never saw is a stretch nobody can vouch for.
+    private mutating func advanceBatteryClock(_ inputs: SafetyInputs) {
+        // Nothing to time, and the next run must start from zero rather than
+        // inherit a spent budget.
+        guard inputs.oldestSessionAge != nil else {
+            batteryTimeAccrued = 0
+            batteryClockLastRead = nil
+            return
+        }
+        guard inputs.onBattery else {
+            // Pause, keeping what has been spent.
+            batteryClockLastRead = nil
+            return
+        }
+        if let last = batteryClockLastRead {
+            batteryTimeAccrued += inputs.now.timeIntervalSince(last)
+        }
+        batteryClockLastRead = inputs.now
+    }
+
     private func breach(_ inputs: SafetyInputs) -> SafetyReason? {
         if let limit = config.thermalSensitivity.limit(lidClosed: inputs.lidClosed),
            inputs.thermal >= limit {
@@ -180,8 +227,8 @@ struct SafetyEngine {
            let effective = config.effectiveBatteryCutoff(lidClosed: inputs.lidClosed) {
             if level <= effective { return .lowBattery }
         }
-        if let maximum = config.maxSessionDuration, let age = inputs.oldestSessionAge,
-           age >= maximum {
+        if let maximum = config.maxSessionDuration, inputs.onBattery,
+           batteryTimeAccrued >= maximum {
             return .maxDuration
         }
         return nil
@@ -226,7 +273,12 @@ struct SafetyEngine {
             // re-breaching in the same evaluation.
             return (inputs.batteryPercentage ?? 100) > cutoff + config.batteryHysteresis
         case .maxDuration:
-            return (inputs.oldestSessionAge ?? 0) < (config.maxSessionDuration ?? .infinity)
+            // Mirrors `breach`: plugging in removes the danger outright, and
+            // otherwise the budget has to have actually come back — which it
+            // does when the stopped sessions leave and `advanceBatteryClock`
+            // resets the accrual.
+            if !inputs.onBattery { return true }
+            return batteryTimeAccrued < (config.maxSessionDuration ?? .infinity)
         }
     }
 }

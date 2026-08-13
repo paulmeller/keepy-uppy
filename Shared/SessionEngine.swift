@@ -145,17 +145,22 @@ struct SessionEngine {
     var desiredPowerPlan: PowerPlan { table.desiredPowerPlan }
     var desiredKeepAwake: Bool { table.desiredKeepAwake }
 
-    /// Mirrors `SafetyConfig.default.maxSessionDuration` (8 hours): the
-    /// absolute ceiling any session, including a renewed lease, may run for
-    /// from its `startedAt`. Duplicated here — rather than `SessionEngine`
-    /// taking a `SafetyConfig` dependency — because `SessionEngine` is a
+    /// The absolute ceiling a **renewed lease** may run for from its
+    /// `startedAt`. Duplicated here — rather than `SessionEngine` taking a
+    /// `SafetyConfig` dependency — because `SessionEngine` is a
     /// dependency-free pure reducer, and this check is defense-in-depth
     /// against `renewLease` alone scheduling a deadline further out than
-    /// the safety backstop would ever honour, not a replacement for that
-    /// backstop (which remains `SafetyEngine`'s job and is keyed off
-    /// session age, not the kind's own deadline). If the two ever need to
-    /// diverge, tighten this one, not loosen it — it is enforced
-    /// independently of whether `SafetyEngine` happens to be wired up.
+    /// anything would ever honour. It is not a replacement for the safety
+    /// backstop, which remains `SafetyEngine`'s job.
+    ///
+    /// **It no longer mirrors `SafetyConfig.default.maxSessionDuration`, and
+    /// deliberately so.** That backstop now spends a budget of *battery* time
+    /// and never fires on mains, so on a plugged-in Mac it is the looser of the
+    /// two and this 8 hours is the binding limit on a lease. That is the
+    /// direction the original note sanctioned — "if the two ever need to
+    /// diverge, tighten this one, not loosen it" — and it still holds: this
+    /// number is enforced whether or not `SafetyEngine` is wired up, so it must
+    /// never be raised to chase the backstop.
     static let maxSessionDuration: TimeInterval = 8 * 3600
 
     /// Starts a session, subject to `SessionAdmission`'s caps. The decision

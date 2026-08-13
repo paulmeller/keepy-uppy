@@ -516,9 +516,13 @@ func batteryGuardFootnote(_ config: SafetyConfig) -> String {
     return "On battery, sessions stop at \(open)% — or \(closed)% with the lid closed, where this Mac can't cool itself as well."
 }
 
+/// Says "on battery" because the number alone reads as wall clock, which is
+/// what this backstop used to measure and no longer does. A user who reads "8
+/// hours" beside a stepper and then watches a mains-powered session run for
+/// three days has been told something false by a label that was only terse.
 func maxSessionLengthLabel(_ config: SafetyConfig) -> String {
     let hours = Int((config.maxSessionDuration ?? 0) / 3600)
-    return hours == 1 ? "1 hour" : "\(hours) hours"
+    return hours == 1 ? "1 hour on battery" : "\(hours) hours on battery"
 }
 
 // MARK: - Background service status

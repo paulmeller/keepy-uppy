@@ -42,9 +42,26 @@ final class SafetyEngineTests: XCTestCase {
         XCTAssertEqual(engine.evaluate(inputs(battery: 5, onBattery: false)), .none)
     }
 
-    func testMaxDurationBackstopStopsIndefiniteSessions() {
+    /// Ticks the engine the way the daemon's timer does — an opening reading
+    /// that starts the clock, then one `elapsed` later — because the backstop
+    /// measures time the engine has *observed* on battery, and a single
+    /// evaluate has observed none of it.
+    @discardableResult
+    private func tick(_ engine: inout SafetyEngine, elapsed: TimeInterval,
+                      onBattery: Bool, lidClosed: Bool = false,
+                      oldestAge: TimeInterval = 60,
+                      from: Date? = nil) -> SafetyOutcome {
+        let begin = from ?? t0
+        _ = engine.evaluate(inputs(onBattery: onBattery, lidClosed: lidClosed,
+                                   oldestAge: oldestAge, now: begin))
+        return engine.evaluate(inputs(onBattery: onBattery, lidClosed: lidClosed,
+                                      oldestAge: oldestAge + elapsed,
+                                      now: begin.addingTimeInterval(elapsed)))
+    }
+
+    func testMaxDurationBackstopStopsIndefiniteSessionsOnBattery() {
         var engine = SafetyEngine(config: .default)
-        XCTAssertEqual(engine.evaluate(inputs(lidClosed: true, oldestAge: 9 * 3600)),
+        XCTAssertEqual(tick(&engine, elapsed: 9 * 3600, onBattery: true, lidClosed: true),
                        .stopAll(reason: .maxDuration))
     }
 
@@ -55,8 +72,71 @@ final class SafetyEngineTests: XCTestCase {
     /// path does not apply and only the max-duration skip does.
     func testMaxDurationBackstopStopsImmediatelyEvenWithLidOpen() {
         var engine = SafetyEngine(config: .default)
-        XCTAssertEqual(engine.evaluate(inputs(lidClosed: false, oldestAge: 9 * 3600)),
+        XCTAssertEqual(tick(&engine, elapsed: 9 * 3600, onBattery: true, lidClosed: false),
                        .stopAll(reason: .maxDuration))
+    }
+
+    // MARK: - The backstop counts battery time, not wall clock
+
+    /// The headline of this change: a mains-powered Mac running an indefinite
+    /// session is the case `keepy-uppy on` exists for, and the backstop used to
+    /// end it at eight hours regardless. "Until you say otherwise" now means it
+    /// while the charger is in.
+    func testMaxDurationBackstopNeverFiresOnACPower() {
+        var engine = SafetyEngine(config: .default)
+        XCTAssertEqual(tick(&engine, elapsed: 100 * 3600, onBattery: false), .none)
+    }
+
+    /// The cliff this change exists to avoid. Measuring session age but gating
+    /// the *firing* on battery would stop everything the instant the charger
+    /// came out of a machine that had been plugged in all day, because
+    /// `age >= maximum` was already true. The clock has to start when the power
+    /// does.
+    func testUnpluggingAfterALongACSessionDoesNotStopItInstantly() {
+        var engine = SafetyEngine(config: .default)
+        tick(&engine, elapsed: 20 * 3600, onBattery: false)
+        let justUnplugged = engine.evaluate(inputs(onBattery: true, oldestAge: 20 * 3600,
+                                                   now: t0.addingTimeInterval(20 * 3600)))
+        XCTAssertEqual(justUnplugged, .none)
+    }
+
+    /// …and having survived the unplug, it still gets stopped once it has
+    /// genuinely run its budget on battery.
+    func testTheBackstopStillFiresOnceTheBudgetIsSpentOnBattery() {
+        var engine = SafetyEngine(config: .default)
+        tick(&engine, elapsed: 20 * 3600, onBattery: false)
+        let outcome = tick(&engine, elapsed: 9 * 3600, onBattery: true,
+                           oldestAge: 20 * 3600, from: t0.addingTimeInterval(20 * 3600))
+        XCTAssertEqual(outcome, .stopAll(reason: .maxDuration))
+    }
+
+    /// Plugging in pauses the budget rather than refunding it. Otherwise a
+    /// laptop that touches a charger once an hour never reaches the backstop at
+    /// all, which is the guard quietly not existing.
+    func testACTimePausesTheBudgetRatherThanResettingIt() {
+        var engine = SafetyEngine(config: .default)
+        // 5h on battery, then a long spell on mains, then 4h more on battery:
+        // 9h of battery time in total, either side of the interruption.
+        tick(&engine, elapsed: 5 * 3600, onBattery: true)
+        tick(&engine, elapsed: 50 * 3600, onBattery: false,
+             oldestAge: 5 * 3600, from: t0.addingTimeInterval(5 * 3600))
+        let outcome = tick(&engine, elapsed: 4 * 3600, onBattery: true,
+                           oldestAge: 55 * 3600, from: t0.addingTimeInterval(55 * 3600))
+        XCTAssertEqual(outcome, .stopAll(reason: .maxDuration))
+    }
+
+    /// The budget belongs to the run of sessions being timed, not to the
+    /// engine. Without this, the first session after a long one would inherit a
+    /// spent budget and be stopped on its first tick.
+    func testTheBudgetResetsOnceNoSessionsRemain() {
+        var engine = SafetyEngine(config: .default)
+        tick(&engine, elapsed: 7 * 3600, onBattery: true)
+        // Everything ends: no oldest session for the engine to time.
+        _ = engine.evaluate(inputs(onBattery: true, oldestAge: nil,
+                                   now: t0.addingTimeInterval(7 * 3600)))
+        let fresh = tick(&engine, elapsed: 2 * 3600, onBattery: true,
+                         from: t0.addingTimeInterval(8 * 3600))
+        XCTAssertEqual(fresh, .none)
     }
 
     // MARK: - Thermal sensitivity (Change 1)

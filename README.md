@@ -88,7 +88,7 @@ that didn't happen.
 ## The whole CLI
 
 ```sh
-keepy-uppy on                                # until you say otherwise
+keepy-uppy on                                # until you say otherwise (see the backstop)
 keepy-uppy on --for 2h
 keepy-uppy on --until 17:00
 keepy-uppy on --while-app com.apple.dt.Xcode # until Xcode quits
@@ -355,7 +355,12 @@ regardless of which client asked for the session:
   Tighter with the lid closed.
 - **Battery** — ends sessions below your chosen percentage. Also tighter with
   the lid closed.
-- **Maximum duration** — a backstop for the session you started and forgot.
+- **Maximum duration** — a backstop for the session you started and forgot,
+  eight hours by default. **It spends battery time, not wall clock**: a Mac on
+  mains is never stopped by it, and plugging in pauses the budget rather than
+  refunding it. That's what lets `keepy-uppy on` mean what it says on a desk or
+  a rack, while a laptop that walks off with a session still running is still
+  caught.
 
 When a guard fires it suppresses *automatic* restarts for a cooldown, so a
 trigger can't fight it in a loop. Manual starts are always honoured — that's
@@ -363,9 +368,10 @@ your call to make.
 
 The rule underneath it all: **no session outlives its evidence.** A timed
 session ends on its clock. A condition-based one ends when the condition ends —
-or when the process watching it disappears. An indefinite one hits the
-backstop. And the daemon forces sleep back on at startup and if the app is
-deleted, so nothing can strand your Mac awake.
+or when the process watching it disappears. An indefinite one runs until you
+say otherwise, or until it has spent its backstop budget on battery. And the
+daemon forces sleep back on at startup and if the app is deleted, so nothing
+can strand your Mac awake.
 
 ## How it's built
 
@@ -402,7 +408,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **976 unit tests**.
+by **981 unit tests**.
 
 ## Build it yourself
 
@@ -425,7 +431,7 @@ just notarize
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 976 tests, and a
+**v0.1 — new, and moving fast.** Signed and notarized, 981 tests, and a
 privilege boundary that's been through three adversarial review passes. What
 it hasn't had yet is months on other people's hardware. Closed-lid behaviour
 over a real job is verified — a live session was watched surviving a genuine
