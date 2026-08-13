@@ -22,11 +22,10 @@ Close the lid. Walk away.
 clamshell, on battery, with nothing plugged in. That takes a privileged daemon
 and a system-level power setting, which is exactly what Keepy Uppy ships.
 
-**Most people will only ever open the menu bar.** Drag it to Applications, hit
-Enable, and every session, guard and trigger is a click away — no terminal
-required. What's underneath is a daemon, not the app, so the same things are
-just as reachable from a script, from CI, from a Shortcut and over SSH, because
-the CLI talks to the same daemon the UI does.
+**It lives in your menu bar.** Drag, click Enable, done — every session, guard
+and trigger is one click away, and you never have to open a terminal. Unless
+you want to: underneath is a daemon, not an app, so all of it is just as
+reachable from a script, from CI, from a Shortcut and over SSH.
 
 ```sh
 ssh mac-mini 'zsh -lc "keepy-uppy on --for 8h"'
