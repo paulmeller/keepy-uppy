@@ -576,6 +576,28 @@ func serviceStatusTint(_ state: OnboardingService.State) -> Color {
     }
 }
 
+/// Why this app wants a root daemon, said before it asks rather than after.
+///
+/// **This is the paragraph that decides whether a stranger installs this.** The
+/// README makes the argument at length and nobody reads a README at the moment
+/// they are being asked for an administrator password; "a new app wants root"
+/// with no reason attached is a reasonable thing to refuse. So the reason is
+/// here, on the pane with the button, and it is specific: what needs the
+/// privilege, what does not get it, and what happens when the app goes away.
+///
+/// Returned as a string from a pure function, like every other line of copy in
+/// this file, so it is greppable and testable rather than buried in a `body`.
+func privilegeBoundaryExplanation() -> String {
+    "Staying awake with the lid shut means changing a system-level power setting, "
+    + "and macOS only lets a root process do that. Keepy Uppy installs one small "
+    + "daemon for it — and nothing else runs with those privileges. The menu bar "
+    + "app, the command line and the trigger watcher all run as you and ask the "
+    + "daemon over XPC, each on its own connection that admits exactly one signed "
+    + "bundle, so nothing else on this Mac can borrow it. The daemon forces sleep "
+    + "back on at startup and if you delete the app, so uninstalling cannot leave "
+    + "this Mac unable to sleep."
+}
+
 func backgroundServicesFootnote(_ state: OnboardingService.State) -> String {
     switch state {
     case .running:
@@ -1491,6 +1513,69 @@ let wakeModeSettingsScopeNote = "Sessions you start from the menu from now on us
 /// `Session`'s decode default and the CLI's absent flag. Absence must not
 /// *weaken* a promise anybody already relies on (hence `.clamshell` there), and
 /// must not *manufacture* one nobody asked for (hence `false` here).
+/// Which pair of menu bar glyphs to draw.
+///
+/// A choice at all because a menu bar is a shared, crowded space with the
+/// user's own taste in it, and because the balloon — which is the app's whole
+/// visual idea — is exactly the kind of thing somebody either likes or wants
+/// gone. Amphetamine has offered custom icons for years; this is the cheap
+/// version of that, and the cheap version is most of the value.
+///
+/// **Every case is a filled/outline pair, and that is the load-bearing part.**
+/// The menu bar's one job here is to answer "is this Mac being held awake"
+/// without being clicked, and it answers by being full or empty. An option that
+/// broke that — one glyph for both states, or two unrelated glyphs — would be a
+/// preference that quietly removes the feature, so the type cannot express one.
+enum MenuBarIconStyle: String, CaseIterable, Identifiable, Codable {
+    case balloon, sun, moon, cup
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .balloon: return "Balloon"
+        case .sun: return "Sun"
+        case .moon: return "Moon"
+        case .cup: return "Cup"
+        }
+    }
+
+    /// The SF Symbol for each state. Named `active`/`idle` rather than
+    /// `filled`/`outline` because that is what they mean; `.moon` inverts the
+    /// visual convention (a *filled* moon reads as night, so the active glyph
+    /// is the one with rays) and a name describing the drawing rather than the
+    /// state would make that arm look like a bug.
+    func symbol(active: Bool) -> String {
+        switch self {
+        case .balloon: return active ? "balloon.fill" : "balloon"
+        case .sun: return active ? "sun.max.fill" : "sun.max"
+        case .moon: return active ? "moon.stars.fill" : "moon"
+        case .cup: return active ? "cup.and.saucer.fill" : "cup.and.saucer"
+        }
+    }
+}
+
+let menuBarIconSettingsTitle = "Menu bar icon"
+
+/// Says what the icon *means*, not what it looks like — the picker already
+/// shows that. Whichever pair is chosen, full means held awake and empty means
+/// not, and that is the only thing a reader needs to carry away.
+let menuBarIconSettingsFootnote =
+    "Filled while something is keeping this Mac awake, outlined when nothing is."
+
+enum MenuBarIconStylePreference {
+    static let key = "menuBarIconStyle"
+    static let fallback = MenuBarIconStyle.balloon
+    static var defaultRawValue: String { fallback.rawValue }
+
+    /// The same shape as every other raw-value reader here: an unknown string —
+    /// a style written by a newer build, or a hand-edited plist — falls back
+    /// rather than crashing or drawing nothing.
+    static func style(rawValue: String) -> MenuBarIconStyle {
+        MenuBarIconStyle(rawValue: rawValue) ?? fallback
+    }
+}
+
 enum DefaultKeepDisksAwakePreference {
     static let key = "defaultKeepDisksAwake"
 

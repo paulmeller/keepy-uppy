@@ -31,6 +31,8 @@ struct DisplaySettingsTab: View {
     private var defaultWakeModeRaw: String = DefaultWakeModePreference.defaultRawValue
     @AppStorage(DefaultKeepDisksAwakePreference.key, store: PreferencesSuite.defaults)
     private var defaultKeepDisksAwake: Bool = DefaultKeepDisksAwakePreference.fallback
+    @AppStorage(MenuBarIconStylePreference.key, store: PreferencesSuite.defaults)
+    private var menuBarIconStyleRaw: String = MenuBarIconStylePreference.defaultRawValue
 
     private var defaultWakeMode: WakeMode {
         DefaultWakeModePreference.mode(rawValue: defaultWakeModeRaw)
@@ -75,6 +77,24 @@ struct DisplaySettingsTab: View {
                     Text(keepDisksAwakeSettingsScopeNote)
                         .settingsFootnote()
                 }
+            }
+
+            // Last, and in its own Section, because it is the only thing on
+            // this pane that changes nothing about what a session *does*. The
+            // two above answer "what does a session hold awake"; this one is
+            // about the menu bar, and putting it inside either of their
+            // Sections would attach an appearance choice to a footer arguing
+            // about power.
+            Section {
+                Picker(menuBarIconSettingsTitle, selection: $menuBarIconStyleRaw) {
+                    ForEach(MenuBarIconStyle.allCases) { style in
+                        Label(style.label, systemImage: style.symbol(active: true))
+                            .tag(style.rawValue)
+                    }
+                }
+            } footer: {
+                Text(menuBarIconSettingsFootnote)
+                    .settingsFootnote()
             }
         }
         .formStyle(.grouped)

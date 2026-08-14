@@ -70,7 +70,19 @@ Or grab the notarized `.dmg` from [Releases](../../releases) and drag it to
 `/Applications`. Either way: open it and hit **Enable Keepy Uppy**. macOS asks
 you to approve the background services once. That's it.
 
-Headless box that'll never run the app?
+Headless box that'll never run the app? One command, over SSH:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/paulmeller/keepy-uppy/main/packaging/install.sh | bash
+```
+
+It downloads the latest release, **checks Gatekeeper's own verdict before
+installing anything**, puts it in `/Applications` and registers the services.
+It refuses to run under `sudo` — `setup` registers a per-user agent, and one
+registered by root belongs to root. macOS asks for an administrator at the
+point the daemon is installed, and not before.
+
+Already have the app and just want the services registered:
 
 ```sh
 "/Applications/Keepy Uppy.app/Contents/MacOS/keepy-uppy" setup
@@ -100,6 +112,7 @@ keepy-uppy on --while-volume Backup          # until that drive is ejected
 keepy-uppy on --while-subnet 192.168.1.0/24  # until you leave that network
 keepy-uppy on --while-vpn                    # until the tunnel drops
 keepy-uppy on --while-usb 05ac:024f          # until that device is unplugged
+keepy-uppy on --while-schedule 'weekdays 09:00-18:00'  # until the window closes
 keepy-uppy off                               # stop yours
 keepy-uppy off --all                         # stop everything
 keepy-uppy mode --session <id>               # change a running session, see below
@@ -220,13 +233,14 @@ you.
 ## Or don't type anything at all
 
 Settings → Triggers turns a condition into a standing rule, so the Mac starts
-keeping itself awake without you remembering to ask. Nine conditions, and they
+keeping itself awake without you remembering to ask. Ten conditions, and they
 fall into two groups that behave differently — which is the thing worth knowing
 before you write a rule.
 
-**Five start out holding a session open for exactly as long as the condition
+**Six start out holding a session open for exactly as long as the condition
 lasts:** a process is running, a volume is mounted, this Mac is on a given
-network, a VPN is connected, a USB device is attached. Eject the drive, drop the
+network, a VPN is connected, a USB device is attached, or the clock is inside a
+recurring window you set — "weekdays, 09:00 to 18:00". Eject the drive, drop the
 tunnel or unplug the dongle and the session goes with it, the same way
 `--while-…` does from the command line.
 
@@ -346,6 +360,13 @@ sweep away something you didn't name. macOS won't tell an app that another app
 already owns a combination, so a shortcut that never fires is almost always one
 that's already taken; pick another.
 
+**It's in Shortcuts.** Three actions — keep awake for a chosen duration, stop
+the sessions this app started, and ask whether anything is holding this Mac
+awake — so a session can be a step in an Automation, a Focus filter or a
+Shortcut you run from anywhere. They need no permission of any kind, and they
+run as the app: a session a Shortcut starts appears in the menu with a Stop
+button, and the stop shortcut ends it, exactly as if you had clicked the row.
+
 ## Safety, in detail
 
 Configurable in Settings → Safety & Guards, and enforced by the daemon
@@ -408,7 +429,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **981 unit tests**.
+by **1011 unit tests**.
 
 ## Build it yourself
 
@@ -441,7 +462,7 @@ still works if you have one — it's just the second choice.
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 981 tests, and a
+**v0.1 — new, and moving fast.** Signed and notarized, 1011 tests, and a
 privilege boundary that's been through three adversarial review passes. What
 it hasn't had yet is months on other people's hardware. Closed-lid behaviour
 over a real job is verified — a live session was watched surviving a genuine
@@ -471,12 +492,14 @@ is not the same thing.
 [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
 what only hardware can settle.
 
-**This page describes the current download.** [Releases](../../releases) has
-**v0.1.1**, and it's current in every way that matters — everything above is
-in it: wake modes, `--keep-disks-awake`, `keepy-uppy mode`, all nine trigger
-conditions, per-rule wake mode and lifetime, the five-tab Settings window,
-notifications, keyboard shortcuts, and the `PATH` install button. `main` is
-two commits ahead, both documentation only.
+**Four things on this page are on `main` and not yet in the download**, and
+they are called out here rather than left for you to discover: the scheduled
+trigger and `--while-schedule`, the Shortcuts actions, the menu bar icon
+picker, and Settings search. Everything else above is in
+[Releases](../../releases) as **v0.1.2** — wake modes, `--keep-disks-awake`,
+`keepy-uppy mode`, the other nine trigger conditions, per-rule wake mode and
+lifetime, the five-tab Settings window, notifications, keyboard shortcuts, the
+`PATH` install button, and the battery-time session backstop.
 
 An earlier **v0.1.0** is also on Releases, for anyone who wants the smaller,
 first-notarized build: `--for`, `--until`, `--while-app`, and three trigger

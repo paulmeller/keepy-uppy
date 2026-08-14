@@ -28,6 +28,9 @@ struct SettingsView: View {
     /// for what a second instance would do.
     @ObservedObject var hotKeys: HotKeyCenter
 
+    @State private var selectedTab: SettingsTab = .general
+    @State private var searchQuery = ""
+
     /// Passed straight through to the same tab, whose Diagnostics section asks
     /// it for the daemon's version. It has to be the app's one connection: a
     /// second `DaemonConnection` made here would open its own privileged XPC
@@ -48,17 +51,28 @@ struct SettingsView: View {
         // against CoreGlyphs' `name_availability.plist`: bolt and
         // exclamationmark.shield are 2019 (macOS 10.15), gearshape, display and
         // terminal are 2020 (macOS 11.0).
-        TabView {
+        // The tabs are `selection`-bound now, which they were not, because
+        // search has to be able to *go* somewhere: a result that names a tab
+        // and cannot open it is a worse answer than no result.
+        TabView(selection: $selectedTab) {
             GeneralSettingsTab()
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }
+                .tag(SettingsTab.general)
             TriggersSettingsTab()
-                .tabItem { Label("Triggers", systemImage: "bolt") }
+                .tabItem { Label(SettingsTab.triggers.title, systemImage: SettingsTab.triggers.symbol) }
+                .tag(SettingsTab.triggers)
             DisplaySettingsTab()
-                .tabItem { Label("Display", systemImage: "display") }
+                .tabItem { Label(SettingsTab.display.title, systemImage: SettingsTab.display.symbol) }
+                .tag(SettingsTab.display)
             SafetySettingsTab()
-                .tabItem { Label("Safety & Guards", systemImage: "exclamationmark.shield") }
+                .tabItem { Label(SettingsTab.safety.title, systemImage: SettingsTab.safety.symbol) }
+                .tag(SettingsTab.safety)
             AdvancedSettingsTab(hotKeys: hotKeys, daemon: daemon)
-                .tabItem { Label("CLI & Advanced", systemImage: "terminal") }
+                .tabItem { Label(SettingsTab.advanced.title, systemImage: SettingsTab.advanced.symbol) }
+                .tag(SettingsTab.advanced)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            SettingsSearchField(query: $searchQuery, selectedTab: $selectedTab)
         }
         .frame(minWidth: SettingsMetrics.width, maxWidth: SettingsMetrics.width,
                minHeight: SettingsMetrics.minHeight)
@@ -193,6 +207,19 @@ struct GeneralSettingsTab: View {
                 // wrong: a control that materialises mid-layout shifts
                 // everything below it, and a permanently-visible disabled
                 // button also tells the reader this pane is where you'd fix it.
+                // Shown only before the daemon is running, which is the only
+                // moment it is load-bearing: it is the answer to "why does this
+                // want an administrator", and it has to be on screen *before*
+                // the button is pressed rather than in a README nobody opens
+                // while a password prompt is waiting. Once running, the reader
+                // has already made the decision and the pane goes back to being
+                // a status pane.
+                if onboarding.state != .running {
+                    Text(privilegeBoundaryExplanation())
+                        .settingsFootnote()
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 HStack {
                     Spacer()
                     Button(onboarding.state == .running ? "Running" : "Enable Keepy Uppy…") {
@@ -299,5 +326,78 @@ extension Text {
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+
+/// The search field above the tabs, and the results it drops beneath itself.
+///
+/// A list of destinations rather than a filtered view of the settings
+/// themselves: the panes are `Form`s with their own footers and section
+/// arguments, and rebuilding them from an index would give two renderings of
+/// every control to keep in step. Naming where a thing lives and taking you
+/// there is most of the value at a fraction of the surface.
+private struct SettingsSearchField: View {
+    @Binding var query: String
+    @Binding var selectedTab: SettingsTab
+
+    private var results: [SettingsIndexEntry] { searchSettings(query) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search settings", text: $query)
+                    .textFieldStyle(.plain)
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear")
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+
+            if !query.isEmpty {
+                Divider()
+                if results.isEmpty {
+                    // Says so rather than showing an empty strip, which reads
+                    // as a broken control rather than an answer.
+                    Text("Nothing matches “\(query)”.")
+                        .settingsFootnote()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(results, id: \.title) { entry in
+                                Button {
+                                    selectedTab = entry.tab
+                                    query = ""
+                                } label: {
+                                    HStack {
+                                        Label(entry.title, systemImage: entry.tab.symbol)
+                                        Spacer()
+                                        Text(entry.tab.title).foregroundStyle(.secondary)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 180)
+                }
+                Divider()
+            }
+        }
+        .background(.bar)
     }
 }

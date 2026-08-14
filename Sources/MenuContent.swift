@@ -2,9 +2,12 @@ import SwiftUI
 
 struct MenuBarIcon: View {
     @ObservedObject var daemon: DaemonConnection
+    @AppStorage(MenuBarIconStylePreference.key, store: PreferencesSuite.defaults)
+    private var styleRaw: String = MenuBarIconStylePreference.defaultRawValue
 
     var body: some View {
-        Image(systemName: daemon.keepingAwake ? "balloon.fill" : "balloon")
+        Image(systemName: MenuBarIconStylePreference.style(rawValue: styleRaw)
+            .symbol(active: daemon.keepingAwake))
     }
 }
 

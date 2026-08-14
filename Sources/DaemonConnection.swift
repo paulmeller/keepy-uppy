@@ -261,11 +261,21 @@ final class DaemonConnection: ObservableObject {
         await refresh()
     }
 
-    func stopAllSessions(all: Bool) async {
-        let _: Int? = await call { proxy, reply in
+    /// Answers how many sessions were actually stopped.
+    ///
+    /// `@discardableResult` because the menu and the hot key both stop and then
+    /// look at the refreshed list rather than a count; the count is here for
+    /// the Shortcut, which has no list to look at and has to say something.
+    /// Nil — the daemon never answered — is reported as 0 rather than guessed
+    /// upward, for `ConditionReading`'s reason: a number nobody measured is
+    /// worse than an admission.
+    @discardableResult
+    func stopAllSessions(all: Bool) async -> Int {
+        let stopped: Int? = await call { proxy, reply in
             proxy.stopAllSessions(all: all) { stopped, _ in reply(stopped) }
         }
         await refresh()
+        return stopped ?? 0
     }
 
     /// Changes what a **running** session asks of this Mac, and reports whether
