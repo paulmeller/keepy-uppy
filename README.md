@@ -425,9 +425,19 @@ accepting them. For the real thing you need a Developer ID certificate:
 ```sh
 export KEEPY_UPPY_SIGNING_IDENTITY="Developer ID Application: You (TEAMID)"
 export KEEPY_UPPY_TEAM_ID="TEAMID"
-export KEEPY_UPPY_NOTARY_PROFILE="your-notarytool-profile"
+export KEEPY_UPPY_NOTARY_KEY="$HOME/.appstoreconnect/private_keys/AuthKey_XXXXXXXXXX.p8"
+export KEEPY_UPPY_NOTARY_KEY_ID="XXXXXXXXXX"
+export KEEPY_UPPY_NOTARY_ISSUER="your-issuer-uuid"
 just notarize
 ```
+
+An App Store Connect API key, rather than `notarytool`'s stored keychain
+profile, because the profile has a failure mode worth avoiding: it can read
+back stale or missing even when it worked an hour earlier, and when it does,
+every call answers `HTTP 401 Invalid credentials … use the app-specific
+password generated at appleid.apple.com`. That sentence sends you off to
+rotate a password that was never the problem. `KEEPY_UPPY_NOTARY_PROFILE`
+still works if you have one — it's just the second choice.
 
 ## Status
 

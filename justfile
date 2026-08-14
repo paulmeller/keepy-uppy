@@ -14,6 +14,9 @@ dmg_path := derived_data + "/" + app_name + ".dmg"
 signing_identity := env_var_or_default("KEEPY_UPPY_SIGNING_IDENTITY", "")
 team_id := env_var_or_default("KEEPY_UPPY_TEAM_ID", "")
 notary_profile := env_var_or_default("KEEPY_UPPY_NOTARY_PROFILE", "")
+notary_key := env_var_or_default("KEEPY_UPPY_NOTARY_KEY", "")
+notary_key_id := env_var_or_default("KEEPY_UPPY_NOTARY_KEY_ID", "")
+notary_issuer := env_var_or_default("KEEPY_UPPY_NOTARY_ISSUER", "")
 cask_tap := env_var_or_default("KEEPY_UPPY_CASK_TAP", "../homebrew-tap")
 
 generate:
@@ -104,11 +107,37 @@ dmg: export
         -ov -format UDZO \
         "{{dmg_path}}"
 
+# Prefers an App Store Connect API key over a stored keychain profile, and
+# that order is deliberate.
+#
+# `notarytool store-credentials` writes somewhere `security` cannot reliably
+# enumerate, and a profile that worked an hour ago can read back stale or
+# missing — including from a shell that is merely sandboxed differently. The
+# failure is silent and its error message is actively misleading: a stale
+# profile answers every call with `HTTP 401 Invalid credentials … use the
+# app-specific password generated at appleid.apple.com`, which reads as a
+# revoked password rather than a keychain that handed over the wrong key. That
+# sentence cost an afternoon once. Storing the same profile name twice makes it
+# worse, because the second write appears to succeed and the first key keeps
+# answering.
+#
+# The three key variables have no such indirection: the `.p8` either signs the
+# JWT or it does not. Keep `KEEPY_UPPY_NOTARY_PROFILE` working for anyone who
+# has one, but reach for it second.
 notarize: bump dmg
-    @test -n "{{notary_profile}}" || { echo "Set KEEPY_UPPY_NOTARY_PROFILE (see README)"; exit 1; }
-    xcrun notarytool submit "{{dmg_path}}" \
-        --keychain-profile "{{notary_profile}}" \
-        --wait
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{notary_key}}" ]; then
+        test -n "{{notary_key_id}}" && test -n "{{notary_issuer}}" || {
+            echo "KEEPY_UPPY_NOTARY_KEY needs KEEPY_UPPY_NOTARY_KEY_ID and KEEPY_UPPY_NOTARY_ISSUER too"; exit 1; }
+        auth=(--key "{{notary_key}}" --key-id "{{notary_key_id}}" --issuer "{{notary_issuer}}")
+    elif [ -n "{{notary_profile}}" ]; then
+        auth=(--keychain-profile "{{notary_profile}}")
+    else
+        echo "Set KEEPY_UPPY_NOTARY_KEY (+ _KEY_ID and _ISSUER), or KEEPY_UPPY_NOTARY_PROFILE. See README."
+        exit 1
+    fi
+    xcrun notarytool submit "{{dmg_path}}" "${auth[@]}" --wait
     xcrun stapler staple "{{dmg_path}}"
     @echo "shipped $(plutil -extract CFBundleShortVersionString raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist") ($(plutil -extract CFBundleVersion raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist"))"
 
