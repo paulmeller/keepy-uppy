@@ -126,9 +126,18 @@ struct StopKeepingAwakeIntent: AppIntent {
         // build script would be a surprise nobody asked for, and the wording
         // above promises it does not.
         let stopped = await daemon.stopAllSessions(all: false)
-        return .result(dialog: stopped > 0
-                       ? "Stopped \(stopped) session\(stopped == 1 ? "" : "s")."
-                       : "Nothing of this app's was keeping the Mac awake.")
+        // Three literal returns rather than one ternary. `IntentDialog` is
+        // built from a *literal* — a ternary hands it an already-formed
+        // `String`, which does not convert, and whether that compiles turns out
+        // to depend on the Xcode version. It also gets the plural right, which
+        // an inline `s` never quite does.
+        if stopped == 0 {
+            return .result(dialog: "Nothing this app started was keeping the Mac awake.")
+        }
+        if stopped == 1 {
+            return .result(dialog: "Stopped 1 session.")
+        }
+        return .result(dialog: "Stopped \(stopped) sessions.")
     }
 }
 
@@ -144,9 +153,10 @@ struct IsKeepingAwakeIntent: AppIntent {
         let daemon = try appDaemon()
         await daemon.refresh()
         let awake = daemon.keepingAwake
-        return .result(value: awake,
-                       dialog: awake ? "This Mac is being kept awake."
-                                     : "This Mac is not being kept awake.")
+        if awake {
+            return .result(value: true, dialog: "This Mac is being kept awake.")
+        }
+        return .result(value: false, dialog: "This Mac is not being kept awake.")
     }
 }
 
