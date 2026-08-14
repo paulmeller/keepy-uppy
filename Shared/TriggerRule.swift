@@ -39,6 +39,16 @@ enum TriggerCondition: Codable, Equatable {
     /// fills them in from what is plugged in right now, so nobody types hex.
     /// Binds its session's lifetime.
     case usbDevicePresent(vendorID: UInt16, productID: UInt16)
+    /// The wall clock is inside a recurring window — "weekdays, 09:00 to 18:00".
+    /// Binds its session's lifetime, so the session ends when the window closes
+    /// rather than running a duration from the moment it opened.
+    ///
+    /// **The only condition whose evidence is not a device, a process or a
+    /// network.** Everything else here asks an observer, which can answer
+    /// `.undetermined` when the framework behind it declines; a clock cannot
+    /// fail to be read, so this one is a pure function of `ObserverSet.now` and
+    /// is the reason that field exists.
+    case onSchedule(TriggerSchedule)
 
     /// Why a `.processRunning` name can never match anything, or `nil` if it
     /// can. Lives here rather than inside the Add-trigger sheet so it is
@@ -123,6 +133,7 @@ enum TriggerCondition: Codable, Equatable {
 enum TriggerConditionKind: String, CaseIterable, Identifiable {
     case appLaunched, externalDisplayConnected, acPowerConnected, processRunning
     case appFrontmost, volumeMounted, onSubnet, vpnActive, usbDevicePresent
+    case onSchedule
 
     var id: String { rawValue }
 
@@ -194,7 +205,8 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
     var bindsSessionLifetime: Bool {
         switch self {
         case .appLaunched, .externalDisplayConnected, .acPowerConnected, .appFrontmost: return false
-        case .processRunning, .volumeMounted, .onSubnet, .vpnActive, .usbDevicePresent: return true
+        case .processRunning, .volumeMounted, .onSubnet, .vpnActive, .usbDevicePresent,
+             .onSchedule: return true
         }
     }
 
@@ -212,6 +224,9 @@ enum TriggerConditionKind: String, CaseIterable, Identifiable {
         case .onSubnet: return .onSubnet(cidr: "192.168.1.0/24")
         case .vpnActive: return .vpnActive
         case .usbDevicePresent: return .usbDevicePresent(vendorID: 0x05ac, productID: 0x024f)
+        case .onSchedule:
+            return .onSchedule(TriggerSchedule(dayMask: TriggerSchedule.weekdays,
+                                               startMinute: 9 * 60, endMinute: 18 * 60))
         }
     }
 }
@@ -229,6 +244,7 @@ extension TriggerCondition {
         case .onSubnet: return .onSubnet
         case .vpnActive: return .vpnActive
         case .usbDevicePresent: return .usbDevicePresent
+        case .onSchedule: return .onSchedule
         }
     }
 
@@ -266,6 +282,8 @@ extension TriggerCondition {
             return .whileVPNActive
         case .usbDevicePresent(let vendorID, let productID):
             return .whileUSBDevicePresent(vendorID: vendorID, productID: productID)
+        case .onSchedule(let schedule):
+            return .whileOnSchedule(schedule)
         }
     }
 
@@ -323,6 +341,8 @@ extension TriggerCondition {
             return .whileVPNActive
         case .usbDevicePresent(let vendorID, let productID):
             return .whileUSBDevicePresent(vendorID: vendorID, productID: productID)
+        case .onSchedule(let schedule):
+            return .whileOnSchedule(schedule)
         }
     }
 }
@@ -901,7 +921,8 @@ enum TriggerStore {
 func triggersToFire(
     _ rules: [TriggerRule],
     activeSessions: [Session],
-    observers: ObserverSet
+    observers: ObserverSet,
+    now: Date
 ) -> [TriggerRule] {
     let activeTriggerIDs = Set(activeSessions.compactMap(\.triggerID))
     return rules.filter { rule in
@@ -931,6 +952,17 @@ func triggersToFire(
         case .usbDevicePresent(let vendorID, let productID):
             return observers.usbDevice.isPresent(vendorID: vendorID,
                                                  productID: productID).isConfidentlyPresent
+        case .onSchedule(let schedule):
+            // No observer, and so no `.undetermined`: a clock cannot decline
+            // to be read.
+            //
+            // `now` is a parameter rather than a member of `ObserverSet`
+            // because this function and `sessionsToEnd` must agree about the
+            // instant. When the clock lived on the bundle, a caller could hand
+            // one value here and another there — and a schedule that starts a
+            // session on one clock and ends it on another is the exact bug that
+            // shape invites.
+            return schedule.includes(now)
         }
     }
 }

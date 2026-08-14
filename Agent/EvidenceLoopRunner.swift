@@ -138,6 +138,10 @@ final class EvidenceLoopRunner {
         // `PowerSource.acPowerReading`, where this mapping now lives so the
         // daemon's `.whileOnACPower` handling shares it rather than
         // re-deriving it (it re-derived it wrongly).
+        // One reading for the whole tick: `triggersToFire` and `sessionsToEnd`
+        // must agree about the instant, or a schedule could start a session on
+        // one clock and be ended by the other in the same pass.
+        let now = Date()
         let observers = ObserverSet(appRunning: appRunning,
                                     display: display,
                                     processRunning: processRunning,
@@ -150,20 +154,24 @@ final class EvidenceLoopRunner {
                                     cpuBusy: cpuObserver.currentBusy())
 
         let ended = sessionsToEnd(sessions, observers: observers,
-                                  evidence: &evidence, now: Date())
+                                  evidence: &evidence, now: now)
         for id in ended {
             _ = await connection.reportConditionEnded(id.uuidString)
         }
 
         let rules = TriggerStore.load()
-        let fired = triggersToFire(rules, activeSessions: sessions, observers: observers)
+        let fired = triggersToFire(rules, activeSessions: sessions, observers: observers, now: now)
         for rule in fired {
             // The rule stores relative intent; the absolute deadline is
             // computed HERE, at the instant the rule actually fires. A rule
             // written weeks ago must still buy a full hour of wakefulness
             // now — see `TriggerRule.defaultKind` for what going the other
             // way costs (a permanent 5s refire loop against the daemon).
-            let now = Date()
+            // Named rather than `now` because the tick's own clock is already
+            // in scope: this is deliberately a *fresh* reading taken at the
+            // instant this rule fires, and shadowing the outer one would hide
+            // that difference behind an identical name.
+            let firedAt = Date()
             // Both power axes come from the rule. They used to be two literals
             // here — `.clamshell` and `false` — and the comment that argued for
             // them, in opposite directions, is now the doc comment on
@@ -178,9 +186,9 @@ final class EvidenceLoopRunner {
             // outside `Shared/` that no test can reach: this file is not in the
             // app target's `sources:` list, so it is verified by reading plus a
             // green build of the agent, and nothing else.
-            let session = Session(id: UUID(), kind: sessionKind(firing: rule, now: now),
+            let session = Session(id: UUID(), kind: sessionKind(firing: rule, now: firedAt),
                                   owner: ClientID(rawValue: "agent"), ownerUID: 0,
-                                  persistence: .detached, origin: .trigger, startedAt: now,
+                                  persistence: .detached, origin: .trigger, startedAt: firedAt,
                                   triggerID: rule.id, wakeMode: rule.effect.power.wakeMode,
                                   keepsDisksAwake: rule.effect.power.keepsDisksAwake)
             let (sessionID, error) = await connection.startSession(session)

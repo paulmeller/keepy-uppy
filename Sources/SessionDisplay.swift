@@ -41,6 +41,12 @@ func remainingTimeText(for session: Session, now: Date) -> String {
         return "While the CPU is at least \(Int((threshold * 100).rounded()))% busy"
     case .whileProcessRunning(let processName):
         return "While \(processName) is running"
+    case .whileOnSchedule(let schedule):
+        // The window rather than a countdown, deliberately. This row answers
+        // "why is this Mac awake", and "Weekdays, 9:00 am to 6:00 pm" answers
+        // it; "3h 12m left" would be true but would read as a timer somebody
+        // set today, which is the one thing a standing rule is not.
+        return "During \(schedule.describe())"
     case .whileVolumeMounted(let name):
         return "While \(name) is mounted"
     case .whileOnSubnet(let cidr):
@@ -128,6 +134,7 @@ func triggerConditionKindLabel(_ kind: TriggerConditionKind) -> String {
     case .onSubnet: return "This Mac is on a network"
     case .vpnActive: return "A VPN is connected"
     case .usbDevicePresent: return "A USB device is attached"
+    case .onSchedule: return "A time of day comes round"
     }
 }
 
@@ -242,6 +249,8 @@ func triggerStartEventTitle(_ condition: TriggerCondition) -> String {
     case .vpnActive: return "When a VPN connects"
     case .usbDevicePresent(let vendorID, let productID):
         return "When \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is attached"
+    case .onSchedule(let schedule):
+        return "When \(schedule.describe()) comes round"
     }
 }
 
@@ -266,6 +275,13 @@ func triggerWhileTitle(_ condition: TriggerCondition) -> String? {
     case .vpnActive: return "While a VPN is connected"
     case .usbDevicePresent(let vendorID, let productID):
         return "While \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is attached"
+    case .onSchedule(let schedule):
+        // "While" rather than the more natural "During", because the row's
+        // voice is load-bearing here: `testOnlyABindingConditionsTitleMaySayWhile`
+        // reads this word to check the copy agrees with
+        // `bindsSessionLifetime`. A condition that binds a lifetime and does
+        // not say so is the drift that test exists to catch.
+        return "While it's \(schedule.describe())"
     }
 }
 
@@ -313,6 +329,8 @@ func triggerBoundEffectSubtitle(_ condition: TriggerCondition) -> String? {
         return "Keeps this Mac awake until the VPN disconnects"
     case .usbDevicePresent(let vendorID, let productID):
         return "Keeps this Mac awake until \(usbDeviceDisplayName(vendorID: vendorID, productID: productID)) is unplugged"
+    case .onSchedule(let schedule):
+        return "Keeps this Mac awake until \(schedule.describe()) ends"
     }
 }
 
@@ -365,6 +383,11 @@ func triggerBindingFootnote(_ condition: TriggerCondition) -> String? {
         // `0x0000:0x0000` before anything is chosen. "The device" is true at
         // every moment the sheet is open.
         return "Ends automatically when the device is unplugged — no duration to pick."
+    case .onSchedule:
+        // Unnamed for `.usbDevicePresent`'s reason: read while the sheet is
+        // still being filled in, where the window may not yet have a day ticked
+        // and would otherwise render as a schedule that can never fire.
+        return "Ends automatically when the window closes — no duration to pick."
     }
 }
 

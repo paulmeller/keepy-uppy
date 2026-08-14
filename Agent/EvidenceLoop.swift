@@ -146,6 +146,17 @@ func sessionsToEnd(
             if evidence.recordAndCheckEnd(session.id, observers.vpn.isVPNActive()) {
                 ended.append(session.id)
             }
+        case .whileOnSchedule(let schedule):
+            // Routed through `evidence` like every other kind even though a
+            // clock has no flaky reading for the two-negatives rule to absorb.
+            // The cost is that the session outlives its window by one tick;
+            // the benefit is that this loop has no special case, and a window
+            // that closes ten seconds late is not a thing anyone can perceive.
+            // `now` is this function's injected clock, the same one
+            // `ObserverSet.now` carries into `triggersToFire`.
+            if evidence.recordAndCheckEnd(session.id, ConditionReading(schedule.includes(now))) {
+                ended.append(session.id)
+            }
         case .whileUSBDevicePresent(let vendorID, let productID):
             let reading = observers.usbDevice.isPresent(vendorID: vendorID, productID: productID)
             if evidence.recordAndCheckEnd(session.id, reading) {

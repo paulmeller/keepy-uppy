@@ -305,6 +305,8 @@ final class SessionKindEvaluationTests: XCTestCase {
             .whileCPUBusy(threshold: 0.5), .whileProcessRunning(processName: "claude"),
             .whileVolumeMounted(name: "Backup"), .whileOnSubnet(cidr: "192.168.1.0/24"),
             .whileVPNActive, .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f),
+            .whileOnSchedule(TriggerSchedule(dayMask: TriggerSchedule.weekdays,
+                                             startMinute: 9 * 60, endMinute: 18 * 60)),
         ]
         for kind in allKinds {
             let daemonCanEvaluateItAlone: Bool
@@ -316,9 +318,17 @@ final class SessionKindEvaluationTests: XCTestCase {
             case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
                  .whileVolumeMounted, .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent:
                 daemonCanEvaluateItAlone = false  // needs the agent's observers
+            case .whileOnSchedule:
+                // The one kind here the daemon *could* answer alone — a clock is
+                // not a device, and needs no login session. It is still `false`
+                // because the code that ends one lives in the agent's evidence
+                // loop, and `deadline` is nil for it, so a daemon told it owned
+                // this would end it never. The honest answer is the one that
+                // matches who actually does the work.
+                daemonCanEvaluateItAlone = false
             }
             XCTAssertEqual(kind.isDaemonEvaluable, daemonCanEvaluateItAlone, "\(kind)")
         }
-        XCTAssertEqual(allKinds.count, 13, "a case was added to SessionKind but not to allKinds")
+        XCTAssertEqual(allKinds.count, 14, "a case was added to SessionKind but not to allKinds")
     }
 }

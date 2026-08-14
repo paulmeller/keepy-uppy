@@ -19,6 +19,11 @@ enum SessionKind: Equatable, Codable {
     /// intentional exception to "a trigger starts a session, it doesn't
     /// bind that session's lifetime to the condition."
     case whileProcessRunning(processName: String)
+    /// Ends when a recurring wall-clock window closes. The clock-bound sibling
+    /// of the kinds above, and the only one whose evidence is not a device: see
+    /// `TriggerSchedule` for why the window is compared on wall-clock
+    /// components and what that buys across a daylight-saving change.
+    case whileOnSchedule(TriggerSchedule)
     /// Ends when the named volume is unmounted. The second condition-bound
     /// kind, and the same shape as `.whileExternalDisplay`: "keep this Mac
     /// awake while the backup drive is plugged in" is a *while* on its face,
@@ -86,6 +91,7 @@ enum SessionKind: Equatable, Codable {
         case whileOnSubnet = "while-on-subnet"
         case whileVPNActive = "while-vpn-active"
         case whileUSBDevicePresent = "while-usb-device-present"
+        case whileOnSchedule = "while-on-schedule"
 
         /// A representative `SessionKind` of this family. Associated values are
         /// stand-ins chosen to be recognisable in a failure message, never
@@ -125,6 +131,9 @@ enum SessionKind: Equatable, Codable {
             case .whileVPNActive: return .whileVPNActive
             case .whileUSBDevicePresent:
                 return .whileUSBDevicePresent(vendorID: 0x05ac, productID: 0x024f)
+            case .whileOnSchedule:
+                return .whileOnSchedule(TriggerSchedule(dayMask: TriggerSchedule.weekdays,
+                                                        startMinute: 9 * 60, endMinute: 18 * 60))
             }
         }
     }
@@ -147,6 +156,7 @@ enum SessionKind: Equatable, Codable {
         case .whileOnSubnet: return .whileOnSubnet
         case .whileVPNActive: return .whileVPNActive
         case .whileUSBDevicePresent: return .whileUSBDevicePresent
+        case .whileOnSchedule: return .whileOnSchedule
         }
     }
 
@@ -156,7 +166,8 @@ enum SessionKind: Equatable, Codable {
         switch self {
         case .indefinite, .duration, .untilTime, .lease, .whileOnACPower: return true
         case .whileAppRunning, .whileExternalDisplay, .whileCPUBusy, .whileProcessRunning,
-             .whileVolumeMounted, .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent: return false
+             .whileVolumeMounted, .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent,
+             .whileOnSchedule: return false
         }
     }
 
@@ -201,6 +212,11 @@ enum SessionKind: Equatable, Codable {
         // whole. `%04x` carries no locale, so no formatting can vary here.
         case .whileUSBDevicePresent(let vendorID, let productID):
             return "\(family.rawValue):\(USBDeviceID(vendorID: vendorID, productID: productID).text)"
+        // Three integers, joined without a formatter for `%04x`'s reason: this
+        // string is compared across processes, and anything locale-aware could
+        // render the same window two ways on two Macs.
+        case .whileOnSchedule(let schedule):
+            return "\(family.rawValue):\(schedule.dayMask)/\(schedule.startMinute)-\(schedule.endMinute)"
         // `.whileVPNActive` is here rather than above because it has no
         // associated value to put after the colon: the condition is "any VPN",
         // so there is nothing that identifies *which* tunnel was watched.
@@ -220,7 +236,7 @@ enum SessionKind: Equatable, Codable {
             return until
         case .indefinite, .whileAppRunning, .whileExternalDisplay,
              .whileOnACPower, .whileCPUBusy, .whileProcessRunning, .whileVolumeMounted,
-             .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent:
+             .whileOnSubnet, .whileVPNActive, .whileUSBDevicePresent, .whileOnSchedule:
             return nil
         }
     }

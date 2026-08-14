@@ -329,6 +329,13 @@ private struct AddTriggerSheet: View {
         }
     }()
     @State private var usbDeviceText = ""
+    /// The schedule being built. Seeded with the weekday nine-to-six the
+    /// picker's own label promises, so the sheet opens on a rule that is
+    /// already valid rather than one whose Add button is disabled until a day
+    /// is ticked.
+    @State private var scheduleDayMask: UInt8 = TriggerSchedule.weekdays
+    @State private var scheduleStart = 9 * 60
+    @State private var scheduleEnd = 18 * 60
     /// What is plugged in *now*, read once when the sheet is built — the
     /// `mountedVolumeNames` bargain exactly: a convenience for filling the field
     /// in, never a constraint on it, because a rule naming a dongle that is not
@@ -519,6 +526,45 @@ private struct AddTriggerSheet: View {
                     }
                 }
 
+                if inputField == .schedule {
+                    LabeledContent("Days") {
+                        // Seven toggles rather than a multi-select list: the
+                        // whole set is seven items, they are always the same
+                        // seven, and a row of them is read at a glance where a
+                        // list has to be opened. The symbols come from the
+                        // calendar so a non-English Mac is not shown "Mon".
+                        HStack(spacing: 4) {
+                            ForEach(0..<7, id: \.self) { day in
+                                Toggle(scheduleDayInitial(day),
+                                       isOn: scheduleDayBinding(day))
+                                    .toggleStyle(.button)
+                                    .help(Calendar.current.weekdaySymbols[day])
+                            }
+                        }
+                    }
+
+                    LabeledContent("From") { scheduleTimePicker($scheduleStart) }
+                    LabeledContent("Until") { scheduleTimePicker($scheduleEnd) }
+
+                    // Said before it can surprise anyone: an end earlier than
+                    // the start is not an error here, it is the way to write a
+                    // window that runs through midnight, and the rule it makes
+                    // belongs to the day it opens on.
+                    if scheduleEnd < scheduleStart {
+                        Text("This window runs overnight — it opens on the days you ticked "
+                             + "and closes the next morning.")
+                            .settingsFootnote()
+                    }
+
+                    if let problem = TriggerSchedule.problem(dayMask: scheduleDayMask,
+                                                             startMinute: scheduleStart,
+                                                             endMinute: scheduleEnd) {
+                        Label(problem, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    }
+                }
+
                 if inputField == .usbDevice {
                     LabeledContent("Device") {
                         HStack {
@@ -650,7 +696,49 @@ private struct AddTriggerSheet: View {
     /// is one: a new condition must *state* which field it wants. A chain of
     /// equality tests answers "none" on its author's behalf, silently, and the
     /// result is a sheet whose Add button is enabled with nothing filled in.
-    private enum InputField { case app, process, volume, subnet, usbDevice, none }
+    private enum InputField { case app, process, volume, subnet, usbDevice, schedule, none }
+
+    /// One letter per day, from the calendar rather than a literal, so a
+    /// non-English Mac gets its own initials. `veryShortWeekdaySymbols` is
+    /// already one character in every locale that has such a thing.
+    private func scheduleDayInitial(_ day: Int) -> String {
+        let symbols = Calendar.current.veryShortWeekdaySymbols
+        return day < symbols.count ? symbols[day] : "?"
+    }
+
+    private func scheduleDayBinding(_ day: Int) -> Binding<Bool> {
+        Binding(
+            get: { scheduleDayMask & (1 << UInt8(day)) != 0 },
+            set: { isOn in
+                if isOn { scheduleDayMask |= (1 << UInt8(day)) }
+                else { scheduleDayMask &= ~(1 << UInt8(day)) }
+            }
+        )
+    }
+
+    /// A `DatePicker` over a minutes-since-midnight `Int`.
+    ///
+    /// The stored value is an `Int` rather than a `Date` because a schedule has
+    /// no date — see `TriggerSchedule` for why the comparison is on wall-clock
+    /// components — but the only good macOS control for picking a time takes a
+    /// `Date`. This is the adapter, and it pins the date part to a fixed day so
+    /// nothing about *which* day can leak into the value.
+    private func scheduleTimePicker(_ minutes: Binding<Int>) -> some View {
+        DatePicker("", selection: Binding(
+            get: {
+                var parts = DateComponents()
+                parts.year = 2000; parts.month = 1; parts.day = 1
+                parts.hour = minutes.wrappedValue / 60
+                parts.minute = minutes.wrappedValue % 60
+                return Calendar.current.date(from: parts) ?? Date()
+            },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                minutes.wrappedValue = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+            }
+        ), displayedComponents: .hourAndMinute)
+        .labelsHidden()
+    }
 
     private var inputField: InputField {
         switch conditionKind {
@@ -662,6 +750,7 @@ private struct AddTriggerSheet: View {
         case .volumeMounted: return .volume
         case .onSubnet: return .subnet
         case .usbDevicePresent: return .usbDevice
+        case .onSchedule: return .schedule
         // `.vpnActive` names no tunnel — see `VPNObserving` — so there is
         // nothing to fill in, exactly like the display and power conditions.
         case .externalDisplayConnected, .acPowerConnected, .vpnActive: return .none
@@ -678,6 +767,10 @@ private struct AddTriggerSheet: View {
             return !subnetCIDR.isEmpty && TriggerCondition.subnetProblem(subnetCIDR) == nil
         case .usbDevicePresent:
             return !usbDeviceText.isEmpty && TriggerCondition.usbDeviceProblem(usbDeviceText) == nil
+        case .onSchedule:
+            return TriggerSchedule.problem(dayMask: scheduleDayMask,
+                                           startMinute: scheduleStart,
+                                           endMinute: scheduleEnd) == nil
         case .externalDisplayConnected, .acPowerConnected, .vpnActive: return true
         }
     }
@@ -699,6 +792,10 @@ private struct AddTriggerSheet: View {
             // half-typed, and that footnote names no device.
             let device = USBDeviceID(text: usbDeviceText) ?? USBDeviceID(vendorID: 0, productID: 0)
             return .usbDevicePresent(vendorID: device.vendorID, productID: device.productID)
+        case .onSchedule:
+            return .onSchedule(TriggerSchedule(dayMask: scheduleDayMask,
+                                               startMinute: scheduleStart,
+                                               endMinute: scheduleEnd))
         }
     }
 

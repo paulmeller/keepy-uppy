@@ -545,6 +545,7 @@ final class CLISessionKindReachabilityTests: XCTestCase {
             ["--while-display"], ["--while-ac-power"], ["--while-cpu-busy", "30"],
             ["--while-volume", "Backup"], ["--while-subnet", "192.168.1.0/24"],
             ["--while-vpn"], ["--while-usb", "05ac:024f"],
+            ["--while-schedule", "weekdays 09:00-18:00"],
         ]
         let reachable = Set(invocations.compactMap { flags -> SessionKind.Family? in
             guard case .success(.on(let kind, _, _)) = parseCLIArguments(["on"] + flags) else { return nil }

@@ -236,6 +236,7 @@ private enum OnOption: String, CaseIterable {
     case whileSubnet = "--while-subnet"
     case whileVPN = "--while-vpn"
     case whileUSB = "--while-usb"
+    case whileSchedule = "--while-schedule"
 
     /// How this option reads in `onUsage`, value placeholder and all.
     ///
@@ -258,6 +259,7 @@ private enum OnOption: String, CaseIterable {
         // because the placeholder's whole job here is to say "hexadecimal" —
         // which the angle brackets do not.
         case .whileUSB: return "\(rawValue) 05ac:024f"
+        case .whileSchedule: return "\(rawValue) 'weekdays 09:00-18:00'"
         // `--while-vpn` takes no value because the condition is "any VPN":
         // naming one would mean typing a network-service identifier, which is
         // not a thing anybody has seen. See `VPNObserving`.
@@ -393,6 +395,11 @@ private func parseOn(_ args: [String], now: Date) -> Result<CLICommand, CLIParse
             switch scanner.value(for: token).flatMap(parseUSBDeviceID) {
             case .success(let device):
                 kind = .whileUSBDevicePresent(vendorID: device.vendorID, productID: device.productID)
+            case .failure(let error): return .failure(error)
+            }
+        case .whileSchedule:
+            switch scanner.value(for: token).flatMap(parseSchedule) {
+            case .success(let schedule): kind = .whileOnSchedule(schedule)
             case .failure(let error): return .failure(error)
             }
         case .whileCPUBusy:
@@ -830,6 +837,26 @@ func parseSubnet(_ string: String) -> Result<String, CLIParseError> {
 /// keyboard costs one retype. The message names the value **and** points at
 /// `system_profiler`, because "what is my dongle's vendor ID" is a real
 /// question and a rejection that does not answer it just moves the problem.
+/// `parseUSBDeviceID`'s sibling, refusing an unmatchable window at the keyboard
+/// for the same reason: a session whose schedule can never contain now is one
+/// that ends two ticks after it starts.
+///
+/// The message spells out the whole grammar rather than naming the offending
+/// half, because there are three ways to get this wrong — the days, the times,
+/// and the space between them — and a rejection that says only "invalid" makes
+/// the user guess which.
+func parseSchedule(_ string: String) -> Result<TriggerSchedule, CLIParseError> {
+    guard let schedule = TriggerSchedule(text: string) else {
+        return .failure(CLIParseError(
+            message: "invalid --while-schedule '\(string)' — use days then a window, "
+                + "e.g. 'weekdays 09:00-18:00', 'weekends 10:00-16:00' or 'mon,wed,fri 22:00-06:00'. "
+                + "Days are weekdays/weekends/daily or a comma-separated list of "
+                + "mon,tue,wed,thu,fri,sat,sun; times are 24-hour HH:MM. "
+                + "An end earlier than the start runs the window overnight."))
+    }
+    return .success(schedule)
+}
+
 func parseUSBDeviceID(_ string: String) -> Result<USBDeviceID, CLIParseError> {
     guard let device = USBDeviceID(text: string) else {
         return .failure(CLIParseError(

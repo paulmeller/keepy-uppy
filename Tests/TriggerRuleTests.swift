@@ -124,7 +124,8 @@ final class TriggerRuleTests: XCTestCase {
                       network: FakeNetworkAddress = FakeNetworkAddress(),
                       vpn: FakeVPN = FakeVPN(),
                       usbDevice: FakeUSBDevice = FakeUSBDevice(),
-                      acPower: ConditionReading = .absent) -> [TriggerRule] {
+                      acPower: ConditionReading = .absent,
+                      now: Date? = nil) -> [TriggerRule] {
         triggersToFire(rules, activeSessions: activeSessions,
                        // No trigger condition consults the CPU sample, so this
                        // is filler — and `.undetermined` is the filler that
@@ -133,7 +134,11 @@ final class TriggerRuleTests: XCTestCase {
                                               processRunning: process, frontmostApp: frontmost,
                                               mountedVolume: volume, networkAddress: network,
                                               vpn: vpn, usbDevice: usbDevice,
-                                              acPower: acPower, cpuBusy: .undetermined))
+                                              acPower: acPower, cpuBusy: .undetermined),
+                       // Inside the sample window by default, so a caller that
+                       // does not care about the clock still gets a
+                       // `.onSchedule` rule that behaves like the others.
+                       now: now ?? insideTheSampleSchedule)
     }
 
     func testDisabledRuleNeverFires() {
@@ -506,6 +511,26 @@ final class TriggerRuleTests: XCTestCase {
     /// comment), which is also what keeps this helper honest: a seventh observer
     /// stops it compiling until somebody states what "present" means for it,
     /// rather than leaving the loops below quietly testing a stale bundle.
+    /// Noon on a Wednesday, built from components so it is noon *locally*
+    /// wherever this runs — the sample schedule is a weekday nine-to-six and is
+    /// compared on wall-clock components, so a UTC literal would put CI outside
+    /// the window and this suite would pass or fail by time zone.
+    /// 3am on a Sunday: no day of the weekday sample is ticked and no hour of
+    /// it is open, so the sample schedule is shut on both axes.
+    private var outsideTheSampleSchedule: Date {
+        var parts = DateComponents()
+        parts.year = 2026; parts.month = 8; parts.day = 16  // a Sunday
+        parts.hour = 3; parts.minute = 0
+        return Calendar.current.date(from: parts)!
+    }
+
+    private var insideTheSampleSchedule: Date {
+        var parts = DateComponents()
+        parts.year = 2026; parts.month = 8; parts.day = 12  // a Wednesday
+        parts.hour = 12; parts.minute = 0
+        return Calendar.current.date(from: parts)!
+    }
+
     private var everyObserverPresent: ObserverSet {
         ObserverSet(appRunning: FakeAppRunning(running: [], reading: .present),
                     display: FakeDisplay(external: false, reading: .present),
@@ -550,7 +575,8 @@ final class TriggerRuleTests: XCTestCase {
         for kind in TriggerConditionKind.allCases {
             let r = rule(kind.sampleCondition)
             XCTAssertEqual(
-                triggersToFire([r], activeSessions: [], observers: everyObserverPresent).map(\.id), [r.id],
+                triggersToFire([r], activeSessions: [], observers: everyObserverPresent,
+                               now: insideTheSampleSchedule).map(\.id), [r.id],
                 "\(kind) does not fire on a confident positive — its arm in triggersToFire is dead")
         }
     }
@@ -569,7 +595,14 @@ final class TriggerRuleTests: XCTestCase {
         for kind in TriggerConditionKind.allCases {
             let r = rule(kind.sampleCondition)
             XCTAssertTrue(
-                triggersToFire([r], activeSessions: [], observers: everyObserverUndetermined).isEmpty,
+                // **Outside the window for `.onSchedule`, and that is the only
+                // honest reading here.** Every other condition is silenced by
+                // its observer failing; a clock has no failure to simulate, so
+                // the analogue is a window that is legitimately shut. Handing
+                // it a time *inside* the window instead would fail this
+                // assertion for a condition that is behaving perfectly.
+                triggersToFire([r], activeSessions: [], observers: everyObserverUndetermined,
+                               now: outsideTheSampleSchedule).isEmpty,
                 "\(kind) fires on an observation that failed")
         }
     }
@@ -635,7 +668,13 @@ final class TriggerRuleTests: XCTestCase {
     /// ending arm by accident, and no test would have said a word.
     func testNoSessionEndsWhenEveryObservationFailed() {
         var evidence = SessionEvidence()
-        let start = Date(timeIntervalSince1970: 2_000_000)
+        // Inside the weekday window `Family.whileOnSchedule`'s sample carries,
+        // rather than an epoch offset that lands wherever the local zone puts
+        // it. That kind has no failed reading to simulate — a clock always
+        // answers — so the world in which "every observation failed" leaves it
+        // running is one where its window is legitimately open. The runs below
+        // advance a minute at a time and stay inside it.
+        let start = insideTheSampleSchedule
         for family in SessionKind.Family.allCases {
             let session = Session(id: UUID(),
                                   kind: family.sampleKind(deadline: start.addingTimeInterval(86_400)),
