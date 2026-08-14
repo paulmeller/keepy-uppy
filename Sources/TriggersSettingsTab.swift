@@ -544,7 +544,38 @@ private struct AddTriggerSheet: View {
                     }
 
                     LabeledContent("From") { scheduleTimePicker($scheduleStart) }
-                    LabeledContent("Until") { scheduleTimePicker($scheduleEnd) }
+                    LabeledContent("Until") {
+                        HStack {
+                            if scheduleEnd == TriggerSchedule.minutesPerDay {
+                                // A `DatePicker` cannot represent midnight-at-
+                                // the-end-of-the-day: it edits a wall-clock
+                                // time, and 24:00 is not one — it is an
+                                // exclusive bound. Showing the picker here
+                                // would silently round the value down to 23:59
+                                // and reintroduce the one-minute nightly gap
+                                // this control exists to avoid, so the whole-
+                                // day case is a label instead.
+                                Text("Midnight (end of day)")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                scheduleTimePicker($scheduleEnd)
+                            }
+                            Spacer()
+                            Toggle("All day", isOn: Binding(
+                                get: { scheduleStart == 0
+                                    && scheduleEnd == TriggerSchedule.minutesPerDay },
+                                set: { isOn in
+                                    if isOn {
+                                        scheduleStart = 0
+                                        scheduleEnd = TriggerSchedule.minutesPerDay
+                                    } else {
+                                        scheduleEnd = 18 * 60
+                                    }
+                                }
+                            ))
+                            .toggleStyle(.checkbox)
+                        }
+                    }
 
                     // Said before it can surprise anyone: an end earlier than
                     // the start is not an error here, it is the way to write a
