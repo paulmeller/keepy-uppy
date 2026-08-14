@@ -151,10 +151,20 @@ final class DaemonConnection: ObservableObject {
         return result
     }
 
-    func refresh() async {
+    /// Reports whether it actually managed to read the daemon.
+    ///
+    /// It always could — the early `return` on a failed call has been here from
+    /// the start — but it said so to nobody, so a caller could not tell a
+    /// refreshed `keepingAwake` from a stale one. Everything in the UI reads
+    /// this object continuously and redraws when it changes, so for those
+    /// callers a stale value is momentary and harmless. A Shortcut asking
+    /// once, and branching an automation on the answer, is the caller that
+    /// needs the difference.
+    @discardableResult
+    func refresh() async -> Bool {
         guard let state: Bool = await call({ proxy, reply in
             proxy.currentState { reply($0) }
-        }) else { return }
+        }) else { return false }
         keepingAwake = state
 
         guard let list: [Session] = await call({ proxy, reply in
@@ -167,12 +177,13 @@ final class DaemonConnection: ObservableObject {
                 }
                 reply(decoded)
             }
-        }) else { return }
+        }) else { return false }
         sessions = list
         // The note describes a session that is running now. Once nothing is
         // running it is stale, and a stale explanation on an idle menu is worse
         // than none.
         if list.isEmpty { powerRequestNote = nil }
+        return true
     }
 
     /// The `Session` this app asks the daemon to start — the *request*, whose
@@ -263,19 +274,26 @@ final class DaemonConnection: ObservableObject {
 
     /// Answers how many sessions were actually stopped.
     ///
-    /// `@discardableResult` because the menu and the hot key both stop and then
-    /// look at the refreshed list rather than a count; the count is here for
-    /// the Shortcut, which has no list to look at and has to say something.
-    /// Nil — the daemon never answered — is reported as 0 rather than guessed
-    /// upward, for `ConditionReading`'s reason: a number nobody measured is
-    /// worse than an admission.
+    /// Answers how many sessions were stopped, or **nil when the daemon never
+    /// answered**.
+    ///
+    /// The nil is the whole point and an earlier version of this threw it away,
+    /// collapsing it to 0. That is the same mistake `ConditionReading` exists
+    /// to prevent one layer down: "nothing was running" and "I could not ask"
+    /// are different facts, and only one of them is safe to tell somebody. A
+    /// Shortcut that reported "nothing was running" after a timed-out stop
+    /// would be reassuring a user whose sessions are all still live.
+    ///
+    /// `@discardableResult` because the menu and the hot key stop and then read
+    /// the refreshed list rather than a count; the count is for callers with no
+    /// list to look at.
     @discardableResult
-    func stopAllSessions(all: Bool) async -> Int {
+    func stopAllSessions(all: Bool) async -> Int? {
         let stopped: Int? = await call { proxy, reply in
             proxy.stopAllSessions(all: all) { stopped, _ in reply(stopped) }
         }
         await refresh()
-        return stopped ?? 0
+        return stopped
     }
 
     /// Changes what a **running** session asks of this Mac, and reports whether

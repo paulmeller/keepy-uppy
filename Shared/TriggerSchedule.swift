@@ -20,8 +20,15 @@ struct TriggerSchedule: Codable, Equatable, CustomStringConvertible {
     var dayMask: UInt8
     /// Minutes since local midnight, `0..<1440`.
     var startMinute: Int
-    /// Minutes since local midnight, `0..<1440`. May be *less* than
+    /// Minutes since local midnight, `0...1440`. May be *less* than
     /// `startMinute`, which is how a window crosses midnight.
+    ///
+    /// **1440 is legal here and nowhere else**: it is midnight at the far end
+    /// of the day, and it exists because the end is exclusive. Without it there
+    /// is no way to say "all day" — `00:00`–`23:59` leaves the final minute
+    /// out, so a bound session ends at 23:59 and restarts at 00:00, dropping
+    /// the Mac's keep-awake for a minute every night. `startMinute` has no such
+    /// case: a window that begins at midnight begins at 0.
     var endMinute: Int
 
     static let minutesPerDay = 1440
@@ -156,21 +163,28 @@ extension TriggerSchedule {
         let window = parts[1].split(separator: "-")
         guard window.count == 2,
               let start = TriggerSchedule.parseClock(String(window[0])),
-              let end = TriggerSchedule.parseClock(String(window[1])),
+              let end = TriggerSchedule.parseClock(String(window[1]), allowEndOfDay: true),
               start != end
         else { return nil }
 
         self.init(dayMask: mask, startMinute: start, endMinute: end)
     }
 
-    /// `"09:00"` to `540`. Rejects anything that is not two numbers in range —
-    /// including `"24:00"`, which reads as a legitimate end-of-day and is not:
-    /// the last minute of a day is `23:59`, and accepting `24:00` would store a
-    /// minute count no `Calendar` component can ever equal.
-    private static func parseClock(_ text: String) -> Int? {
+    /// `"09:00"` to `540`.
+    ///
+    /// `"24:00"` is accepted **as an end only**, where it means midnight at the
+    /// far end of the day and is the one way to write a whole-day window. As a
+    /// *start* it is meaningless — a window cannot open after the last minute
+    /// of the day — so `allowEndOfDay` gates it rather than the value being
+    /// blanket-legal. An earlier draft rejected it everywhere on the grounds
+    /// that no `Calendar` component equals 1440, which is true of a wall-clock
+    /// reading and irrelevant to an exclusive bound.
+    private static func parseClock(_ text: String, allowEndOfDay: Bool = false) -> Int? {
         let bits = text.split(separator: ":")
         guard bits.count == 2, let hour = Int(bits[0]), let minute = Int(bits[1]),
-              (0...23).contains(hour), (0...59).contains(minute) else { return nil }
+              (0...59).contains(minute) else { return nil }
+        if allowEndOfDay, hour == 24, minute == 0 { return TriggerSchedule.minutesPerDay }
+        guard (0...23).contains(hour) else { return nil }
         return hour * 60 + minute
     }
 
@@ -185,7 +199,7 @@ extension TriggerSchedule {
         }
         if startMinute == endMinute {
             return "Start and end are the same time, so the window has no length. "
-                + "For a whole day, use 00:00 to 23:59."
+                + "For a whole day, use 00:00 to 24:00."
         }
         return nil
     }

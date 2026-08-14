@@ -66,8 +66,29 @@ hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$tmp/keepy-uppy.dmg" >/de
 [ -d "$mnt/$APP" ] || fail "that disk image does not contain $APP."
 
 say "Checking the signature…"
+
+# TWO checks, because notarization alone does not say *whose* app this is.
+#
+# `spctl` answers "Apple notarized this and Gatekeeper would run it", which is
+# true of every notarized Developer ID app in the world. On its own it would
+# accept any such app that happened to be named "Keepy Uppy.app" in a release
+# asset — and this script then runs that app's `setup`, which asks for an
+# administrator. That is a straight path from "the download was swapped" to
+# "root", so the identity has to be pinned as well.
+#
+# The requirement below is the one the app's own XPC services pin, and the same
+# shape `codesign --requirements` embeds: Apple's root, this bundle identifier,
+# and this team's leaf certificate. `codesign -R` is the check rather than a
+# grep of `codesign -dv` output, because a requirement is evaluated by the same
+# code that enforces one, and string-matching a human-readable dump is how you
+# get fooled by a bundle id that merely *contains* the right text.
 spctl -a -vvv -t install "$mnt/$APP" 2>&1 | grep -q "source=Notarized Developer ID" \
   || fail "the downloaded app is not notarized — refusing to install it."
+
+codesign --verify --strict -R \
+  '=anchor apple generic and identifier "au.com.workwireless.keepy-uppy" and certificate leaf[subject.OU] = "2F2JR84D4V"' \
+  "$mnt/$APP" 2>/dev/null \
+  || fail "the downloaded app is notarized but is not Keepy Uppy signed by its own team — refusing to install it."
 
 if [ -e "$DEST/$APP" ]; then
   say "Replacing the copy already in $DEST…"

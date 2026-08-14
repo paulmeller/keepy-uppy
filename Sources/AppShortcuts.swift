@@ -38,6 +38,7 @@ private func appDaemon() throws -> DaemonConnection {
 enum KeepyUppyIntentError: Swift.Error, CustomLocalizedStringResourceConvertible {
     case appNotReady
     case daemonRefused
+    case daemonUnreachable
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
@@ -49,6 +50,13 @@ enum KeepyUppyIntentError: Swift.Error, CustomLocalizedStringResourceConvertible
             // automation, the per-user cap is reached — and inventing one here
             // would be the same lie the notification copy refuses to tell.
             return "Keepy Uppy could not start a session. Check Settings → Safety & Guards, or run keepy-uppy status for what the daemon says."
+        case .daemonUnreachable:
+            // Thrown rather than answered, because the alternative is a
+            // confident wrong answer. A Shortcut branching on "is this Mac
+            // awake" would take the wrong branch, and a Shortcut told "nothing
+            // was stopped" would believe sessions had ended that are still
+            // running.
+            return "Keepy Uppy could not reach its background service, so it cannot say what this Mac is doing. Check Settings → General."
         }
     }
 }
@@ -125,7 +133,9 @@ struct StopKeepingAwakeIntent: AppIntent {
         // key. A Shortcut that swept away a `keepy-uppy on` session from a
         // build script would be a surprise nobody asked for, and the wording
         // above promises it does not.
-        let stopped = await daemon.stopAllSessions(all: false)
+        guard let stopped = await daemon.stopAllSessions(all: false) else {
+            throw KeepyUppyIntentError.daemonUnreachable
+        }
         // Three literal returns rather than one ternary. `IntentDialog` is
         // built from a *literal* — a ternary hands it an already-formed
         // `String`, which does not convert, and whether that compiles turns out
@@ -151,7 +161,9 @@ struct IsKeepingAwakeIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ReturnsValue<Bool> & ProvidesDialog {
         let daemon = try appDaemon()
-        await daemon.refresh()
+        guard await daemon.refresh() else {
+            throw KeepyUppyIntentError.daemonUnreachable
+        }
         let awake = daemon.keepingAwake
         if awake {
             return .result(value: true, dialog: "This Mac is being kept awake.")

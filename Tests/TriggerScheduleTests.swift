@@ -209,8 +209,10 @@ extension TriggerScheduleTests {
         XCTAssertNil(TriggerSchedule(text: "mon,tues 09:00-18:00"))
         // Zero length — the same value `problem(...)` refuses at the keyboard.
         XCTAssertNil(TriggerSchedule(text: "weekdays 09:00-09:00"))
-        // 24:00 reads as end-of-day and is not a time a `Calendar` can produce.
-        XCTAssertNil(TriggerSchedule(text: "weekdays 09:00-24:00"))
+        // `09:00-24:00` is deliberately NOT here: 24:00 is legal as an end, and
+        // is the only way to write a window that runs to midnight without
+        // leaving the day's last minute out. See
+        // `testTwentyFourHundredParsesAsAnEndOnly`.
         XCTAssertNil(TriggerSchedule(text: "weekdays 09:60-18:00"))
         // Shape errors: no window, no days, no space.
         XCTAssertNil(TriggerSchedule(text: "weekdays"))
@@ -222,5 +224,58 @@ extension TriggerScheduleTests {
     func testAParsedScheduleMatchesTheSameWindowAsAHandBuiltOne() {
         XCTAssertEqual(TriggerSchedule(text: "weekdays 09:00-18:00"),
                        schedule(TriggerSchedule.weekdays, 9 * 60, 18 * 60))
+    }
+}
+
+extension TriggerScheduleTests {
+    // MARK: - The whole day
+
+    /// The gap a code review found, pinned so it cannot come back.
+    ///
+    /// `includes` is half-open, so `00:00`–`23:59` excludes 23:59 entirely — a
+    /// bound session ends at 23:59 and restarts at 00:00, dropping the Mac's
+    /// keep-awake for a minute every night. `problem(...)` used to *recommend*
+    /// exactly that window.
+    func testTheLastMinuteOfTheDayIsInsideAWholeDayWindow() {
+        let allDay = schedule(TriggerSchedule.everyDay, 0, TriggerSchedule.minutesPerDay)
+        XCTAssertTrue(allDay.includes(date("2026-08-12 00:00"), calendar: calendar))
+        XCTAssertTrue(allDay.includes(date("2026-08-12 23:58"), calendar: calendar))
+        XCTAssertTrue(allDay.includes(date("2026-08-12 23:59"), calendar: calendar),
+                      "the last minute of the day must be inside a whole-day window")
+    }
+
+    /// …and the window that used to be recommended still has its hole, which is
+    /// why the advice changed rather than the comparison.
+    func testAWindowEndingAt2359StillExcludesThatMinute() {
+        let almost = schedule(TriggerSchedule.everyDay, 0, 23 * 60 + 59)
+        XCTAssertTrue(almost.includes(date("2026-08-12 23:58"), calendar: calendar))
+        XCTAssertFalse(almost.includes(date("2026-08-12 23:59"), calendar: calendar))
+    }
+
+    func testTwentyFourHundredParsesAsAnEndOnly() {
+        let allDay = TriggerSchedule(text: "daily 00:00-24:00")
+        XCTAssertEqual(allDay?.endMinute, TriggerSchedule.minutesPerDay)
+        XCTAssertEqual(allDay?.startMinute, 0)
+        // Meaningless as a start: a window cannot open after the day's last minute.
+        XCTAssertNil(TriggerSchedule(text: "daily 24:00-09:00"))
+        // Still not a wall-clock time anywhere else.
+        XCTAssertNil(TriggerSchedule(text: "daily 24:30-09:00"))
+        XCTAssertNil(TriggerSchedule(text: "daily 09:00-24:30"))
+        XCTAssertNil(TriggerSchedule(text: "daily 25:00-09:00"))
+    }
+
+    /// The advice `problem(...)` gives must itself be a window with no hole —
+    /// the failure being fixed was a *recommendation*, not a comparison.
+    func testTheWholeDayWindowItRecommendsIsActuallyWhole() {
+        let recommended = TriggerSchedule(text: "daily 00:00-24:00")
+        XCTAssertNotNil(recommended)
+        XCTAssertNil(TriggerSchedule.problem(dayMask: recommended!.dayMask,
+                                             startMinute: recommended!.startMinute,
+                                             endMinute: recommended!.endMinute))
+        for hour in 0..<24 {
+            let stamp = String(format: "2026-08-12 %02d:59", hour)
+            XCTAssertTrue(recommended!.includes(date(stamp), calendar: calendar),
+                          "\(stamp) fell outside a whole-day window")
+        }
     }
 }
