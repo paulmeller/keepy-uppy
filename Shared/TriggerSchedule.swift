@@ -7,7 +7,7 @@ import Foundation
 /// the tests that matter here are the ones about *when* — midnight, the last
 /// minute before the window opens, the Sunday of a Friday-night rule — which
 /// are unreachable if the type reads its own clock.
-struct TriggerSchedule: Codable, Equatable {
+struct TriggerSchedule: Codable, Equatable, CustomStringConvertible {
     /// Bit 0 is Sunday … bit 6 is Saturday, matching `Calendar`'s 1-based
     /// `weekday` less one.
     ///
@@ -34,6 +34,17 @@ struct TriggerSchedule: Codable, Equatable {
 }
 
 extension TriggerSchedule {
+    /// So that interpolating a schedule anywhere prints a window rather than
+    /// its fields.
+    ///
+    /// `keepy-uppy sessions` interpolates `SessionKind` directly, which is fine
+    /// for a case carrying a name or a number and became
+    /// `whileOnSchedule(keepy_uppy.TriggerSchedule(dayMask: 65, startMinute:
+    /// 360, endMinute: 1380))` the moment a case carried a struct. Conforming
+    /// here fixes that line and every future one, rather than teaching one
+    /// print statement about one case.
+    var description: String { describe() }
+
     func includesDay(_ dayIndex: Int) -> Bool {
         guard (0..<7).contains(dayIndex) else { return false }
         return dayMask & (1 << UInt8(dayIndex)) != 0
