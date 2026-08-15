@@ -46,7 +46,8 @@ it once and the Mac stays awake precisely as long as the tool does:
 | Codex CLI | ✅ | `hooks.json` |
 | Pi | ✅ | `session_shutdown` |
 | Antigravity (`agy`) | ✅ | `hooks.json` |
-| Cursor CLI | ✅ | *(no session-end hook upstream yet)* |
+| Cursor CLI | ✅ | `sessionEnd` |
+| Grok | ✅ | *(no session-end hook upstream yet)* |
 
 One click in Settings → Triggers adds any of them. Or wire a tool's own
 completion hook straight into Keepy Uppy for exact task-level precision:
