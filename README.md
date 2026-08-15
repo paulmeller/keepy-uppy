@@ -429,7 +429,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **1015 unit tests**.
+by **1018 unit tests**.
 
 ## Build it yourself
 
@@ -462,7 +462,7 @@ still works if you have one — it's just the second choice.
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 1015 tests, and a
+**v0.1 — new, and moving fast.** Signed and notarized, 1018 tests, and a
 privilege boundary that's been through three adversarial review passes. What
 it hasn't had yet is months on other people's hardware. Closed-lid behaviour
 over a real job is verified — a live session was watched surviving a genuine
@@ -493,7 +493,7 @@ is not the same thing.
 what only hardware can settle.
 
 **This page describes the current download.** [Releases](../../releases) has
-**v0.1.4**, and everything above is in it: all ten trigger conditions
+**v0.1.5**, and everything above is in it: all ten trigger conditions
 including the scheduled one, the Shortcuts actions, wake modes,
 `--keep-disks-awake`, `keepy-uppy mode`, per-rule wake mode and lifetime, the
 five-tab Settings window with search, notifications, keyboard shortcuts, the
