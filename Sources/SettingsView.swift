@@ -5,8 +5,10 @@ import SwiftUI
 /// that fits the tallest pane. Panes scroll rather than clip if a future one
 /// outgrows it.
 private enum SettingsMetrics {
-    static let width: CGFloat = 560
-    static let minHeight: CGFloat = 440
+    /// The *detail* column. It is the width the five panes were laid out
+    /// against as tabs, kept unchanged so no pane has to be re-checked.
+    static let detailWidth: CGFloat = 560
+    static let minHeight: CGFloat = 460
 }
 
 /// Deliberately observes nothing. It held an `@ObservedObject
@@ -28,8 +30,56 @@ struct SettingsView: View {
     /// for what a second instance would do.
     @ObservedObject var hotKeys: HotKeyCenter
 
-    @State private var selectedTab: SettingsTab = .general
+    /// Stored rather than `@State`, so reopening Settings returns you to the
+    /// pane you were last in. macOS settings windows are expected to do this,
+    /// and the old `@State` reset to General on every open — which is worst
+    /// exactly where it is most annoying, on the deep panes somebody is
+    /// iterating on.
+    @AppStorage("settingsSelectedTab", store: PreferencesSuite.defaults)
+    private var selectedTabRaw: String = SettingsTab.general.rawValue
     @State private var searchQuery = ""
+
+    /// Falls back rather than trapping on a value written by a newer build or
+    /// edited by hand, exactly like every other raw-value reader here.
+    private var selectedTab: Binding<SettingsTab> {
+        Binding(
+            get: { SettingsTab(rawValue: selectedTabRaw) ?? .general },
+            set: { selectedTabRaw = $0.rawValue }
+        )
+    }
+
+    /// Honours the system's sidebar size, which most apps ignore. The numbers
+    /// are Ice's — the open-source menu bar app whose settings window is the
+    /// one people point at — because they are already tuned against the same
+    /// control the OS offers.
+    @Environment(\.sidebarRowSize) private var sidebarRowSize
+
+    private var sidebarWidth: CGFloat {
+        switch sidebarRowSize {
+        case .small: 190
+        case .medium: 210
+        case .large: 230
+        @unknown default: 210
+        }
+    }
+
+    private var sidebarItemHeight: CGFloat {
+        switch sidebarRowSize {
+        case .small: 26
+        case .medium: 32
+        case .large: 34
+        @unknown default: 32
+        }
+    }
+
+    private var sidebarItemFontSize: CGFloat {
+        switch sidebarRowSize {
+        case .small: 13
+        case .medium: 15
+        case .large: 16
+        @unknown default: 15
+        }
+    }
 
     /// Passed straight through to the same tab, whose Diagnostics section asks
     /// it for the daemon's version. It has to be the app's one connection: a
@@ -37,6 +87,35 @@ struct SettingsView: View {
     /// connection, poll it forever, and report on the health of something no
     /// other part of the app is using.
     let daemon: DaemonConnection
+
+    /// The window rules a settings window is expected to follow, and which
+    /// SwiftUI does not apply on its own.
+    ///
+    /// **Close only.** A settings window is not a document: it cannot be
+    /// minimised to the Dock and there is nothing to zoom to full screen, so
+    /// both buttons are disabled rather than left live and doing something
+    /// nobody wants. macOS keeps drawing them, greyed, which is the intended
+    /// appearance.
+    ///
+    /// **Escape closes it**, alongside the ⌘W the Settings scene already
+    /// provides — a modeless window whose changes are already saved should be
+    /// dismissible with the key people press to dismiss things.
+    ///
+    /// Done in `onAppear` rather than at construction because there is no
+    /// `NSWindow` until SwiftUI has put the view in one.
+    @MainActor
+    private func configureSettingsWindow() {
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: {
+            $0.identifier?.rawValue.contains("Settings") == true || $0.isKeyWindow
+        }) else { return }
+        window.standardWindowButton(.miniaturizeButton)?.isEnabled = false
+        window.standardWindowButton(.zoomButton)?.isEnabled = false
+        // Not `.fullScreenPrimary`: a settings window has no full-screen mode
+        // worth offering, and leaving the collection behaviour alone is what
+        // puts a live green button back on some macOS versions.
+        window.collectionBehavior.remove(.fullScreenPrimary)
+        window.collectionBehavior.insert(.fullScreenNone)
+    }
 
     var body: some View {
         // Five tabs, in the order a new user meets them: what the app does on
@@ -54,33 +133,66 @@ struct SettingsView: View {
         // The tabs are `selection`-bound now, which they were not, because
         // search has to be able to *go* somewhere: a result that names a tab
         // and cannot open it is a worse answer than no result.
-        TabView(selection: $selectedTab) {
-            GeneralSettingsTab()
-                .tabItem { Label(SettingsTab.general.title, systemImage: SettingsTab.general.symbol) }
-                .tag(SettingsTab.general)
-            TriggersSettingsTab()
-                .tabItem { Label(SettingsTab.triggers.title, systemImage: SettingsTab.triggers.symbol) }
-                .tag(SettingsTab.triggers)
-            DisplaySettingsTab()
-                .tabItem { Label(SettingsTab.display.title, systemImage: SettingsTab.display.symbol) }
-                .tag(SettingsTab.display)
-            SafetySettingsTab()
-                .tabItem { Label(SettingsTab.safety.title, systemImage: SettingsTab.safety.symbol) }
-                .tag(SettingsTab.safety)
-            AdvancedSettingsTab(hotKeys: hotKeys, daemon: daemon)
-                .tabItem { Label(SettingsTab.advanced.title, systemImage: SettingsTab.advanced.symbol) }
-                .tag(SettingsTab.advanced)
+        NavigationSplitView {
+            List(selection: selectedTab) {
+                Section {
+                    ForEach(SettingsTab.allCases) { tab in
+                        Label {
+                            Text(tab.title)
+                                .font(.system(size: sidebarItemFontSize))
+                                .padding(.leading, 2)
+                        } icon: {
+                            Image(systemName: tab.symbol)
+                        }
+                        .frame(height: sidebarItemHeight)
+                        .tag(tab)
+                    }
+                }
+                // **No app-name header, deliberately.** A 30pt wordmark was
+                // here for one revision because it is what Ice does and it
+                // makes a screenshot look designed. Neither System Settings nor
+                // Xcode's settings has one, and a settings window is the last
+                // place to be inventive — the title bar already names the pane,
+                // and the window is only ever opened from this app. It was the
+                // prettier layout and the wrong one.
+                .collapsible(false)
+            }
+            // A settings sidebar is a fixed list of five, not a document
+            // browser: it must not scroll, and it must not offer to collapse
+            // itself away and leave the window with no navigation at all.
+            .scrollDisabled(true)
+            .removeSidebarToggle()
+            .navigationSplitViewColumnWidth(sidebarWidth)
+            // Top of the sidebar, where System Settings puts its own. It was
+            // briefly at the bottom, which looked tidy and is not where anybody
+            // reaches for it.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                SettingsSearchField(query: $searchQuery, selectedTab: selectedTab)
+            }
+        } detail: {
+            Group {
+                switch selectedTab.wrappedValue {
+                case .general: GeneralSettingsTab()
+                case .triggers: TriggersSettingsTab()
+                case .display: DisplaySettingsTab()
+                case .safety: SafetySettingsTab()
+                case .advanced: AdvancedSettingsTab(hotKeys: hotKeys, daemon: daemon)
+                }
+            }
+            // A floor, not a fixed width. The panes were laid out against this
+            // as tabs and must never be squeezed below it; letting them use a
+            // little more when the window is wider costs nothing, and pinning
+            // them exactly would leave dead space beside a resizable window.
+            .frame(minWidth: SettingsMetrics.detailWidth)
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            SettingsSearchField(query: $searchQuery, selectedTab: $selectedTab)
-        }
-        .frame(minWidth: SettingsMetrics.width, maxWidth: SettingsMetrics.width,
-               minHeight: SettingsMetrics.minHeight)
+        .navigationTitle(selectedTab.wrappedValue.title)
+        .frame(minHeight: SettingsMetrics.minHeight)
         .onAppear {
             // An LSUIElement app owns no menu bar and is never "frontmost" by
             // default, so its Settings window opens behind whatever the user
             // was doing unless it asks for activation explicitly (spec §9).
             NSApp.activate(ignoringOtherApps: true)
+            configureSettingsWindow()
         }
     }
 }
