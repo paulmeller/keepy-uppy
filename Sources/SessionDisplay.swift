@@ -803,7 +803,14 @@ let sessionEndActionsNotificationsSignpost = "To be told on screen instead, see 
 /// avoid.
 func menuStatusLine(yours: [Session], others: [Session], now: Date) -> String {
     let all = yours.count + others.count
-    guard all > 0 else { return "Not keeping awake" }
+    // "Nothing is keeping this Mac awake", not "Not keeping awake". The old
+    // line was a fragment with no subject — *what* is not keeping awake? — and
+    // it is the first thing in the menu at the one moment the reader wants an
+    // action rather than a negation. The wording matches the notification
+    // toggle that says the same thing ("when nothing of yours is keeping this
+    // Mac awake"), because two phrasings for one state is how a user decides
+    // they are two states.
+    guard all > 0 else { return "Nothing is keeping this Mac awake" }
     if all == 1, let only = (yours + others).first {
         return "Keeping awake — \(remainingTimeText(for: only, now: now).lowercased())"
     }
@@ -1314,6 +1321,23 @@ func menuLidCaveat(for sessions: [Session]) -> String? {
     // reconstructs a partial request it stops being the same computation.
     guard !PowerPlan.reduce(sessions.map(\.power)).sleepDisabled else { return nil }
     return "Closing the lid will still let this Mac sleep."
+}
+
+/// Whether the lid caveat should be shown *given* a power-skew note is already
+/// on screen.
+///
+/// Both lines can be true at once, and when the dropped axis is the lid they
+/// are the same fact told twice: the note says the background service ignored
+/// keeping the lid closed and how to fix it, and the caveat then says what that
+/// means. Two grey advisory lines stacked above the sessions is the
+/// accumulation this menu was rebuilt to remove.
+///
+/// The note wins, because it carries the remedy. A skew about *disks* leaves
+/// the caveat showing, since that note says nothing about the lid and the
+/// caveat is then the only place the lid is mentioned.
+func menuShowsLidCaveat(alongside powerRequestNote: String?) -> Bool {
+    guard let note = powerRequestNote else { return true }
+    return !note.contains(SessionPowerSkew.Axis.wakeMode.describes)
 }
 
 // MARK: - The stored default session kind

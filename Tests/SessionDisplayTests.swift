@@ -730,7 +730,8 @@ final class MenuCopyTests: XCTestCase {
     }
 
     func testIdleSaysSoPlainly() {
-        XCTAssertEqual(menuStatusLine(yours: [], others: [], now: t0), "Not keeping awake")
+        XCTAssertEqual(menuStatusLine(yours: [], others: [], now: t0),
+                       "Nothing is keeping this Mac awake")
     }
 
     func testOneSessionNamesWhatItIsRatherThanCountingIt() {
@@ -3177,5 +3178,36 @@ final class DiagnosticsCopyTests: XCTestCase {
         let footnote = diagnosticsSectionFootnote.lowercased()
         XCTAssertTrue(footnote.contains("terminal"), footnote)
         XCTAssertTrue(footnote.contains("bug") || footnote.contains("issue"), footnote)
+    }
+}
+
+
+/// The rule that stops two grey advisory lines stacking above the sessions.
+final class MenuLidCaveatSuppressionTests: XCTestCase {
+    private func skewNote(_ requested: PowerRequest, _ admitted: PowerRequest) -> String? {
+        SessionPowerSkew.note(requested: requested, admitted: admitted)
+    }
+
+    func testTheCaveatShowsWhenThereIsNoSkewNote() {
+        XCTAssertTrue(menuShowsLidCaveat(alongside: nil))
+    }
+
+    /// The note already says the service ignored *how it keeps this Mac awake*
+    /// and how to fix it; the caveat would say what that means, second, without
+    /// a remedy.
+    func testALidSkewSuppressesTheCaveat() {
+        let note = skewNote(PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false),
+                            PowerRequest(wakeMode: .system, keepsDisksAwake: false))
+        XCTAssertNotNil(note)
+        XCTAssertFalse(menuShowsLidCaveat(alongside: note))
+    }
+
+    /// A disk-only skew says nothing about the lid, so the caveat is then the
+    /// only place the lid is mentioned and must survive.
+    func testADiskOnlySkewLeavesTheCaveatAlone() {
+        let note = skewNote(PowerRequest(wakeMode: .clamshell, keepsDisksAwake: true),
+                            PowerRequest(wakeMode: .clamshell, keepsDisksAwake: false))
+        XCTAssertNotNil(note)
+        XCTAssertTrue(menuShowsLidCaveat(alongside: note))
     }
 }

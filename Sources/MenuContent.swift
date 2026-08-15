@@ -185,7 +185,8 @@ struct MenuContent: View {
             // why it can be stated flatly here while the CLI's equivalent has
             // to be hedged down to the one session it knows about. Absent
             // whenever the lid is held — the expected case says nothing.
-            if let caveat = menuLidCaveat(for: daemon.sessions) {
+            if menuShowsLidCaveat(alongside: daemon.powerRequestNote),
+               let caveat = menuLidCaveat(for: daemon.sessions) {
                 Text(caveat)
             }
 
