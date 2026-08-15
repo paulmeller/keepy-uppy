@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// The five tabs, as a value rather than five `.tabItem` calls in a row.
 ///
@@ -18,6 +18,28 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         case .display: return "Display"
         case .safety: return "Safety & Guards"
         case .advanced: return "CLI & Advanced"
+        }
+    }
+
+    /// The tile colour behind the glyph.
+    ///
+    /// System Settings draws every sidebar row's icon as a white symbol on a
+    /// filled, rounded square, and that — far more than the typeface or the
+    /// spacing — is what makes a sidebar read as a *settings* sidebar rather
+    /// than a file list. Bare monochrome symbols are what this had, and they
+    /// looked like a generic outline view sitting next to the real thing.
+    ///
+    /// The colours are picked to mean something rather than to decorate:
+    /// Triggers is the yellow of something firing, Safety the red of something
+    /// stopping, Display the blue macOS itself uses for screen settings, and
+    /// the two that are "the app itself" are grey.
+    var tint: Color {
+        switch self {
+        case .general: return .gray
+        case .triggers: return .orange
+        case .display: return .blue
+        case .safety: return .red
+        case .advanced: return Color(nsColor: .darkGray)
         }
     }
 

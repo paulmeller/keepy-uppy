@@ -117,6 +117,21 @@ struct SettingsView: View {
         window.collectionBehavior.insert(.fullScreenNone)
     }
 
+    private var searchResults: [SettingsIndexEntry] { searchSettings(searchQuery) }
+
+    @ViewBuilder
+    private func sidebarRow(for tab: SettingsTab) -> some View {
+        Label {
+            Text(tab.title)
+                .font(.system(size: sidebarItemFontSize))
+                .padding(.leading, 2)
+        } icon: {
+            SettingsTabIcon(tab: tab)
+        }
+        .frame(height: sidebarItemHeight)
+        .tag(tab)
+    }
+
     var body: some View {
         // Five tabs, in the order a new user meets them: what the app does on
         // its own (General), what starts a session without you (Triggers), what
@@ -134,42 +149,49 @@ struct SettingsView: View {
         // search has to be able to *go* somewhere: a result that names a tab
         // and cannot open it is a worse answer than no result.
         NavigationSplitView {
-            // A plain stack rather than `safeAreaInset`. The inset version puts
-            // the field inside the List's safe area, which is *already* inset
-            // beneath the title bar, so the two stacked and left a band of
-            // empty sidebar above the search field.
-            VStack(spacing: 0) {
-                SettingsSearchField(query: $searchQuery, selectedTab: selectedTab)
-                List(selection: selectedTab) {
-                Section {
-                    ForEach(SettingsTab.allCases) { tab in
-                        Label {
-                            Text(tab.title)
-                                .font(.system(size: sidebarItemFontSize))
-                                .padding(.leading, 2)
-                        } icon: {
-                            Image(systemName: tab.symbol)
+            // **No VStack wrapping the List, and no hand-built search field.**
+            //
+            // Both were here and both were wrong on macOS 26. A stack that owns
+            // the whole column ignores the sidebar's top safe area, so its
+            // first row slid under the traffic lights; and the sidebar is
+            // handed floating Liquid Glass by the system, which the guidance is
+            // explicit you should not paint over. `.searchable` is placed,
+            // inset and materialised by SwiftUI, which is the only way those
+            // stay right across appearances and OS versions.
+            List(selection: selectedTab) {
+                if searchResults.isEmpty {
+                    Section {
+                        ForEach(SettingsTab.allCases) { tab in
+                            sidebarRow(for: tab)
                         }
-                        .frame(height: sidebarItemHeight)
-                        .tag(tab)
                     }
+                    .collapsible(false)
+                } else {
+                    // Searching replaces the five panes with what matched, the
+                    // way System Settings does, rather than dropping a menu
+                    // over them. The row still names its pane, because "which
+                    // tab is this in" is most of what a settings search is for.
+                    Section("Results") {
+                        ForEach(searchResults, id: \.title) { entry in
+                            Label {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(entry.title)
+                                        .font(.system(size: sidebarItemFontSize))
+                                    Text(entry.tab.title)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.leading, 2)
+                            } icon: {
+                                SettingsTabIcon(tab: entry.tab)
+                            }
+                            .tag(entry.tab)
+                        }
+                    }
+                    .collapsible(false)
                 }
-                // **No app-name header, deliberately.** A 30pt wordmark was
-                // here for one revision because it is what Ice does and it
-                // makes a screenshot look designed. Neither System Settings nor
-                // Xcode's settings has one, and a settings window is the last
-                // place to be inventive — the title bar already names the pane,
-                // and the window is only ever opened from this app. It was the
-                // prettier layout and the wrong one.
-                .collapsible(false)
             }
-                // A settings sidebar is a fixed list of five, not a document
-                // browser: it must not scroll.
-                .scrollDisabled(true)
-            }
-            // On the column, not the List: the search field is part of the
-            // column too, and a width set on the List alone leaves the field
-            // sized to something else.
+            .scrollDisabled(searchResults.isEmpty)
             .removeSidebarToggle()
             .navigationSplitViewColumnWidth(sidebarWidth)
         } detail: {
@@ -189,6 +211,7 @@ struct SettingsView: View {
             .frame(minWidth: SettingsMetrics.detailWidth)
         }
         .navigationTitle(selectedTab.wrappedValue.title)
+        .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
         .frame(minHeight: SettingsMetrics.minHeight)
         .onAppear {
             // An LSUIElement app owns no menu bar and is never "frontmost" by
@@ -444,75 +467,29 @@ extension Text {
     }
 }
 
-
-/// The search field above the tabs, and the results it drops beneath itself.
+/// A sidebar row's icon, drawn the way System Settings draws its own: a white
+/// glyph centred on a filled, rounded square.
 ///
-/// A list of destinations rather than a filtered view of the settings
-/// themselves: the panes are `Form`s with their own footers and section
-/// arguments, and rebuilding them from an index would give two renderings of
-/// every control to keep in step. Naming where a thing lives and taking you
-/// there is most of the value at a fraction of the surface.
-private struct SettingsSearchField: View {
-    @Binding var query: String
-    @Binding var selectedTab: SettingsTab
+/// The size is fixed rather than derived from the row height. It has to line up
+/// down the column whatever symbol is in it — a bolt and a display have very
+/// different natural widths — and the system's own tiles do not resize with the
+/// sidebar row setting either.
+struct SettingsTabIcon: View {
+    let tab: SettingsTab
 
-    private var results: [SettingsIndexEntry] { searchSettings(query) }
+    private let side: CGFloat = 20
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search settings", text: $query)
-                    .textFieldStyle(.plain)
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Clear")
-                }
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(tab.tint)
+            .frame(width: side, height: side)
+            .overlay {
+                Image(systemName: tab.symbol)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-
-            if !query.isEmpty {
-                Divider()
-                if results.isEmpty {
-                    // Says so rather than showing an empty strip, which reads
-                    // as a broken control rather than an answer.
-                    Text("Nothing matches “\(query)”.")
-                        .settingsFootnote()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(results, id: \.title) { entry in
-                                Button {
-                                    selectedTab = entry.tab
-                                    query = ""
-                                } label: {
-                                    HStack {
-                                        Label(entry.title, systemImage: entry.tab.symbol)
-                                        Spacer()
-                                        Text(entry.tab.title).foregroundStyle(.secondary)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 180)
-                }
-                Divider()
-            }
-        }
-        .background(.bar)
+            // The label beside it already says everything this conveys, and a
+            // tile announced separately is one more stop for no information.
+            .accessibilityHidden(true)
     }
 }
