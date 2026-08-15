@@ -312,9 +312,38 @@ struct MenuContent: View {
         // scanning for. Each row still *announces* the whole phrase, because a
         // menu row is read alone by VoiceOver and "Indefinitely" on its own is
         // not an instruction.
-        Section(menuStartSectionTitle) {
-            Button(menuStartRowLabel(defaultKind, wakeMode: defaultWakeMode,
-                                     keepsDisksAwake: defaultKeepDisksAwake)) {
+        //
+        // **Gated on macOS 14, and the fallback is not cosmetic.** Section
+        // headers in a menu are `NSMenu`'s, added in Sonoma; on 13 a
+        // `Section` still groups but draws no title, which would leave four
+        // rows reading "Indefinitely", "For 1 Hour" with the verb nowhere on
+        // screen. That is worse than the repetition this replaced, so 13 keeps
+        // the full labels it always had.
+        if #available(macOS 14, *) {
+            startRows(headed: true)
+        } else {
+            startRows(headed: false)
+        }
+    }
+
+    /// The four start rows, with or without the header that carries their verb.
+    @ViewBuilder
+    private func startRows(headed: Bool) -> some View {
+        if headed {
+            Section(menuStartSectionTitle) { startButtons(showingVerb: false) }
+        } else {
+            startButtons(showingVerb: true)
+        }
+    }
+
+    @ViewBuilder
+    private func startButtons(showingVerb: Bool) -> some View {
+        Group {
+            Button(showingVerb
+                   ? menuStartLabel(defaultKind, wakeMode: defaultWakeMode,
+                                    keepsDisksAwake: defaultKeepDisksAwake)
+                   : menuStartRowLabel(defaultKind, wakeMode: defaultWakeMode,
+                                       keepsDisksAwake: defaultKeepDisksAwake)) {
                 let start = defaultStart
                 Task {
                     await daemon.startSession(kind: start.sessionKind(now: Date()),
@@ -325,8 +354,11 @@ struct MenuContent: View {
                                                keepsDisksAwake: defaultKeepDisksAwake))
 
             ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
-                Button(menuStartRowLabel(kind, wakeMode: defaultWakeMode,
-                                         keepsDisksAwake: defaultKeepDisksAwake)) {
+                Button(showingVerb
+                       ? menuStartLabel(kind, wakeMode: defaultWakeMode,
+                                        keepsDisksAwake: defaultKeepDisksAwake)
+                       : menuStartRowLabel(kind, wakeMode: defaultWakeMode,
+                                           keepsDisksAwake: defaultKeepDisksAwake)) {
                     let power = defaultStart.power
                     Task {
                         await daemon.startSession(kind: kind.sessionKind(now: Date()),
