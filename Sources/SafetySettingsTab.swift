@@ -6,6 +6,10 @@ struct SafetySettingsTab: View {
     var body: some View {
         Form {
             Section {
+                SettingsPaneHeader(tab: .safety)
+            }
+
+            Section {
                 SettingsRow(thermalSensitivityExplanation(config.thermalSensitivity)) {
                     Picker("Overheating", selection: $config.thermalSensitivity) {
                         ForEach(ThermalSensitivity.allCases, id: \.self) { level in

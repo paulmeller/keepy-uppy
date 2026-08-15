@@ -8,6 +8,8 @@ private enum SettingsMetrics {
     /// The *detail* column. It is the width the five panes were laid out
     /// against as tabs, kept unchanged so no pane has to be re-checked.
     static let detailWidth: CGFloat = 560
+    /// Past this the lines are too long to read, not too short to fit.
+    static let detailMaxWidth: CGFloat = 680
     static let minHeight: CGFloat = 460
 }
 
@@ -275,7 +277,13 @@ struct SettingsView: View {
             // as tabs and must never be squeezed below it; letting them use a
             // little more when the window is wider costs nothing, and pinning
             // them exactly would leave dead space beside a resizable window.
-            .frame(minWidth: SettingsMetrics.detailWidth)
+            // A floor *and* a ceiling. The floor is what the panes were laid
+            // out against; the ceiling is because this window is resizable and
+            // a `Form` will happily run a footnote to 120 characters a line,
+            // which is well past what anybody reads comfortably. System
+            // Settings caps its content for the same reason.
+            .frame(minWidth: SettingsMetrics.detailWidth,
+                   maxWidth: SettingsMetrics.detailMaxWidth)
         }
         .navigationTitle(selectedTab.wrappedValue.title)
         .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
@@ -338,6 +346,10 @@ struct GeneralSettingsTab: View {
 
     var body: some View {
         Form {
+            Section {
+                SettingsPaneHeader(tab: .general)
+            }
+
             Section {
                 SettingsRow("Opens Keepy Uppy in the menu bar when you log in. The background services below run regardless.") {
                     Toggle("Launch at login", isOn: $launchAtLoginEnabled)
@@ -638,5 +650,43 @@ extension SettingsRow where Note == SettingsRowNote {
         self.init(control: control) {
             SettingsRowNote(text: note)
         }
+    }
+}
+
+/// The card at the top of each pane: the pane's icon, its name, and one
+/// sentence saying what it decides.
+///
+/// System Settings heads every pane this way, and it earns its space here for a
+/// reason particular to this app: the commonest confusion is *scope* — which
+/// sessions a setting reaches. Display governs what the menu starts; Safety
+/// governs every session the daemon holds, whoever asked for it. A sentence at
+/// the top is where that belongs, rather than repeated in four footers.
+struct SettingsPaneHeader: View {
+    let tab: SettingsTab
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(tab.tint)
+                .frame(width: 38, height: 38)
+                .overlay {
+                    Image(systemName: tab.symbol)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(tab.title)
+                    .font(.headline)
+                Text(tab.paneDescription)
+                    .settingsFootnote()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        // The tile repeats the sidebar row's icon and the title repeats the
+        // window title; both are decoration next to the sentence, which is the
+        // only thing here a screen reader has not already said.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(tab.paneDescription)
     }
 }

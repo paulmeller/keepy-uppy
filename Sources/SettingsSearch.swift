@@ -21,6 +21,29 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// The sentence under the pane's title in its header card.
+    ///
+    /// Says what the pane *decides*, not what it contains — a list of the
+    /// controls below would be read twice by anyone who then reads the
+    /// controls. Each one is scoped where the pane is scoped, because the
+    /// commonest confusion in this app is which sessions a setting reaches:
+    /// Display governs what the *menu* starts, Safety governs everything the
+    /// daemon holds whoever asked for it.
+    var paneDescription: String {
+        switch self {
+        case .general:
+            return "How Keepy Uppy starts, which session the menu's first row starts, and whether you are told when one ends."
+        case .triggers:
+            return "Standing rules that start a session without you asking, and what runs when one finishes."
+        case .display:
+            return "What a session started from the menu holds awake: the lid, the screen, and attached disks."
+        case .safety:
+            return "When the background service ends a session no matter what asked for it — too hot, too low on battery, or running too long."
+        case .advanced:
+            return "The command line on your PATH, keyboard shortcuts, and what to quote in a bug report."
+        }
+    }
+
     /// The tile colour behind the glyph.
     ///
     /// System Settings draws every sidebar row's icon as a white symbol on a

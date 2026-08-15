@@ -40,6 +40,10 @@ struct DisplaySettingsTab: View {
 
     var body: some View {
         Form {
+            Section {
+                SettingsPaneHeader(tab: .display)
+            }
+
             // Its own Section rather than a second row of anything, so the
             // footer can change with the selection — the arrangement Safety's
             // thermal picker already uses: three short phrases can distinguish

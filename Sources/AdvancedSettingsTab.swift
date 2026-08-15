@@ -63,6 +63,10 @@ struct AdvancedSettingsTab: View {
 
     var body: some View {
         Form {
+            Section {
+                SettingsPaneHeader(tab: .advanced)
+            }
+
             // Shortcuts first, above the CLI section: this is the one people
             // come here to set, and the CLI section is the one they come here
             // to read once and never again.

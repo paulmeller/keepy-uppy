@@ -88,6 +88,10 @@ struct TriggersSettingsTab: View {
     private var completionSection: some View {
         Form {
             Section {
+                SettingsPaneHeader(tab: .triggers)
+            }
+
+            Section {
                 LabeledContent("Script") {
                     HStack {
                         Text(completionConfig.scriptPath?.isEmpty == false ? completionConfig.scriptPath! : "None chosen")
