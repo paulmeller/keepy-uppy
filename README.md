@@ -187,7 +187,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **1018 unit tests**.
+by **1021 unit tests**.
 
 ## Build it yourself
 
@@ -220,7 +220,7 @@ still works if you have one — it's just the second choice.
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 1018 tests, and a
+**v0.1 — new, and moving fast.** Signed and notarized, 1021 tests, and a
 privilege boundary that has been through three adversarial review passes. What
 it has not had is months on other people's hardware.
 
@@ -236,7 +236,7 @@ and tested; none has been watched happen.
 [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
 what only hardware can settle, and it is kept honest as things are ticked off.
 
-[Releases](../../releases) has **v0.1.5**, which is what this page describes.
+[Releases](../../releases) has **v0.1.6**, which is what this page describes.
 
 If something misbehaves, an issue with the daemon log is genuinely useful:
 
