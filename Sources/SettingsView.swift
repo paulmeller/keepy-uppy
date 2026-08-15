@@ -134,7 +134,13 @@ struct SettingsView: View {
         // search has to be able to *go* somewhere: a result that names a tab
         // and cannot open it is a worse answer than no result.
         NavigationSplitView {
-            List(selection: selectedTab) {
+            // A plain stack rather than `safeAreaInset`. The inset version puts
+            // the field inside the List's safe area, which is *already* inset
+            // beneath the title bar, so the two stacked and left a band of
+            // empty sidebar above the search field.
+            VStack(spacing: 0) {
+                SettingsSearchField(query: $searchQuery, selectedTab: selectedTab)
+                List(selection: selectedTab) {
                 Section {
                     ForEach(SettingsTab.allCases) { tab in
                         Label {
@@ -157,18 +163,15 @@ struct SettingsView: View {
                 // prettier layout and the wrong one.
                 .collapsible(false)
             }
-            // A settings sidebar is a fixed list of five, not a document
-            // browser: it must not scroll, and it must not offer to collapse
-            // itself away and leave the window with no navigation at all.
-            .scrollDisabled(true)
+                // A settings sidebar is a fixed list of five, not a document
+                // browser: it must not scroll.
+                .scrollDisabled(true)
+            }
+            // On the column, not the List: the search field is part of the
+            // column too, and a width set on the List alone leaves the field
+            // sized to something else.
             .removeSidebarToggle()
             .navigationSplitViewColumnWidth(sidebarWidth)
-            // Top of the sidebar, where System Settings puts its own. It was
-            // briefly at the bottom, which looked tidy and is not where anybody
-            // reaches for it.
-            .safeAreaInset(edge: .top, spacing: 0) {
-                SettingsSearchField(query: $searchQuery, selectedTab: selectedTab)
-            }
         } detail: {
             Group {
                 switch selectedTab.wrappedValue {

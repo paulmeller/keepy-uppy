@@ -24,9 +24,11 @@ extension View {
 private struct RemoveSidebarToggleModifier: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 14.0, *) {
-            content
-                .toolbar(removing: .sidebarToggle)
-                .toolbar { Color.clear }
+            // No `.toolbar { Color.clear }` alongside this. Ice pairs the two,
+            // but an empty toolbar item still reserves toolbar height, and in
+            // this window that showed up as a band of dead space above the
+            // sidebar's search field.
+            content.toolbar(removing: .sidebarToggle)
         } else {
             content.background(SidebarToggleRemover())
         }
