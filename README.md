@@ -493,7 +493,7 @@ is not the same thing.
 what only hardware can settle.
 
 **This page describes the current download.** [Releases](../../releases) has
-**v0.1.3**, and everything above is in it: all ten trigger conditions
+**v0.1.4**, and everything above is in it: all ten trigger conditions
 including the scheduled one, the Shortcuts actions, wake modes,
 `--keep-disks-awake`, `keepy-uppy mode`, per-rule wake mode and lifetime, the
 five-tab Settings window with search, notifications, keyboard shortcuts, the
