@@ -31,6 +31,8 @@ struct SafetySettingsTab: View {
 
             Section {
                 LabeledContent("Stop below") {
+                    Text("\(config.batteryCutoff ?? 0)%")
+                        .monospacedDigit()
                     Stepper(
                         value: Binding(
                             get: { config.batteryCutoff ?? 0 },
@@ -44,9 +46,13 @@ struct SafetySettingsTab: View {
                         // have silently turned an off guard on at 5%.
                         in: 0...50
                     ) {
-                        Text("\(config.batteryCutoff ?? 0)%")
-                            .monospacedDigit()
+                        // Empty label: the value is drawn beside the stepper
+                        // rather than inside it, because a `Stepper`'s own
+                        // label sits *before* its arrows and every stepper in
+                        // System Settings reads value-then-arrows.
+                        EmptyView()
                     }
+                    .labelsHidden()
                 }
 
                 Toggle("Stop earlier while the lid is closed", isOn: $config.lidClosedStricter)
@@ -60,6 +66,8 @@ struct SafetySettingsTab: View {
             Section {
                 SettingsRow("A backstop for a session that was started and forgotten. It spends only time on battery, so a Mac left on mains power is never stopped by it, and plugging in pauses the budget rather than refunding it. It applies to every session, including ones started from the command line.") {
                     LabeledContent("Maximum length") {
+                        Text(maxSessionLengthLabel(config))
+                            .monospacedDigit()
                         Stepper(
                             value: Binding(
                                 get: { Int((config.maxSessionDuration ?? 0) / 3600) },
@@ -93,9 +101,9 @@ struct SafetySettingsTab: View {
                             ),
                             in: 1...24
                         ) {
-                            Text(maxSessionLengthLabel(config))
-                                .monospacedDigit()
+                            EmptyView()
                         }
+                        .labelsHidden()
                     }
                 }
             } header: {

@@ -110,6 +110,19 @@ struct SettingsView: View {
         }) else { return }
         window.standardWindowButton(.miniaturizeButton)?.isEnabled = false
         window.standardWindowButton(.zoomButton)?.isEnabled = false
+
+        // **`.unified`, and this is what puts the toolbar right.**
+        //
+        // A Settings scene defaults to a preference-style toolbar: a tall band
+        // with its title centred and items stacked beneath it. That shape was
+        // built for the row of centred tab icons this window used to have, and
+        // with a sidebar it leaves a deep empty stripe above both columns and
+        // strands the back/forward buttons floating in the middle of it.
+        //
+        // Unified is the shape System Settings uses: one row, title at the
+        // leading edge, items beside it, and no reserved height for icons that
+        // are not there any more.
+        window.toolbarStyle = .unified
         // Not `.fullScreenPrimary`: a settings window has no full-screen mode
         // worth offering, and leaving the collection behaviour alone is what
         // puts a live green button back on some macOS versions.
