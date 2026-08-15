@@ -3211,3 +3211,34 @@ final class MenuLidCaveatSuppressionTests: XCTestCase {
         XCTAssertTrue(menuShowsLidCaveat(alongside: note))
     }
 }
+
+/// The start rows show the duration and announce the whole phrase.
+final class MenuStartRowLabelTests: XCTestCase {
+    func testRowsShowOnlyTheDuration() {
+        XCTAssertEqual(menuStartRowLabel(.indefinite, wakeMode: .clamshell, keepsDisksAwake: false),
+                       "Indefinitely")
+        XCTAssertEqual(menuStartRowLabel(.oneHour, wakeMode: .clamshell, keepsDisksAwake: false),
+                       "For 1 Hour")
+        XCTAssertEqual(menuStartRowLabel(.eightHours, wakeMode: .clamshell, keepsDisksAwake: false),
+                       "For 8 Hours")
+    }
+
+    /// The verb is not repeated on the row — that is the whole point of the
+    /// header — but it must still be in what a screen reader is handed.
+    func testNoRowRepeatsTheVerbButEveryAnnouncementCarriesIt() {
+        for kind in DefaultSessionKind.allCases {
+            let shown = menuStartRowLabel(kind, wakeMode: .clamshell, keepsDisksAwake: false)
+            XCTAssertFalse(shown.lowercased().contains("keep awake"), "\(kind) repeats the verb")
+            let announced = menuStartLabel(kind, wakeMode: .clamshell, keepsDisksAwake: false)
+            XCTAssertTrue(announced.lowercased().hasPrefix("keep awake"), "\(kind) announces nothing")
+        }
+    }
+
+    /// A non-default power request is still named on the row that would start
+    /// it, exactly as before — the qualifier is the one thing worth the width.
+    func testANonDefaultRequestIsStillNamedOnTheRow() {
+        let shown = menuStartRowLabel(.indefinite, wakeMode: .system, keepsDisksAwake: true)
+        XCTAssertTrue(shown.hasPrefix("Indefinitely ("), shown)
+        XCTAssertTrue(shown.hasSuffix(")"), shown)
+    }
+}

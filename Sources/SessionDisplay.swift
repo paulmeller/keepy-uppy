@@ -1128,6 +1128,26 @@ func menuStartLabel(_ kind: DefaultSessionKind, wakeMode: WakeMode,
     return "Keep awake \(kind.durationPhrase) (\(tags.joined(separator: ", ")))"
 }
 
+/// The header the four start rows now sit under, carrying the verb they used to
+/// repeat four times.
+let menuStartSectionTitle = "Keep this Mac awake"
+
+/// What a start row *shows*: the duration alone, since the header above it
+/// supplies the verb.
+///
+/// `menuStartLabel` above is still the full phrase and is still used — as each
+/// row's **accessibility label**. That split is the whole design: a macOS menu
+/// row is read on its own by VoiceOver, where a bare "Indefinitely" means
+/// nothing, so the eye gets the short form and the ear gets the sentence. This
+/// is the objection that made the change look unwise, answered rather than
+/// accepted.
+func menuStartRowLabel(_ kind: DefaultSessionKind, wakeMode: WakeMode,
+                       keepsDisksAwake: Bool) -> String {
+    let tags = [menuWakeModeTag(wakeMode), menuDiskTag(keepsDisksAwake)].compactMap { $0 }
+    guard !tags.isEmpty else { return kind.label }
+    return "\(kind.label) (\(tags.joined(separator: ", ")))"
+}
+
 /// What a **start** row says about the stored disk default, or `nil` when it is
 /// off — which is the default, so most menus never see it.
 ///

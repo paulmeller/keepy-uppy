@@ -307,22 +307,34 @@ struct MenuContent: View {
         // without this menu being open. Recorded here so the absence is not
         // re-litigated as an omission — the same reason Plan 5 wrote down that
         // trigger warnings are not in the menu bar.
-        Button(menuStartLabel(defaultKind, wakeMode: defaultWakeMode,
-                              keepsDisksAwake: defaultKeepDisksAwake)) {
-            let start = defaultStart
-            Task {
-                await daemon.startSession(kind: start.sessionKind(now: Date()),
-                                          power: start.power)
-            }
-        }
-        ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
-            Button(menuStartLabel(kind, wakeMode: defaultWakeMode,
-                                  keepsDisksAwake: defaultKeepDisksAwake)) {
-                let power = defaultStart.power
+        // The verb moved to the section header, so the four rows carry only what
+        // differs between them — the durations, which is what anyone is
+        // scanning for. Each row still *announces* the whole phrase, because a
+        // menu row is read alone by VoiceOver and "Indefinitely" on its own is
+        // not an instruction.
+        Section(menuStartSectionTitle) {
+            Button(menuStartRowLabel(defaultKind, wakeMode: defaultWakeMode,
+                                     keepsDisksAwake: defaultKeepDisksAwake)) {
+                let start = defaultStart
                 Task {
-                    await daemon.startSession(kind: kind.sessionKind(now: Date()),
-                                              power: power)
+                    await daemon.startSession(kind: start.sessionKind(now: Date()),
+                                              power: start.power)
                 }
+            }
+            .accessibilityLabel(menuStartLabel(defaultKind, wakeMode: defaultWakeMode,
+                                               keepsDisksAwake: defaultKeepDisksAwake))
+
+            ForEach(DefaultSessionKind.allCases.filter { $0 != defaultKind }) { kind in
+                Button(menuStartRowLabel(kind, wakeMode: defaultWakeMode,
+                                         keepsDisksAwake: defaultKeepDisksAwake)) {
+                    let power = defaultStart.power
+                    Task {
+                        await daemon.startSession(kind: kind.sessionKind(now: Date()),
+                                                  power: power)
+                    }
+                }
+                .accessibilityLabel(menuStartLabel(kind, wakeMode: defaultWakeMode,
+                                                   keepsDisksAwake: defaultKeepDisksAwake))
             }
         }
 
