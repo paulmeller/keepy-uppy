@@ -139,7 +139,11 @@ notarize: bump dmg
     fi
     xcrun notarytool submit "{{dmg_path}}" "${auth[@]}" --wait
     xcrun stapler staple "{{dmg_path}}"
-    @echo "shipped $(plutil -extract CFBundleShortVersionString raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist") ($(plutil -extract CFBundleVersion raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist"))"
+    # No `@` prefix: that is just(1) syntax for "do not echo this line", and
+    # this recipe has a shebang, so its body is a bash script where `@echo` is
+    # a command name. It exited 127 *after* a successful notarize and staple —
+    # the artifact was fine and the recipe reported failure.
+    echo "shipped $(plutil -extract CFBundleShortVersionString raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist") ($(plutil -extract CFBundleVersion raw "{{export_path}}/{{app_name}}.app/Contents/Info.plist"))"
 
 # Point the Homebrew cask at a release that is already published:
 # `just cask v0.1.1`.

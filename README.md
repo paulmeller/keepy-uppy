@@ -429,7 +429,7 @@ it; it isn't something the daemon could ever see, let alone enforce.
 The session and safety engines are pure reducers — `(state, event, now) →
 state`, with time injected rather than read. An eight-hour session is tested in
 a millisecond, which is why most of the logic inside a root daemon is covered
-by **1011 unit tests**.
+by **1015 unit tests**.
 
 ## Build it yourself
 
@@ -462,7 +462,7 @@ still works if you have one — it's just the second choice.
 
 ## Status
 
-**v0.1 — new, and moving fast.** Signed and notarized, 1011 tests, and a
+**v0.1 — new, and moving fast.** Signed and notarized, 1015 tests, and a
 privilege boundary that's been through three adversarial review passes. What
 it hasn't had yet is months on other people's hardware. Closed-lid behaviour
 over a real job is verified — a live session was watched surviving a genuine
@@ -492,13 +492,11 @@ is not the same thing.
 [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
 what only hardware can settle.
 
-**Four things on this page are on `main` and not yet in the download**, and
-they are called out here rather than left for you to discover: the scheduled
-trigger and `--while-schedule`, the Shortcuts actions, the menu bar icon
-picker, and Settings search. Everything else above is in
-[Releases](../../releases) as **v0.1.2** — wake modes, `--keep-disks-awake`,
-`keepy-uppy mode`, the other nine trigger conditions, per-rule wake mode and
-lifetime, the five-tab Settings window, notifications, keyboard shortcuts, the
+**This page describes the current download.** [Releases](../../releases) has
+**v0.1.3**, and everything above is in it: all ten trigger conditions
+including the scheduled one, the Shortcuts actions, wake modes,
+`--keep-disks-awake`, `keepy-uppy mode`, per-rule wake mode and lifetime, the
+five-tab Settings window with search, notifications, keyboard shortcuts, the
 `PATH` install button, and the battery-time session backstop.
 
 An earlier **v0.1.0** is also on Releases, for anyone who wants the smaller,
