@@ -6,9 +6,11 @@ struct SafetySettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Picker("Overheating", selection: $config.thermalSensitivity) {
-                    ForEach(ThermalSensitivity.allCases, id: \.self) { level in
-                        Text(thermalSensitivityTitle(level)).tag(level)
+                SettingsRow(thermalSensitivityExplanation(config.thermalSensitivity)) {
+                    Picker("Overheating", selection: $config.thermalSensitivity) {
+                        ForEach(ThermalSensitivity.allCases, id: \.self) { level in
+                            Text(thermalSensitivityTitle(level)).tag(level)
+                        }
                     }
                 }
 
@@ -25,9 +27,6 @@ struct SafetySettingsTab: View {
                 }
             } header: {
                 Text("Thermal")
-            } footer: {
-                Text(thermalSensitivityExplanation(config.thermalSensitivity))
-                    .settingsFootnote()
             }
 
             Section {
@@ -59,49 +58,48 @@ struct SafetySettingsTab: View {
             }
 
             Section {
-                LabeledContent("Maximum length") {
-                    Stepper(
-                        value: Binding(
-                            get: { Int((config.maxSessionDuration ?? 0) / 3600) },
-                            set: { config.maxSessionDuration = TimeInterval($0) * 3600 }
-                        // 0 MUST stay out of range. The setter writes a real
-                        // `Optional(0.0)`, not nil, and `SafetyConfigStore.save`
-                        // persists it verbatim — so a selectable 0 is a
-                        // `maxSessionDuration` of zero seconds, which
-                        // `Shared/SafetyEngine.swift` treats as a live limit:
-                        // `breach(_:)` matches any session with `age >= 0` (every
-                        // session, on the first 5s tick), `evaluate` short-circuits
-                        // past the grace period straight to `.stopAll`, and
-                        // `recovered(_:_:)`'s `oldestSessionAge < maxSessionDuration`
-                        // can never be true against 0 — so `triggersSuppressed`
-                        // latches permanently and all trigger automation dies
-                        // silently.
-                        //
-                        // Harmless while the daemon could not see Safety Settings
-                        // at all; widening this to 0...24 (final whole-branch
-                        // review, Item 6) and teaching the daemon to honour the
-                        // live config landed concurrently, and together made the
-                        // zero reachable and destructive. 1...24 is the
-                        // pre-existing safe state.
-                        //
-                        // The getter's nil -> 0 mapping stays: with 0 outside the
-                        // bounds the Stepper clamps and its own increment and
-                        // decrement can never land there, so the mapping is purely
-                        // cosmetic for a config saved elsewhere. A real "No limit"
-                        // affordance that round-trips to nil is a known, accepted
-                        // limitation and deliberately out of scope.
-                        ),
-                        in: 1...24
-                    ) {
-                        Text(maxSessionLengthLabel(config))
-                            .monospacedDigit()
+                SettingsRow("A backstop for a session that was started and forgotten. It spends only time on battery, so a Mac left on mains power is never stopped by it, and plugging in pauses the budget rather than refunding it. It applies to every session, including ones started from the command line.") {
+                    LabeledContent("Maximum length") {
+                        Stepper(
+                            value: Binding(
+                                get: { Int((config.maxSessionDuration ?? 0) / 3600) },
+                                set: { config.maxSessionDuration = TimeInterval($0) * 3600 }
+                            // 0 MUST stay out of range. The setter writes a real
+                            // `Optional(0.0)`, not nil, and `SafetyConfigStore.save`
+                            // persists it verbatim — so a selectable 0 is a
+                            // `maxSessionDuration` of zero seconds, which
+                            // `Shared/SafetyEngine.swift` treats as a live limit:
+                            // `breach(_:)` matches any session with `age >= 0` (every
+                            // session, on the first 5s tick), `evaluate` short-circuits
+                            // past the grace period straight to `.stopAll`, and
+                            // `recovered(_:_:)`'s `oldestSessionAge < maxSessionDuration`
+                            // can never be true against 0 — so `triggersSuppressed`
+                            // latches permanently and all trigger automation dies
+                            // silently.
+                            //
+                            // Harmless while the daemon could not see Safety Settings
+                            // at all; widening this to 0...24 (final whole-branch
+                            // review, Item 6) and teaching the daemon to honour the
+                            // live config landed concurrently, and together made the
+                            // zero reachable and destructive. 1...24 is the
+                            // pre-existing safe state.
+                            //
+                            // The getter's nil -> 0 mapping stays: with 0 outside the
+                            // bounds the Stepper clamps and its own increment and
+                            // decrement can never land there, so the mapping is purely
+                            // cosmetic for a config saved elsewhere. A real "No limit"
+                            // affordance that round-trips to nil is a known, accepted
+                            // limitation and deliberately out of scope.
+                            ),
+                            in: 1...24
+                        ) {
+                            Text(maxSessionLengthLabel(config))
+                                .monospacedDigit()
+                        }
                     }
                 }
             } header: {
                 Text("Session Limit")
-            } footer: {
-                Text("A backstop for a session that was started and forgotten. It spends only time on battery, so a Mac left on mains power is never stopped by it, and plugging in pauses the budget rather than refunding it. It applies to every session, including ones started from the command line.")
-                    .settingsFootnote()
             }
         }
         .formStyle(.grouped)

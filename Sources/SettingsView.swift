@@ -119,6 +119,60 @@ struct SettingsView: View {
 
     private var searchResults: [SettingsIndexEntry] { searchSettings(searchQuery) }
 
+    // MARK: - Pane history, for the toolbar's back and forward buttons
+    //
+    // System Settings puts a pair of chevrons at the leading edge of its
+    // toolbar, and they walk the panes you have *visited* rather than any
+    // hierarchy — which is why they are meaningful here even though these five
+    // panes are flat and none contains another.
+    //
+    // Not persisted, deliberately: the selected pane is remembered across
+    // launches because returning to what you were editing is useful, but a
+    // *trail* through panes from a previous session is not something anybody
+    // wants to walk back through, and restoring one would make the back button
+    // do something inexplicable on the first click after opening the app.
+
+    @State private var history: [SettingsTab] = []
+    @State private var historyIndex = -1
+    /// Set while a chevron is driving the selection, so the resulting change
+    /// is not recorded as a new visit — otherwise going back would append the
+    /// pane you just left and the forward button would never enable.
+    @State private var navigatingHistory = false
+
+    private var canGoBack: Bool { historyIndex > 0 }
+    private var canGoForward: Bool { historyIndex >= 0 && historyIndex < history.count - 1 }
+
+    private func recordVisit(_ tab: SettingsTab) {
+        if navigatingHistory {
+            navigatingHistory = false
+            return
+        }
+        if historyIndex >= 0, history.indices.contains(historyIndex),
+           history[historyIndex] == tab {
+            return
+        }
+        // Everything ahead of here is discarded, exactly as a browser does: you
+        // have taken a different branch, and the old forward trail is no longer
+        // somewhere you were.
+        history = Array(history.prefix(historyIndex + 1))
+        history.append(tab)
+        historyIndex = history.count - 1
+    }
+
+    private func goBack() {
+        guard canGoBack else { return }
+        historyIndex -= 1
+        navigatingHistory = true
+        selectedTab.wrappedValue = history[historyIndex]
+    }
+
+    private func goForward() {
+        guard canGoForward else { return }
+        historyIndex += 1
+        navigatingHistory = true
+        selectedTab.wrappedValue = history[historyIndex]
+    }
+
     @ViewBuilder
     private func sidebarRow(for tab: SettingsTab) -> some View {
         Label {
@@ -212,6 +266,27 @@ struct SettingsView: View {
         }
         .navigationTitle(selectedTab.wrappedValue.title)
         .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
+        .toolbar {
+            // `.navigation` puts them at the leading edge, ahead of the title,
+            // which is where System Settings has them and the only placement
+            // that reads as navigation rather than as an action.
+            ToolbarItemGroup(placement: .navigation) {
+                Button(action: goBack) {
+                    Image(systemName: "chevron.backward")
+                }
+                .disabled(!canGoBack)
+                .help("Back")
+
+                Button(action: goForward) {
+                    Image(systemName: "chevron.forward")
+                }
+                .disabled(!canGoForward)
+                .help("Forward")
+            }
+        }
+        .onChange(of: selectedTab.wrappedValue) { tab in
+            recordVisit(tab)
+        }
         .frame(minHeight: SettingsMetrics.minHeight)
         .onAppear {
             // An LSUIElement app owns no menu bar and is never "frontmost" by
@@ -219,6 +294,9 @@ struct SettingsView: View {
             // was doing unless it asks for activation explicitly (spec §9).
             NSApp.activate(ignoringOtherApps: true)
             configureSettingsWindow()
+            // Seeds the trail with wherever the window opened, so the first
+            // pane you click has somewhere to go back to.
+            if history.isEmpty { recordVisit(selectedTab.wrappedValue) }
         }
     }
 }
@@ -248,23 +326,24 @@ struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Launch at login", isOn: $launchAtLoginEnabled)
-                    .onChange(of: launchAtLoginEnabled) { enabled in
-                        try? enabled ? LoginItemService.register() : LoginItemService.unregister()
-                    }
-            } footer: {
-                Text("Opens Keepy Uppy in the menu bar when you log in. The background services below run regardless.")
-                    .settingsFootnote()
+                SettingsRow("Opens Keepy Uppy in the menu bar when you log in. The background services below run regardless.") {
+                    Toggle("Launch at login", isOn: $launchAtLoginEnabled)
+                        .onChange(of: launchAtLoginEnabled) { enabled in
+                            try? enabled ? LoginItemService.register() : LoginItemService.unregister()
+                        }
+                }
             }
 
             Section {
-                Picker("Default session", selection: $defaultKindRaw) {
-                    ForEach(DefaultSessionKind.allCases) { kind in
-                        Text(kind.label).tag(kind.rawValue)
+                SettingsRow("Listed first in the menu's Start menu, so the session you use most is one click away.") {
+                    Picker("Default session", selection: $defaultKindRaw) {
+                        ForEach(DefaultSessionKind.allCases) { kind in
+                            Text(kind.label).tag(kind.rawValue)
+                        }
                     }
                 }
             } footer: {
-                Text("Listed first in the menu's Start menu, so the session you use most is one click away.")
+                Text("")
                     .settingsFootnote()
             }
 
@@ -491,5 +570,60 @@ struct SettingsTabIcon: View {
             // The label beside it already says everything this conveys, and a
             // tile announced separately is one more stop for no information.
             .accessibilityHidden(true)
+    }
+}
+
+/// A control and the sentence that explains it, in **one** cell.
+///
+/// System Settings attaches an explanation to the control it describes: same
+/// rounded card, directly beneath, in secondary text. This window used
+/// `Section(footer:)` for the same sentences, which puts them *outside* the
+/// card — so a pane with four controls read as four cards and four unattached
+/// captions, and which caption belonged to which control was left to proximity.
+///
+/// A `Section` footer is still right for a sentence about the whole group
+/// (`backgroundServicesFootnote`, the wake-mode scope note); this is for the
+/// commoner case where one sentence explains exactly one control.
+struct SettingsRow<Control: View, Note: View>: View {
+    private let control: Control
+    private let note: Note
+
+    init(@ViewBuilder control: () -> Control, @ViewBuilder note: () -> Note) {
+        self.control = control()
+        self.note = note()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            control
+            note
+                // Wraps rather than truncating: these sentences are the honest
+                // caveats this project insists on, and a clipped caveat is a
+                // caveat nobody read.
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// The styled sentence the string convenience below builds.
+///
+/// A named type rather than `AnyView` or a `where Note == Text` clause:
+/// `.settingsFootnote()` returns an opaque `some View`, so the constraint
+/// cannot be written against `Text`, and erasing to `AnyView` to dodge that
+/// would be reaching for a sledgehammer over one label.
+struct SettingsRowNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text).settingsFootnote()
+    }
+}
+
+extension SettingsRow where Note == SettingsRowNote {
+    /// The common case: one control, one sentence.
+    init(_ note: String, @ViewBuilder control: () -> Control) {
+        self.init(control: control) {
+            SettingsRowNote(text: note)
+        }
     }
 }

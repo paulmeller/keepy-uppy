@@ -49,17 +49,19 @@ struct DisplaySettingsTab: View {
                 // picker over the same three modes in Plan 8 Task 10, and two
                 // controls selecting one thing under two labels is how a user
                 // learns they are two settings.
-                Picker(wakeModePickerTitle, selection: $defaultWakeModeRaw) {
-                    ForEach(wakeModeSettingsOrder, id: \.self) { mode in
-                        Text(wakeModeSettingsTitle(mode)).tag(mode.rawValue)
+                SettingsRow {
+                    Picker(wakeModePickerTitle, selection: $defaultWakeModeRaw) {
+                        ForEach(wakeModeSettingsOrder, id: \.self) { mode in
+                            Text(wakeModeSettingsTitle(mode)).tag(mode.rawValue)
+                        }
                     }
-                }
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(wakeModeSettingsExplanation(defaultWakeMode))
-                        .settingsFootnote()
-                    Text(wakeModeSettingsScopeNote)
-                        .settingsFootnote()
+                } note: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(wakeModeSettingsExplanation(defaultWakeMode))
+                            .settingsFootnote()
+                        Text(wakeModeSettingsScopeNote)
+                            .settingsFootnote()
+                    }
                 }
             }
 
@@ -69,13 +71,15 @@ struct DisplaySettingsTab: View {
             // under the wake-mode explanation, where it reads as a claim about
             // the modes.
             Section {
-                Toggle(keepDisksAwakeSettingsTitle, isOn: $defaultKeepDisksAwake)
-            } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(keepDisksAwakeSettingsFootnote)
-                        .settingsFootnote()
-                    Text(keepDisksAwakeSettingsScopeNote)
-                        .settingsFootnote()
+                SettingsRow {
+                    Toggle(keepDisksAwakeSettingsTitle, isOn: $defaultKeepDisksAwake)
+                } note: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(keepDisksAwakeSettingsFootnote)
+                            .settingsFootnote()
+                        Text(keepDisksAwakeSettingsScopeNote)
+                            .settingsFootnote()
+                    }
                 }
             }
 
@@ -86,15 +90,14 @@ struct DisplaySettingsTab: View {
             // Sections would attach an appearance choice to a footer arguing
             // about power.
             Section {
-                Picker(menuBarIconSettingsTitle, selection: $menuBarIconStyleRaw) {
-                    ForEach(MenuBarIconStyle.allCases) { style in
-                        Label(style.label, systemImage: style.symbol(active: true))
-                            .tag(style.rawValue)
+                SettingsRow(menuBarIconSettingsFootnote) {
+                    Picker(menuBarIconSettingsTitle, selection: $menuBarIconStyleRaw) {
+                        ForEach(MenuBarIconStyle.allCases) { style in
+                            Label(style.label, systemImage: style.symbol(active: true))
+                                .tag(style.rawValue)
+                        }
                     }
                 }
-            } footer: {
-                Text(menuBarIconSettingsFootnote)
-                    .settingsFootnote()
             }
         }
         .formStyle(.grouped)
