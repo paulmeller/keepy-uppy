@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [main]
+    # Docs-only pushes don't change what the suite proves. This runner bills
+    # at 10x the Linux rate, so a README fix costing a full Xcode build is
+    # the most expensive kind of no-op.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
   workflow_dispatch:
+
+# Work here arrives in bursts — five pushes inside one hour is normal. Without
+# this, every superseded push still pays for a complete Xcode build at the
+# macOS 10x rate, and only the last result is ever looked at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -14,6 +28,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache Homebrew downloads
+        # `brew install` re-downloads and re-links xcodegen on every run. The
+        # bottle is small but the install is a fixed cost paid at 10x on every
+        # single push, which adds up faster than its size suggests.
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: brew-xcodegen-${{ runner.os }}
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -40,9 +63,15 @@ jobs:
             CODE_SIGN_IDENTITY=-
 
       - name: Test
+        # -configuration Debug is stated explicitly to match the build step
+        # above. Both share -derivedDataPath, so the test step reuses that
+        # build only while the configurations agree; if the scheme's test
+        # action ever defaulted elsewhere, every run would silently rebuild
+        # from scratch and the build step's cost would buy nothing.
         run: |
           xcodebuild test \
             -project "Keepy Uppy.xcodeproj" \
             -scheme "Keepy Uppy" \
+            -configuration Debug \
             -derivedDataPath build \
             CODE_SIGN_IDENTITY=-
