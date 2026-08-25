@@ -236,7 +236,7 @@ and tested; none has been watched happen.
 [`docs/manual-test-checklist.md`](docs/manual-test-checklist.md) is the list of
 what only hardware can settle, and it is kept honest as things are ticked off.
 
-[Releases](../../releases) has **v0.1.6**, which is what this page describes.
+[Releases](../../releases) has **v0.1.7**, which is what this page describes.
 
 If something misbehaves, an issue with the daemon log is genuinely useful:
 
