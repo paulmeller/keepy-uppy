@@ -3,22 +3,45 @@ name: CI
 on:
   push:
     branches: [main]
-    # Docs-only pushes don't change what the suite proves. This runner bills
-    # at 10x the Linux rate, so a README fix costing a full Xcode build is
-    # the most expensive kind of no-op.
+    # Docs and artwork don't change what the suite proves, so a run over them
+    # occupies a macOS runner and posts a result nobody reads.
+    #
+    # This is about latency and noise, not money. The repo is public, and
+    # GitHub bills nothing for standard runners on public repos — every run so
+    # far reports MACOS total_ms 0 against ~3.6 minutes of wall clock. The 10x
+    # macOS rate that gets quoted for this only starts applying if the repo is
+    # ever made private, which is the point at which these filters begin
+    # paying rent as well as reducing noise.
+    #
+    # The list is duplicated under pull_request below rather than shared with
+    # a YAML anchor: GitHub does not expand anchors in workflow files.
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+      - 'assets/**'
       - 'LICENSE'
   pull_request:
+    # Safe to filter here only because nothing requires this check to pass: a
+    # skipped run reports as skipped, not success, so under branch protection
+    # or a ruleset this would leave docs-only PRs unmergeable forever. Verified
+    # absent before adding it — recheck if protection is ever turned on.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'assets/**'
+      - 'LICENSE'
   workflow_dispatch:
 
-# Work here arrives in bursts — five pushes inside one hour is normal. Without
-# this, every superseded push still pays for a complete Xcode build at the
-# macOS 10x rate, and only the last result is ever looked at.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Work here arrives in bursts — five pushes inside one hour is normal — and
+  # only the last result is ever looked at, so superseded runs do nothing but
+  # queue behind each other.
+  #
+  # main is deliberately exempt. Releases are cut from main, and a release
+  # commit whose run was cancelled by the next push carries no completed
+  # result — which is the one commit you actually want a green tick against.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
@@ -26,17 +49,22 @@ jobs:
     # IOKit/ServiceManagement types, so this cannot run on a Linux runner.
     runs-on: macos-15
 
+    # The job takes about 3.6 minutes. GitHub's default is 360, so a hung
+    # xcodebuild would sit on a runner for six hours before anything noticed.
+    timeout-minutes: 30
+
+    env:
+      # The expensive part of `brew install` on a runner is the implicit
+      # `brew update` that precedes it, not fetching the bottle.
+      #
+      # Caching ~/Library/Caches/Homebrew was tried here and removed: it
+      # caches downloads rather than the install and link, and actions/cache
+      # never re-saves on a hit, so a fixed key pins one bottle permanently.
+      # Once the formula moves you pay the cache restore *and* the download.
+      HOMEBREW_NO_AUTO_UPDATE: 1
+
     steps:
       - uses: actions/checkout@v4
-
-      - name: Cache Homebrew downloads
-        # `brew install` re-downloads and re-links xcodegen on every run. The
-        # bottle is small but the install is a fixed cost paid at 10x on every
-        # single push, which adds up faster than its size suggests.
-        uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/Homebrew
-          key: brew-xcodegen-${{ runner.os }}
 
       - name: Install xcodegen
         run: brew install xcodegen
