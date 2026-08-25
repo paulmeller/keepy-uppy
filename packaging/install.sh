@@ -90,6 +90,20 @@ codesign --verify --strict -R \
   "$mnt/$APP" 2>/dev/null \
   || fail "the downloaded app is notarized but is not Keepy Uppy signed by its own team — refusing to install it."
 
+# The two checks above pass for an app that is notarized but carries no
+# stapled ticket, because Gatekeeper answers them by asking Apple over the
+# network. That is exactly the release defect this check exists to catch:
+# releases up to 0.1.6 stapled the ticket to the disk image and not to the app
+# inside it, so the copy landing in /Applications had no ticket of its own and
+# needed Apple reachable on every launch. When that check could not complete,
+# macOS said "Apple could not verify Keepy Uppy is free of malware" and offered
+# to move it to the Bin.
+#
+# `stapler validate` reads the ticket out of the bundle, so it is the one check
+# here that says the *installed* app will still launch offline.
+xcrun stapler validate "$mnt/$APP" >/dev/null 2>&1 \
+  || fail "the downloaded app has no stapled notarization ticket — it would need Apple reachable on every launch. Refusing to install it; please report this against the release."
+
 if [ -e "$DEST/$APP" ]; then
   say "Replacing the copy already in $DEST…"
   # Stop the old one first. `reset` hands the machine's sleep behaviour back

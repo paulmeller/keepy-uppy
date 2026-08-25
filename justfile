@@ -124,7 +124,7 @@ dmg: export
 # The three key variables have no such indirection: the `.p8` either signs the
 # JWT or it does not. Keep `KEEPY_UPPY_NOTARY_PROFILE` working for anyone who
 # has one, but reach for it second.
-notarize: bump dmg
+notarize: bump export
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -n "{{notary_key}}" ]; then
@@ -137,8 +137,40 @@ notarize: bump dmg
         echo "Set KEEPY_UPPY_NOTARY_KEY (+ _KEY_ID and _ISSUER), or KEEPY_UPPY_NOTARY_PROFILE. See README."
         exit 1
     fi
+    app="{{export_path}}/{{app_name}}.app"
+
+    # **The app is notarized and stapled FIRST, and that order is the whole
+    # point.** Stapling only the disk image attaches the ticket to the image;
+    # installing copies the app *out* of it and leaves the ticket behind, so
+    # every launch of the installed app needs Gatekeeper to reach Apple. When
+    # that check cannot complete — offline, a flaky network, an Apple hiccup —
+    # macOS says "Apple could not verify Keepy Uppy is free of malware" and
+    # offers to move it to the Bin. Every release up to 0.1.6 shipped that way.
+    #
+    # A stapled app answers Gatekeeper from its own bundle, forever, offline.
+    ditto -c -k --keepParent "$app" "{{derived_data}}/notarize-app.zip"
+    xcrun notarytool submit "{{derived_data}}/notarize-app.zip" "${auth[@]}" --wait
+    xcrun stapler staple "$app"
+
+    # The image is built AFTER the app is stapled, so what ships inside it
+    # carries the ticket — and is then notarized in its own right, because a
+    # rebuilt image is a new file that the app's ticket does not cover.
+    rm -f "{{dmg_path}}"
+    hdiutil create -volname "{{app_name}}" -srcfolder "$app" -ov -format UDZO "{{dmg_path}}"
     xcrun notarytool submit "{{dmg_path}}" "${auth[@]}" --wait
     xcrun stapler staple "{{dmg_path}}"
+
+    # Proves the app *inside the shipped image* carries its own ticket, which
+    # is the property that actually broke. Nothing checked it before, so six
+    # releases shipped the defect in silence — `stapler staple` on the image
+    # succeeded, `spctl` on the image passed, and the app users copied out of
+    # it was unverifiable offline. Mount what will be published and ask.
+    mount="$(mktemp -d)"
+    trap 'hdiutil detach "$mount" -quiet 2>/dev/null || true; rm -rf "$mount"' EXIT
+    hdiutil attach "{{dmg_path}}" -mountpoint "$mount" -nobrowse -quiet
+    xcrun stapler validate "$mount/{{app_name}}.app"
+    spctl -a -vvv -t exec "$mount/{{app_name}}.app"
+
     # No `@` prefix: that is just(1) syntax for "do not echo this line", and
     # this recipe has a shebang, so its body is a bash script where `@echo` is
     # a command name. It exited 127 *after* a successful notarize and staple —
