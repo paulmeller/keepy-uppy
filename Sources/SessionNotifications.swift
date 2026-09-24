@@ -298,9 +298,9 @@ struct SessionNotificationPreferences: Equatable {
     ///
     /// | stop | guard | what happens |
     /// | --- | --- | --- |
-    /// | on | off | the plain sentence, always. The reason is never even asked
-    ///   for, so a user who has not opted in never causes this app to send
-    ///   `recentSafetyStops` at all. |
+    /// | on | off | the plain sentence, always. The reason is still *learned*
+    ///   — the menu and the Safety pane explain stops to users who never wanted
+    ///   a banner — but it is never *said* here. |
     /// | on | on | the reason when it is available, the plain sentence when it
     ///   is not. |
     /// | off | on | the reason when it is available, and silence when it is
@@ -619,14 +619,24 @@ final class SessionNotifier {
 
         guard outcome.events.contains(.stoppedBeingKeptAwake) else { return }
 
-        // **The only thing in this app that ever causes `recentSafetyStops` to
-        // be sent, and the toggle is checked before anything is asked.** A user
-        // who has not opted in never puts that verb on the wire at all — which
-        // is a consent gate on top of the three in `SafetyStopVerbGate`, and
-        // the cheapest of them.
-        guard wanted.onSafetyStop else {
-            return post([.stoppedBeingKeptAwake], wanted: wanted)
-        }
+        // **The reason is asked for unconditionally. The toggle governs only
+        // what is said.**
+        //
+        // It used to gate the asking as well, so a user who had not opted into
+        // banners never put `recentSafetyStops` on the wire. That reads well
+        // until you notice the cost: the menu line and the Safety pane that
+        // exist to explain a stop *after the moment has passed* were then empty
+        // for everyone on default settings — which is exactly the user for whom
+        // a stop looks random, and exactly the complaint they were built for.
+        // Asking is a local XPC call about this user's own sessions on their own
+        // machine; nothing leaves the Mac, and the daemon still applies its own
+        // three gates in `SafetyStopVerbGate`.
+        //
+        // The plain sentence is posted from this synchronous stretch, as it
+        // always was, whenever the reason was not asked to be named. Deferring
+        // it behind the round trip would put a notification the user *did* ask
+        // for behind an XPC timeout in order to carry a reason they did not.
+        if !wanted.onSafetyStop { post([.stoppedBeingKeptAwake], wanted: wanted) }
 
         let ended = outcome.endedUnrequested
         let uid = tracker.ownerUID
@@ -644,6 +654,10 @@ final class SessionNotifier {
             // Mac's `usernotificationsd` has managed all three — must not also
             // cost the user the record of what happened.
             self.rememberStops(records, uid)
+            // Branches on the value captured before the round trip rather than
+            // a fresh read, so the two arms stay mutually exclusive: a toggle
+            // flipped mid-flight must not post a second banner for one ending.
+            guard wanted.onSafetyStop else { return }
             let event = attributedStopEvent(endedUnrequested: ended, records: records,
                                             ownerUID: uid)
             // Re-read rather than reuse `wanted`: a round trip has happened, and

@@ -731,16 +731,24 @@ final class SessionNotifierTests: XCTestCase {
         }
     }
 
-    func testAnEndingIsPostedWithTheEventsOwnCopy() {
+    func testAnEndingIsPostedWithTheEventsOwnCopy() async {
         let harness = self.harness(withoutReasons)
         let live = session()
         harness.notifier.record(sessions: [live], now: Date(timeIntervalSince1970: 1))
         XCTAssertEqual(harness.service.posted, [])
         harness.notifier.record(sessions: [], now: Date(timeIntervalSince1970: 4))
+        // Asserted before the await on purpose: with the reason toggle off this
+        // sentence is posted from `record`'s own synchronous stretch, and a user
+        // who asked only for it must not wait on an XPC round trip to see it.
         XCTAssertEqual(harness.service.posted,
                        [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
-        XCTAssertEqual(harness.asks(), 0,
-                       "the reason was asked for with the safety toggle switched off")
+
+        // The ask is deferred, so it has to be awaited before it can be counted.
+        await harness.notifier.reasonQuery?.value
+        XCTAssertEqual(harness.asks(), 1,
+                       "the reason is now always asked for — it is a local call about "
+                         + "this user's own sessions, and the menu needs the answer "
+                         + "whether or not a banner was wanted")
     }
 
     func testATriggerStartIsPostedWithTheEventsOwnCopy() {
@@ -907,17 +915,26 @@ final class SessionNotifierTests: XCTestCase {
                        [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
     }
 
-    /// With the reason toggle off the verb is never even sent, and the Plan 7
-    /// behaviour is byte-for-byte what it was.
-    func testWithTheReasonToggleOffNothingIsEverAsked() async {
+    /// With the reason toggle off the reason is still *learned* — the menu and
+    /// the Safety pane need it, and a user who never opted into banners is
+    /// exactly the user for whom a stop otherwise looks random — but what is
+    /// **posted** is byte-for-byte the Plan 7 behaviour: the plain sentence.
+    ///
+    /// The toggle used to gate the asking as well. That made the explanation
+    /// surfaces empty by default, which is the whole bug they were added to
+    /// fix. Asking is a local XPC call about this user's own sessions on their
+    /// own machine; nothing leaves the Mac, and the daemon still applies its
+    /// own three gates in `SafetyStopVerbGate`.
+    func testWithTheReasonToggleOffTheReasonIsLearnedButNotPosted() async {
         let live = session()
         let harness = self.harness(withoutReasons,
                                    records: records(for: [live], reason: .thermal))
         await endTheLastSession(harness, live)
-        XCTAssertEqual(harness.asks(), 0,
-                       "a user who did not opt in put a new XPC verb on the wire")
+        XCTAssertEqual(harness.asks(), 1,
+                       "the surfaces that explain a stop would have nothing to show")
         XCTAssertEqual(harness.service.posted,
-                       [sessionNotificationCopy(for: .stoppedBeingKeptAwake)])
+                       [sessionNotificationCopy(for: .stoppedBeingKeptAwake)],
+                       "a user who asked only for the plain sentence got a different one")
     }
 
     /// Reason on, plain notice off: the reason is posted when there is one...
