@@ -147,7 +147,7 @@ final class HelperListenerDelegate: NSObject, NSXPCListenerDelegate {
         newConnection.interruptionHandler = tearDownOnce
 
         newConnection.resume()
-        helperLogger.log("Accepted connection from \(id.rawValue) (role: \(self.role.rawValue))")
+        helperLogger.log("Accepted connection from \(id.rawValue) (role: \(self.role.rawValue, privacy: .public))")
         return true
     }
 }

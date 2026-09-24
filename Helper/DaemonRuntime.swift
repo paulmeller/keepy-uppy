@@ -702,7 +702,7 @@ final class DaemonRuntime {
             helperLogger.log("Safety warning: \(reason.rawValue), acting at \(actAt)")
         case .stopAll(let reason):
             let ended = sessions.apply(.stopAll, now: now)
-            helperLogger.error("Safety stop (\(reason.rawValue)); ended \(ended.count) session(s)")
+            helperLogger.error("Safety stop (\(reason.rawValue, privacy: .public)); ended \(ended.count) session(s)")
             // **The only writer of this log, deliberately.** A record in it
             // means a guard fired; recording ordinary endings here — expiry, a
             // manual stop, a condition ending, the agent disappearing — would

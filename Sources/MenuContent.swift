@@ -21,6 +21,12 @@ struct MenuContent: View {
     /// that the XPC client stays a transport and
     /// `SessionNotificationTracker` stays the only thing that decides anything.
     let notifier: SessionNotifier
+    /// This user's own record of guard stops, read once when the menu opens.
+    ///
+    /// `@State` rather than `@AppStorage`: the value is a struct behind a JSON
+    /// blob, not a plist scalar, and the menu needs to write a *derived* change
+    /// (acknowledged) rather than a value the user typed.
+    @State private var safetyStops = SafetyStopHistoryStore.load()
     @AppStorage(DefaultSessionKindPreference.key, store: PreferencesSuite.defaults)
     private var defaultKindRaw: String = DefaultSessionKindPreference.defaultRawValue
     @AppStorage(DefaultWakeModePreference.key, store: PreferencesSuite.defaults)
@@ -198,6 +204,30 @@ struct MenuContent: View {
             // in build numbers.
             if let note = daemon.powerRequestNote {
                 Text(note)
+            }
+
+            // The status region's fourth line, and the only one that speaks
+            // about the *past*: the guard stop the user has not been told
+            // about yet.
+            //
+            // It exists because the reason used to have exactly one delivery
+            // surface — a notification: transient, off by default, and on some
+            // Macs never delivered. Miss it and the machine's behaviour became
+            // indistinguishable from random, which is precisely how it was
+            // reported. This is the pull-based half: it waits in the menu until
+            // it is read, rather than expecting the user to have been looking.
+            //
+            // Clicking dismisses rather than navigating. The sentence is the
+            // whole message, Settings keeps the longer record, and a menu item
+            // that silently opened a window would be a surprise for a line that
+            // reads like a status.
+            if let stop = safetyStops.unacknowledged {
+                Button(safetyStopSummary(stop, now: now)) {
+                    var updated = SafetyStopHistoryStore.load()
+                    updated.acknowledge()
+                    SafetyStopHistoryStore.save(updated)
+                    safetyStops = updated
+                }
             }
         }
 

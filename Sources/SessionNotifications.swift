@@ -165,17 +165,17 @@ func sessionNotificationCopy(for event: SessionNotificationEvent) -> SessionNoti
     // about most.
     case .stoppedByThermalGuard:
         return SessionNotificationCopy(
-            title: "Stopped: this Mac was too hot",
+            title: "Stopped: \(safetyStopReasonPhrase(.thermal))",
             body: "Keepy Uppy ended your sessions so it can cool down. "
                 + "Nothing you started is keeping this Mac awake any more.")
     case .stoppedByLowBattery:
         return SessionNotificationCopy(
-            title: "Stopped: the battery was running out",
+            title: "Stopped: \(safetyStopReasonPhrase(.lowBattery))",
             body: "Keepy Uppy ended your sessions to save what is left. "
                 + "Nothing you started is keeping this Mac awake any more.")
     case .stoppedByMaxDuration:
         return SessionNotificationCopy(
-            title: "Stopped: the time limit was reached",
+            title: "Stopped: \(safetyStopReasonPhrase(.maxDuration))",
             body: "Your sessions ran for as long as Keepy Uppy allows, so it ended them. "
                 + "Nothing you started is keeping this Mac awake any more.")
     }
@@ -536,6 +536,15 @@ final class SessionNotifier {
     private let makeService: () -> NotificationPosting
     private let safetyStops: () async -> [SafetyStopRecord]
 
+    /// Where an explained stop is kept so a surface can show it later.
+    ///
+    /// Injected, like the three above, so a test can watch it without reaching
+    /// into a preference domain. **Unlike `safetyStops` it does carry a
+    /// default**, and the asymmetry follows that parameter's own rule: a
+    /// default of `{ _, _ in }` there would be the feature switched off,
+    /// whereas the default here *is* the production behaviour.
+    private let rememberStops: ([SafetyStopRecord], UInt32) -> Void
+
     /// The deferred half of the most recent stop transition — the round trip
     /// that asks why, and the post that follows it.
     ///
@@ -569,11 +578,18 @@ final class SessionNotifier {
          preferences: @escaping () -> SessionNotificationPreferences
             = { SessionNotificationPreference.load() },
          makeService: @escaping () -> NotificationPosting = { UserNotificationService() },
-         safetyStops: @escaping () async -> [SafetyStopRecord]) {
+         safetyStops: @escaping () async -> [SafetyStopRecord],
+         rememberStops: @escaping ([SafetyStopRecord], UInt32) -> Void
+            = { records, uid in
+                var history = SafetyStopHistoryStore.load()
+                history.record(records, ownerUID: uid)
+                SafetyStopHistoryStore.save(history)
+            }) {
         self.tracker = SessionNotificationTracker(ownerUID: ownerUID)
         self.preferences = preferences
         self.makeService = makeService
         self.safetyStops = safetyStops
+        self.rememberStops = rememberStops
     }
 
     /// One published `listSessions` snapshot.
@@ -621,6 +637,13 @@ final class SessionNotifier {
             // not know*, because there is nothing different to say in any of
             // those cases.
             let records = await self.safetyStops()
+            // Remembered before the post, and regardless of what the post
+            // decides. The two answer different questions: a notification is
+            // "tell me now", the history is "let me look it up later". A banner
+            // that was missed, coalesced away, or never delivered at all — this
+            // Mac's `usernotificationsd` has managed all three — must not also
+            // cost the user the record of what happened.
+            self.rememberStops(records, uid)
             let event = attributedStopEvent(endedUnrequested: ended, records: records,
                                             ownerUID: uid)
             // Re-read rather than reuse `wanted`: a round trip has happened, and

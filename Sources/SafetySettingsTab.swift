@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SafetySettingsTab: View {
     @State private var config = SafetyConfigStore.load()
+    @State private var history = SafetyStopHistoryStore.load()
 
     var body: some View {
         Form {
@@ -112,6 +113,33 @@ struct SafetySettingsTab: View {
                 }
             } header: {
                 Text("Session Limit")
+            }
+
+            // The durable half of the same feature the menu shows one line of.
+            // The menu carries the newest stop until it is read; this is where
+            // it stays afterwards, and the only place a pattern is visible —
+            // three thermal stops in a week is a different conversation from
+            // one.
+            Section {
+                if history.entries.isEmpty {
+                    Text("No guard has stopped one of your sessions.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    // Newest first: the opposite of storage order, because a
+                    // list read top-down should start with what just happened.
+                    ForEach(history.entries.reversed(), id: \.sessionID) { stop in
+                        LabeledContent(safetyStopReasonPhrase(stop.reason).localizedCapitalized) {
+                            Text(stop.endedAt.formatted(date: .abbreviated, time: .shortened))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            } header: {
+                Text("Recent Stops")
+            } footer: {
+                Text("Kept on this Mac, for you only. Keepy Uppy sends nothing anywhere.")
+                    .settingsFootnote()
             }
         }
         .formStyle(.grouped)
